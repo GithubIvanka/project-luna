@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Luna Common
+//!
+//! Shared primitives used by all Luna components.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod error;
+pub mod id;
+pub mod result;
+pub mod version;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use error::LunaError;
+pub use id::{BundleId, ComponentId};
+pub use result::LunaResult;
+pub use version::Version;
