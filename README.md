@@ -2,129 +2,207 @@
 
 **Design first. Code second.**
 
->A modern immutable operating system built on the Linux kernel.
+> A modern immutable operating system built on the Linux kernel.
 
-Project Luna is an open-source operating system focused on simplicity, predictability and long-term maintainability.
+Project Luna is an operating system built around the Linux kernel. It is **not** a conventional Linux distribution. Instead of shipping a modified package set on top of a standard userspace, Luna defines its own architecture for the system image, boot process, applications, filesystem layout and system management — while reusing Linux kernel mechanisms where they are useful.
 
-Rather than extending the traditional Linux distribution model, Project Luna rethinks the operating system architecture while remaining compatible with the Linux kernel.
-
-The project aims to provide a clean system layout, immutable core, self-contained applications and a modern desktop experience built entirely around Wayland.
-
-> **Status:** Early design stage. Nothing is implemented yet.
+> **Status:** Early design stage. Architecture is consolidated through Phase 1.5. Core specifications (RFC-0001, RFC-0002) are in progress. Implementation begins after the architecture is precise enough.
 
 ---
 
-# Vision
+## The core idea
 
-Project Luna follows a few simple ideas:
+Project Luna is inspired by the **One File Linux** concept:
 
-- Immutable core operating system
-- Minimal system architecture
-- Human-readable filesystem layout
-- Self-contained applications
-- Atomic system updates
-- Rust-first development
-- Wayland-only desktop
-- Documentation before implementation
+> The system should have a very small, stable and maximally immutable foundation.
 
----
+Everything else is built on top of that foundation in a controlled, versioned way.
 
-# Goals
-
-## Simplicity
-
-Every component should have a single responsibility.
-
-## Predictability
-
-The system should always behave the same way.
-
-## Reliability
-
-System updates must be atomic and recoverable.
-
-## Transparency
-
-Configuration should be readable and understandable by humans.
-
-## Performance
-
-Modern software stack without unnecessary legacy components.
-
----
-
-# Architecture
-
-The operating system is divided into three logical layers.
+Luna is built around four layers:
 
 ```
-EFI
-│
-├── Boot
-│
-System
-│
-└── Immutable operating system
-│
-Users
-│
-├── Applications
-├── User data
-├── Configuration
-└── Cache
+EFI      → launches
+BOOT     → decides what to launch
+SYSTEM   → versioned OS images and kernels
+DATA     → everything mutable
 ```
-
-The system itself is immutable.
-
-Applications and user data are stored separately from the operating system.
 
 ---
 
-# Core Technologies
+## What Luna is NOT
+
+Luna is deliberately **not**:
+
+- a regular Linux distribution with a different package set and theme;
+- a Docker-like operating system;
+- a system with a large number of top-level root directories;
+- a system where every application scatters files across `/`;
+- a system where updating the kernel requires rewriting the whole OS;
+- a system where updating the OS destroys user data;
+- a system where the user must manually mount USB drives via the terminal;
+- a system where the bootloader rewrites boot state on every launch;
+- a system where a System Image is a `.lbp` bundle.
+
+---
+
+## Architecture overview
+
+For the full architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the single Source of Truth.
+
+### Disk layout
+
+Luna uses four disk areas:
+
+```
+Disk
+├── EFI       — bootloader storage (luna-boot.efi)
+├── SYSTEM    — versioned System Images (SquashFS) + kernels
+├── DATA      — mutable user-visible storage (Btrfs)
+└── SWAP      — swap policy (optional: partition, file and/or ZRAM)
+```
+
+### System Images
+
+A **System Image** is a version of Luna itself. It is stored **directly as a SquashFS image** — not as a bundle:
+
+```
+SYSTEM/images/
+├── luna-1.0.0.squashfs
+├── luna-1.0.0.toml        ← per-image manifest
+├── luna-2.0.0.squashfs
+├── luna-2.0.0.toml
+└── ...
+```
+
+Each System Image has its **own manifest** next to it. Kernels are stored and versioned independently in `SYSTEM/kernels/`. System Images and kernels can be updated and rolled back **independently**.
+
+### Boot
+
+```
+UEFI → luna-boot.efi → compatible kernel → System Image → logical root → DATA
+```
+
+- `luna-boot.efi` is Luna's own minimal UEFI bootloader.
+- Press **B** during startup to open the Boot Menu.
+- Boot supports **soft fallback**: if a System Image fails, Luna tries a previous compatible image without rebooting. A kernel panic triggers a reboot and selection of a previous compatible kernel.
+- `current` identifies the active image/kernel combination.
+- `factory` identifies the original guaranteed-good installation and is never deleted by normal cleanup.
+
+### Applications
+
+Applications are **immutable bundles** using the `.lbp` format, installed under `DATA/system/apps/`. Each application runs in its own filesystem/mount namespace and sees a clean logical root, not the host filesystem.
+
+```
+DATA/system/
+├── apps/       — installed application bundles
+├── drivers/    — drivers
+├── libs/       — shared libraries
+├── volumes/    — managed external volumes
+└── config/     — system-wide mutable configuration
+```
+
+### Users
+
+Every local user has exactly three top-level directories:
+
+```
+DATA/users/<user>/
+├── home/       — Documents, Downloads, ...
+├── data/       — mutable application data
+└── config/     — user/application configuration
+```
+
+### System management
+
+The system is managed through a single tool, `luna`, which is a thin client over backend services. There is **no permanent root user** and no `sudo`/`su` privilege hierarchy — administrative authority is a protected, per-operation capability.
+
+---
+
+## Core technologies
 
 | Component | Technology |
 |-----------|------------|
 | Kernel | Linux |
-| Programming Language | Rust |
-| Display Server | Wayland |
+| Language | Rust |
+| Build system | Cargo |
+| System Image format | SquashFS |
+| Bundle format | `.lbp` |
+| Configuration | TOML |
+| Display protocol | Wayland |
 | Compositor | niri |
-| Shell | fish |
+| Desktop shell | Noctalia Shell |
 | Terminal | Ghostty |
-| Desktop | Noctalia Shell |
+| Shell | fish |
+| License | Apache-2.0 |
 
 ---
 
-# Repository Structure
+## Repository structure
 
 ```
-docs/
-src/
-tools/
+project-luna/
+├── components/          # Rust workspace crates
+│   ├── luna/           # main CLI entry point
+│   ├── luna-bundle/    # bundle format representation
+│   ├── luna-common/    # shared fundamental types
+│   ├── luna-config/    # configuration
+│   ├── luna-fs/        # filesystem abstraction
+│   └── luna-log/       # logging
+├── docs/               # documentation
+│   ├── ARCHITECTURE.md # Source of Truth
+│   └── rfc/            # RFC documents
+├── Cargo.toml          # workspace manifest
+├── CHARTER.md          # project charter
+├── HISTORY.md          # project history
+├── STATUS.md           # current project status
+├── ROADMAP.md          # development roadmap
+└── README.md           # this file
 ```
 
-Documentation is written before implementation.
+> Architectural subsystems appear in the repository **only when their real development starts**. Empty crates for future subsystems are not created in advance.
 
 ---
 
-# Current Status
+## Development philosophy
 
-The project is currently focused on designing the operating system architecture.
-
-Current work includes:
-
-- Filesystem layout
-- Boot process
-- Service manager
-- Package format
-- Application model
-- Update mechanism
-
-Implementation will begin after the core architecture is finalized.
+1. **Architecture first** — Architecture → RFC → Format → Interfaces → Prototype → Implementation. Not "code first, figure it out later".
+2. **Modular crates** — every crate must answer "why does this crate exist?". `luna-common` is not a dumping ground.
+3. **Immutable where possible** — System Images and application bundles are immutable.
+4. **Event-driven state** — boot state changes only on events, not on every boot.
+5. **Compatibility-aware boot** — only manifest-declared compatible kernels are considered.
+6. **No silent changes** — accepted decisions are never changed silently. Conflicts are marked `ARCHITECTURE CONFLICT`.
+7. **Don't confuse "discussed" with "decided"** — a new idea is a `Proposal` until explicitly `Accepted`.
 
 ---
 
-# License
+## Getting started
 
-Project Luna is licensed under the Apache License 2.0.
+Project Luna is currently in the design phase. The Rust workspace builds successfully but contains foundational scaffolding rather than a working OS.
 
-See the LICENSE file for details.
+### Prerequisites
+
+- Rust toolchain (see `rust-toolchain.toml`)
+- Git
+
+### Building
+
+```bash
+cargo build
+```
+
+---
+
+## Documentation
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the single architectural Source of Truth
+- **[STATUS.md](STATUS.md)** — current project status
+- **[ROADMAP.md](ROADMAP.md)** — development roadmap
+- **[CHARTER.md](CHARTER.md)** — project charter
+- **[HISTORY.md](HISTORY.md)** — project history
+
+---
+
+## License
+
+Project Luna is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE).
+```
