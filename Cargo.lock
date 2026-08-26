@@ -3,25 +3,5 @@
 version = 4
 
 [[package]]
-name = "luna"
-version = "0.1.0"
-
-[[package]]
-name = "luna-bundle"
-version = "0.1.0"
-
-[[package]]
 name = "luna-common"
-version = "0.1.0"
-
-[[package]]
-name = "luna-config"
-version = "0.1.0"
-
-[[package]]
-name = "luna-fs"
-version = "0.1.0"
-
-[[package]]
-name = "luna-log"
 version = "0.1.0"
