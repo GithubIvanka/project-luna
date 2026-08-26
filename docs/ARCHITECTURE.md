@@ -4460,3 +4460,474 @@ Diagnostics / Health
 ```
 
 The next phase is repository/crate architecture and the translation of these contracts into concrete Rust workspace boundaries and APIs.
+
+# 110. Phase 1.6 — Repository, Crate Architecture and Implementation Boundary
+
+Phase 1.6 is **ACCEPTED** through `1.6-HZ` based on the decisions accepted in the architecture discussion.
+
+This section is the authoritative consolidation of Phase 1.6. The chronological answers remain traceability material; they are not a competing Source of Truth.
+
+## 110.1 Phase 1.6 purpose
+
+Phase 1.6 closes the architecture-first repository boundary and establishes the rules for moving from the accepted system contracts to a clean Rust workspace.
+
+The order is mandatory:
+
+```text
+Phase 1.6 decisions
+        ↓
+ARCHITECTURE.md consolidation
+        ↓
+repository / Cargo audit
+        ↓
+luna-common audit and redesign
+        ↓
+new crate map from the current architecture
+        ↓
+crate/API contracts
+        ↓
+implementation
+```
+
+Old empty crates are not architectural commitments. A crate may be removed when it no longer represents the current responsibility model. Existing code may be retained only when it is useful to the current contract.
+
+## 110.2 Workspace and repository principle
+
+The Rust workspace must represent the **current** architecture, not historical component names or abandoned placeholders.
+
+The repository is intentionally kept minimal while the architecture is being translated into implementation boundaries. Empty placeholder crates are not required merely to reserve names.
+
+The workspace resolver is Rust-current (`resolver = "3"`). The existing repository may temporarily contain only the components that have useful current code. New components are introduced after their responsibility and API boundary are established.
+
+## 110.3 `luna-common` boundary
+
+`luna-common` remains a deliberately small foundational crate and must not become a dumping ground for unrelated system concepts.
+
+Existing code in the old `luna-common` is treated as reusable source material, not as the final API. Existing identifiers such as IDs, versions and generic results/errors must be re-evaluated against the Phase 1.6 architecture before being retained.
+
+`luna-common` may contain genuinely cross-cutting primitives shared by multiple crates. Subsystem-specific errors, policy objects, runtime state, filesystem operations, bundle semantics and service APIs belong to their owning crates.
+
+A client-specific crate may be introduced separately when a client needs an API boundary distinct from the backend/library implementation.
+
+## 110.4 Crate design principles
+
+The crate map must follow architectural ownership rather than historical directory names.
+
+A component that has both a reusable backend and a process/service boundary may use the accepted **small daemon/service + library** model. Thin CLI and GUI clients use the same backend rather than duplicating business logic.
+
+Management and execution remain separate:
+
+```text
+manager  → state-changing management operations
+runtime  → execution and lifecycle of running instances
+security → policy authority
+filesystem / kernel primitives → low-level enforcement
+```
+
+The crate boundary must not silently merge these responsibilities merely because they are convenient to implement together.
+
+## 110.5 Accepted component direction
+
+The architecture continues to use the following conceptual component names where their responsibilities require independent boundaries:
+
+```text
+luna-cli
+luna-system-manager
+luna-app-manager
+luna-device-manager
+luna-update-manager
+luna-kernel-manager
+luna-root-mapping
+luna-security
+luna-system-runtime
+luna-app-runtime
+luna-fs
+luna-bundle
+luna-config
+luna-log
+luna-common
+```
+
+This list is a **responsibility map**, not a command to create every crate immediately. The final Rust workspace is derived from the contracts and may split a component into library/service/client crates where the architecture requires it.
+
+## 110.6 Runtime boundary retained
+
+The accepted runtime hierarchy remains:
+
+```text
+luna-system-runtime
+├── UserSession A
+│   ├── app-runtime
+│   └── GUI/Desktop session
+└── UserSession B
+    ├── app-runtime
+    └── GUI/Desktop session
+```
+
+There is one system runtime supervising multiple UserSessions. Application execution belongs to `luna-app-runtime` and is represented by `ApplicationInstance` objects. `luna-app-manager` is not part of the normal launch chain.
+
+Applications must receive a normal Linux-compatible logical environment rather than an intentionally visible container/VM identity. Linux namespaces may be used as implementation mechanisms without exposing a container model to the application.
+
+## 110.7 Security boundary retained
+
+`luna-security` remains the central policy authority. Security is a separate layer and must not be absorbed into runtime, mapping or filesystem crates merely for convenience.
+
+Administrative authority does not require a permanent root user or a mandatory `sudo`/`su` model. Administrative credentials and per-operation authorization remain the architectural direction.
+
+## 110.8 Mapping and filesystem boundary retained
+
+`luna-root-mapping` remains a narrow logical-root and mapping component. `luna-fs` remains a low-level filesystem abstraction.
+
+Linux mechanisms such as namespaces, mounts, bind mounts and related filesystem primitives are implementation mechanisms. They do not replace the Luna mapping model.
+
+Mapping remains file-oriented, policy-controlled and namespace-specific. Shared information may be deduplicated where it is semantically global, while actual namespace state remains isolated.
+
+## 110.9 Async and resource model
+
+Asynchronous, multicore and multithreaded execution remains an explicit system goal. Tokio is accepted as the initial asynchronous runtime direction where an async runtime is required.
+
+System resource protection remains a first-class architectural requirement. Linux mechanisms may be used initially to reserve CPU/memory/GPU capacity for system operation and responsiveness.
+
+The system owns global resource reclamation rather than permanently assigning reclaimable runtime memory to whichever user is currently active.
+
+## 110.10 Configuration and state
+
+System-wide mutable configuration belongs under:
+
+```text
+DATA/system/config/
+```
+
+User-specific configuration belongs under:
+
+```text
+DATA/users/<user>/config/
+```
+
+Where a configuration value is resolved through layers, the accepted semantic precedence is:
+
+```text
+user override
+    ↓
+application/default content
+    ↓
+DATA/system/config
+    ↓
+System Image default
+```
+
+The exact precedence may be defined per semantic resource class; it is not a universal textual overlay rule.
+
+Persistent state is preferred where it is the source of truth. State changes are event-driven rather than rewritten unnecessarily on every invocation.
+
+## 110.11 Repository-to-architecture rule
+
+Before implementing a crate, the repository must be audited against this document:
+
+1. inspect root `Cargo.toml`;
+2. inspect the actual workspace members;
+3. inspect each surviving crate's source and manifest;
+4. identify obsolete code and reusable code;
+5. compare responsibilities against this Source of Truth;
+6. remove or redesign stale boundaries before adding implementation;
+7. only then define the new crate/API contract.
+
+The repository must not be allowed to become a second, implicit architecture document.
+
+## 110.12 Phase 1.6 accepted-answer ledger
+
+The following ledger preserves the accepted Phase 1.6 answers so that the chronological answers cannot be lost even when phase working files are later archived. `ACCEPTED` means the user's answer accepted the proposal presented for that item. Where the user explicitly selected a variant or supplied a concrete implementation constraint, that selection is recorded verbatim in meaning.
+
+### A–Z
+
+```text
+A  ACCEPTED
+B  ACCEPTED
+C  ACCEPTED
+D  ACCEPTED
+E  ACCEPTED
+F  ACCEPTED
+G  ACCEPTED
+H  ACCEPTED
+I  ACCEPTED
+J  ACCEPTED
+K  ACCEPTED — option B
+L  ACCEPTED
+M  ACCEPTED
+N  ACCEPTED
+O  ACCEPTED
+P  ACCEPTED
+Q  ACCEPTED
+R  ACCEPTED
+S  ACCEPTED
+T  ACCEPTED
+U  ACCEPTED
+V  ACCEPTED
+W  ACCEPTED
+X  ACCEPTED
+Y  ACCEPTED
+Z  ACCEPTED
+```
+
+### AA–AZ
+
+```text
+AA ACCEPTED — option B
+AB ACCEPTED
+AC ACCEPTED
+AD ACCEPTED
+AE ACCEPTED
+AF ACCEPTED
+AG ACCEPTED
+AH ACCEPTED
+AI ACCEPTED
+AJ ACCEPTED
+AK ACCEPTED
+AL ACCEPTED
+AM ACCEPTED
+AN ACCEPTED
+AO ACCEPTED
+AP ACCEPTED
+AQ ACCEPTED
+AR ACCEPTED
+AS ACCEPTED
+AT ACCEPTED
+AU ACCEPTED
+AV ACCEPTED
+AW ACCEPTED
+AX ACCEPTED
+AY ACCEPTED
+AZ ACCEPTED
+```
+
+### BA–BZ
+
+```text
+BA ACCEPTED
+BB ACCEPTED
+BC ACCEPTED
+BD ACCEPTED
+BE ACCEPTED
+BF ACCEPTED
+BG ACCEPTED
+BH ACCEPTED
+BI ACCEPTED
+BJ ACCEPTED
+BK ACCEPTED
+BL ACCEPTED
+BM ACCEPTED
+BN ACCEPTED
+BO ACCEPTED
+BP ACCEPTED
+BQ ACCEPTED
+BR ACCEPTED
+BS ACCEPTED
+BT ACCEPTED
+BU ACCEPTED
+BV ACCEPTED
+BW ACCEPTED
+BX ACCEPTED
+BY ACCEPTED
+BZ ACCEPTED
+```
+
+### Ca–Cz
+
+```text
+Ca ACCEPTED
+Cb ACCEPTED
+Cc ACCEPTED
+Cd ACCEPTED
+Ce ACCEPTED — a separate client crate may be created when required
+Cf ACCEPTED
+Cg ACCEPTED
+Ch ACCEPTED
+Ci ACCEPTED
+Cj ACCEPTED
+Ck ACCEPTED
+Cl ACCEPTED
+Cm ACCEPTED
+Cn ACCEPTED
+Co ACCEPTED
+Cp ACCEPTED
+Cq ACCEPTED
+Cr ACCEPTED
+Cs ACCEPTED
+Ct ACCEPTED
+Cu ACCEPTED
+Cv ACCEPTED
+Cw ACCEPTED
+Cx ACCEPTED
+Cy ACCEPTED
+Cz ACCEPTED
+```
+
+### Da–Dz
+
+```text
+Da ACCEPTED
+Db ACCEPTED — Bin + lib
+Dc ACCEPTED
+Dd ACCEPTED
+De ACCEPTED
+Df ACCEPTED
+Dg ACCEPTED
+Dh ACCEPTED
+Di ACCEPTED — Tokio accepted as the async runtime direction
+Dj ACCEPTED
+Dk ACCEPTED
+Dl ACCEPTED
+Dm ACCEPTED
+Dn ACCEPTED
+Do ACCEPTED
+Dp ACCEPTED
+Dq ACCEPTED
+Dr ACCEPTED
+Ds ACCEPTED
+Dt ACCEPTED
+Du ACCEPTED
+Dv ACCEPTED
+Dw ACCEPTED
+Dx ACCEPTED
+Dy ACCEPTED
+Dz ACCEPTED
+```
+
+### Ea–Ez
+
+```text
+Ea ACCEPTED — option C
+Eb ACCEPTED
+Ec ACCEPTED
+Ed ACCEPTED
+Ee ACCEPTED
+Ef ACCEPTED
+Eg ACCEPTED
+Eh ACCEPTED
+Ei ACCEPTED
+Ej ACCEPTED
+Ek ACCEPTED
+El ACCEPTED
+Em ACCEPTED
+En ACCEPTED
+Eo ACCEPTED
+Ep ACCEPTED
+Eq ACCEPTED
+Er ACCEPTED
+Es ACCEPTED
+Et ACCEPTED
+Eu ACCEPTED
+Ev ACCEPTED
+Ew ACCEPTED
+Ex ACCEPTED
+Ey ACCEPTED
+Ez ACCEPTED
+```
+
+### Fa–Fz
+
+```text
+Fa ACCEPTED
+Fb ACCEPTED
+Fc ACCEPTED
+Fd ACCEPTED
+Fe ACCEPTED
+Ff ACCEPTED
+Fg ACCEPTED
+Fh ACCEPTED
+Fi ACCEPTED
+Fj ACCEPTED
+Fk ACCEPTED
+Fl ACCEPTED
+Fm ACCEPTED
+Fn ACCEPTED
+Fo ACCEPTED
+Fp ACCEPTED
+Fq ACCEPTED
+Fr ACCEPTED
+Fs ACCEPTED
+Ft ACCEPTED
+Fu ACCEPTED
+Fv ACCEPTED
+Fw ACCEPTED
+Fx ACCEPTED
+Fy ACCEPTED
+Fz ACCEPTED
+```
+
+### Ga–Gz
+
+```text
+Ga ACCEPTED
+Gb ACCEPTED
+Gc ACCEPTED
+Gd ACCEPTED
+Ge ACCEPTED
+Gf ACCEPTED
+Gg ACCEPTED
+Gh ACCEPTED
+Gi ACCEPTED
+Gj ACCEPTED
+Gk ACCEPTED
+Gl ACCEPTED
+Gm ACCEPTED
+Gn ACCEPTED
+Go ACCEPTED
+Gp ACCEPTED
+Gq ACCEPTED
+Gr ACCEPTED
+Gs ACCEPTED
+Gt ACCEPTED
+Gu ACCEPTED
+Gv ACCEPTED
+Gw ACCEPTED
+Gx ACCEPTED
+Gy ACCEPTED
+Gz ACCEPTED
+```
+
+### Ha–Hz
+
+```text
+Ha ACCEPTED
+Hb ACCEPTED
+Hc ACCEPTED
+Hd ACCEPTED
+He ACCEPTED
+Hf ACCEPTED
+Hg ACCEPTED
+Hh ACCEPTED
+Hi ACCEPTED
+Hj ACCEPTED
+Hk ACCEPTED
+Hl ACCEPTED
+Hm ACCEPTED
+Hn ACCEPTED
+Ho ACCEPTED
+Hp ACCEPTED
+Hq ACCEPTED
+Hr ACCEPTED
+Hs ACCEPTED
+Ht ACCEPTED
+Hu ACCEPTED
+Hv ACCEPTED
+Hw ACCEPTED
+Hx ACCEPTED
+Hy ACCEPTED
+Hz ACCEPTED
+```
+
+## 110.13 Phase 1.6 status
+
+```text
+Phase 1.1 — accepted and consolidated
+Phase 1.2 — accepted and consolidated
+Phase 1.3 — accepted and consolidated
+Phase 1.4 — accepted and consolidated
+Phase 1.5 — accepted and consolidated
+Phase 1.6 — accepted through HZ and consolidated
+```
+
+The project now moves from architectural decision closure to repository/crate audit. No implementation crate should be treated as final until it has been checked against this Source of Truth.
+
+# END OF SOURCE OF TRUTH
