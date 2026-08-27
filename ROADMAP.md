@@ -6,7 +6,7 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 Phases **1.1–1.6** are accepted/consolidated, with Phase 1.6 complete through **1.6-HZ**.
 
-The current stage is the **repository and crate audit**.
+The repository audit is complete and the architecture-driven crate map has been scaffolded.
 
 ## Sequence
 
@@ -15,11 +15,9 @@ Phase 1.6 consolidation
         ↓
 Repository / Cargo audit
         ↓
-luna-common redesign
-        ↓
 Concrete crate map
         ↓
-Crate/API contracts
+Crate/API contracts              ← CURRENT
         ↓
 RFC/specification work where required
         ↓
@@ -30,30 +28,32 @@ Implementation
 Integration
 ```
 
-### 1. Repository / Cargo audit — CURRENT
+### 1. Repository / Cargo audit — COMPLETED
 
-- Compare the actual repository with the Source of Truth.
-- Keep only useful current code.
-- Remove obsolete implementation assumptions.
-- Do not create empty placeholder crates.
-
-**Exit:** repository structure reflects the current architecture.
+The actual `main` branch was reduced to useful code and then rebuilt around the accepted architecture. Historical empty crates are not treated as implementation commitments.
 
 ### 2. `luna-common` audit — COMPLETED
 
-Keep only genuinely cross-cutting primitives. Do not place subsystem-specific errors, runtime state, security policy, filesystem operations or bundle semantics here.
+Keep only genuinely cross-cutting primitives. Subsystem-specific errors, runtime state, security policy, filesystem operations and bundle semantics do not belong here.
 
-**Result:** the old generic error/result layer was removed; IDs and `Version` remain as small foundational value types.
+### 3. Concrete crate map — COMPLETED / SCAFFOLDED
 
-### 3. Concrete crate map — NEXT
+The current workspace is architecture-driven and includes the foundation, mapping, configuration, security, management, runtime and CLI boundaries documented in `docs/architecture/CRATE-MAP.md`.
 
-Derive the workspace from the accepted responsibility map. A component may become a library, daemon/service, binary, or a combination where that boundary is real.
+Scaffolding does not mean the APIs are final.
 
-**Exit:** every planned crate has a reason to exist, ownership, dependencies and an API boundary.
+### 4. API contracts — CURRENT
 
-### 4. API contracts
+For each crate define:
 
-Define inputs, outputs, state, errors, IPC and persistence before implementation.
+- public API;
+- ownership and state;
+- persistence;
+- errors;
+- dependencies;
+- IPC/client boundary;
+- security boundary;
+- async requirements.
 
 ### 5. RFC/specification work
 
