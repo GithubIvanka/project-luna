@@ -1,7 +1,7 @@
 [workspace]
-
 resolver = "3"
 
 members = [
   "components/luna-common",
+  "components/luna-fs",
 ]
