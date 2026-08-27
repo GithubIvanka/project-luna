@@ -6,7 +6,7 @@ Last updated: 2026-08-27
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The project is now performing the repository/crate audit required before implementation.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The repository has now moved from audit into the first architecture-driven crate scaffolding.
 
 ### Phase status
 
@@ -18,81 +18,74 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | 1.4 | Accepted and consolidated |
 | 1.5 | Accepted and consolidated |
 | 1.6 | Accepted through HZ and consolidated |
-| Repository/crate audit | **Current** |
+| Repository/Cargo audit | Completed for current main baseline |
+| Crate map | Established |
+| API contracts | **Next** |
 
-## Actual repository state
-
-The `main` branch currently contains a minimal Rust workspace:
+## Current repository structure
 
 ```text
 project-luna/
 ├── Cargo.toml
 ├── components/
-│   └── luna-common/
-│       ├── Cargo.toml
-│       └── src/
-│           ├── id.rs
-│           ├── lib.rs
-│           └── version.rs
+│   ├── luna-common/
+│   ├── luna-fs/
+│   ├── luna-root-mapping/
+│   ├── luna-config/
+│   ├── luna-security/
+│   ├── luna-app-manager/
+│   ├── luna-system-manager/
+│   ├── luna-update-manager/
+│   ├── luna-device-manager/
+│   ├── luna-kernel-manager/
+│   ├── luna-system-runtime/
+│   ├── luna-app-runtime/
+│   └── luna-cli/
 └── docs/
 ```
 
-The old empty component crates were intentionally removed. This is correct: historical names are not implementation commitments.
+The crates created in this step are **scaffolds only**. They establish ownership boundaries; they do not claim completed subsystem implementations.
 
-## Repository audit result
+## Foundation audit
 
-- Root workspace: `resolver = "3"`, only `luna-common` remains.
-- `luna-common` is useful as a foundation, but its old API was **not** accepted as the final API.
-- The generic `LunaError` / `LunaResult` layer was removed because subsystem-specific errors belong to their owning crates.
-- `BundleId` and `ComponentId` remain as opaque foundational value types.
-- `Version` remains as a small foundational value type.
-- No new subsystem crate was created merely to reserve a historical name.
+`luna-common` remains intentionally small. Its existing useful value types were retained; subsystem-specific errors and behaviour do not belong there.
 
-These changes were applied directly to the repository as part of the Phase 1.6 audit.
+`luna-fs` is the low-level filesystem layer.
 
-## Architectural subsystems not yet created as crates
+`luna-root-mapping` is a separate logical mapping layer and does not own security policy.
 
-These names are architectural responsibility boundaries, not a list of empty crates to create immediately:
+## Management boundaries
 
-- `luna-cli`
-- `luna-system-manager`
-- `luna-app-manager`
-- `luna-device-manager`
-- `luna-update-manager`
-- `luna-kernel-manager`
-- `luna-root-mapping`
-- `luna-security`
-- `luna-system-runtime`
-- `luna-app-runtime`
-- `luna-fs`
-- `luna-bundle`
-- `luna-config`
-- `luna-log`
-- `luna-common`
+- `luna-app-manager`: installation, update, removal, verification, migrations and package import; it does not own normal application execution.
+- `luna-system-manager`: owns the system state model and queries.
+- `luna-update-manager`: executes changes.
+- `luna-kernel-manager`: kernel inventory/metadata/compatibility model; change execution remains with update-manager.
+- `luna-device-manager`: device and volume lifecycle.
+- `luna-security`: central policy authority.
 
-Some responsibilities may later require a library + daemon/service + thin client split. The final workspace is derived from API boundaries, not from this list mechanically.
+## Runtime boundaries
 
-## Not implemented
+- `luna-system-runtime`: single system-wide runtime supervising UserSessions.
+- `luna-app-runtime`: application execution and ApplicationInstance lifecycle inside a UserSession.
 
-The following are architecture/specification work, not implemented subsystems:
+## User interface
 
-- `luna-boot.efi`
-- System Image lifecycle
-- kernel lifecycle/compatibility implementation
-- Bundle Format v1 implementation
-- application runtime
-- system runtime
-- security backend
-- root mapping backend
-- device manager
-- update manager
-- application manager
-- GUI/CLI backend services
+`luna-cli` is a thin client. Backend work is not duplicated in CLI code. Future GUI clients should use the same backend contracts.
 
-## Immediate next work
+## Deliberately deferred
 
-1. Derive the concrete crate map from `docs/ARCHITECTURE.md`.
-2. Define responsibility, dependency, persistence and API boundaries.
-3. Decide which boundaries need library, daemon/service, binary, or client crates.
-4. Start the first implementation crate only after its contract is explicit.
-5. Treat RFC-0002 as a separate design task; no proposed `.lbp` layout is accepted automatically.
+- `luna-bundle` implementation: deferred until RFC-0002 / Bundle Format v1 is designed and accepted.
+- `luna-boot.efi`: separate bootloader implementation boundary.
+- `luna-log`: not created merely because of historical naming; create when a real ownership boundary requires it.
+
+## Async direction
+
+Phase 1.6 accepted Tokio as the Rust async-runtime direction where an async runtime is actually required. Lower-level crates must not acquire Tokio merely by association.
+
+## Next work
+
+1. Define API contracts for the foundation crates.
+2. Audit/refine the scaffolded public APIs against `docs/ARCHITECTURE.md`.
+3. Define persistence and error boundaries.
+4. Implement the first real crate only after its contract is explicit.
+5. Keep RFC-0002 as a separate design task.
