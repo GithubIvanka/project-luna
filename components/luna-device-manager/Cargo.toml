@@ -1,0 +1,15 @@
+[package]
+name = "luna-device-manager"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "luna-device-manager"
+path = "src/main.rs"
+
+[dependencies]
+luna-common = { path = "../luna-common" }
