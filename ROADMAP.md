@@ -1,266 +1,89 @@
 # Project Luna — Roadmap
 
-This roadmap describes the development sequence for Project Luna.
+The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). This roadmap describes sequence and dependencies, not deadlines.
 
-> The architectural Source of Truth is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-> This file reflects the accepted development order, not fixed deadlines.
+## Current position
 
----
+Phases **1.1–1.6** are accepted/consolidated, with Phase 1.6 complete through **1.6-HZ**.
 
-## How to read this file
+The current stage is the **repository and crate audit**.
 
-- **Sequence and dependencies** come from the Source of Truth (sections 85, 98, 104).
-- **Time estimates** are *proposals only*. They have not been accepted and must
-  not be treated as committed deadlines.
-- The project is **design-first**. Per section 98, the priority is:
+## Sequence
 
-```
-Architecture → RFC → Format → Interfaces → Prototype → Implementation → Integration
-```
-
-not "write a lot of code first and reconcile architectures later".
-
----
-
-## Where the project is now
-
-Per section 108.19 / 109.10:
-
-- Phases 1.1–1.5 are **accepted and consolidated**.
-- Phase 1.5 established the contracts between Security, Root Mapping,
-  Application Runtime, System Runtime, UserSession, IPC, Events/Operations and
-  Diagnostics/Health.
-- The **next phase** is repository/crate architecture — translating those
-  contracts into concrete Rust workspace boundaries and APIs.
-
-Current code state (section 86): a Rust workspace exists and builds
-(`luna`, `luna-common`, `luna-log`, `luna-fs`, `luna-bundle`, `luna-config`).
-No bootloader, bundle format, System Image, kernel manager, runtime or device
-manager is implemented yet.
-
----
-
-## Development sequence
-
-The following order is taken from section 85 and section 104. Each stage must
-reach sufficient precision before the next one begins (section 98).
-
-### Stage 0 — Repository / crate architecture (current)
-Translate Phase 1.5 contracts into concrete Rust workspace boundaries and APIs.
-
-- Define crate responsibility boundaries per section 105.23.
-- Keep `luna-common` small (not a dumping ground).
-- Create new crates only when a real architectural boundary exists (section 51.1).
-- Produce concrete API sketches for the Phase 1.5 contracts.
-
-**Exit criteria:** crate map and API boundaries are precise enough to start
-specification and early prototypes without architectural rework.
-
-### Stage 1 — Architecture baseline
-Consolidate and confirm the foundation (largely already in the Source of Truth):
-
-- directory layout;
-- system/data boundary;
-- boot architecture;
-- System Image architecture;
-- kernel architecture;
-- bundle architecture.
-
-**Exit criteria:** the four-layer model (EFI → BOOT → SYSTEM → DATA, section 96)
-is unambiguous and stable.
-
-### Stage 2 — RFC-0001
-The main architectural RFC describing the Luna foundation:
-
-- purpose;
-- principles;
-- disk layout;
-- boot architecture;
-- system/data separation;
-- immutable model;
-- versioned images;
-- kernel separation.
-
-**Exit criteria:** RFC-0001 accepted and consistent with section 105 onward.
-
-### Stage 3 — RFC-0002 (Bundle Format v1)
-Design `.lbp` (section 33). Must define:
-
-- bundle structure;
-- metadata;
-- manifest;
-- payload;
-- versions and identifiers;
-- dependencies;
-- architecture / target platform;
-- installation, update, removal;
-- integrity checks;
-- signatures (if accepted);
-- compatibility;
-- storage rules;
-- file format inside the bundle.
-
-**Exit criteria:** `.lbp` format specified enough to implement `luna-bundle`
-and `luna-app-manager` import logic.
-
-> Remember (section 32): `.lbp` is the Bundle Format. System Image is SquashFS.
-> These are independent formats.
-
-### Stage 4 — System Image Specification
-Separate from the bundle (section 34). Must cover:
-
-- SquashFS payload;
-- per-image manifest;
-- kernel compatibility;
-- boot metadata;
-- versioning;
-- retention.
-
-**Exit criteria:** System Image + manifest + compatibility + retention specified.
-
-### Stage 5 — Kernel Specification
-Cover:
-
-- kernel metadata;
-- versioning;
-- compatibility;
-- installation / removal;
-- selection;
-- fallback;
-- kernel verification.
-
-**Exit criteria:** kernel lifecycle and compatibility model specified.
-
-### Stage 6 — Boot Specification
-Describe the boot path (section 85, 93):
-
-```
-UEFI → luna-boot.efi → current → manifest → compatible kernel
-     → System Image → fallback → factory
+```text
+Phase 1.6 consolidation
+        ↓
+Repository / Cargo audit
+        ↓
+luna-common redesign
+        ↓
+Concrete crate map
+        ↓
+Crate/API contracts
+        ↓
+RFC/specification work where required
+        ↓
+Prototype
+        ↓
+Implementation
+        ↓
+Integration
 ```
 
-**Exit criteria:** `luna-boot.efi` behaviour, boot state and fallback are
-specified without inventing unspecified formats.
+### 1. Repository / Cargo audit — CURRENT
 
-### Stage 7 — Prototype
-Begin implementation **after** the specifications above are precise enough
-(section 85, stage 6 / section 104).
+- Compare the actual repository with the Source of Truth.
+- Keep only useful current code.
+- Remove obsolete implementation assumptions.
+- Do not create empty placeholder crates.
 
-Suggested first prototypes (not yet committed):
-- `luna-boot.efi` minimal boot path;
-- bundle parse/validate prototype;
-- System Image mount/materialization prototype.
+**Exit:** repository structure reflects the current architecture.
 
-### Stage 8 — Implementation
-Build out the components against the accepted specifications, one component at
-a time, following the single-component rule (section 99).
+### 2. `luna-common` audit — COMPLETED
 
-### Stage 9 — Integration
-Integrate components end-to-end and validate against the canonical models
-(sections 92–95).
+Keep only genuinely cross-cutting primitives. Do not place subsystem-specific errors, runtime state, security policy, filesystem operations or bundle semantics here.
 
----
+**Result:** the old generic error/result layer was removed; IDs and `Version` remain as small foundational value types.
 
-## Dependency graph
+### 3. Concrete crate map — NEXT
 
-```
-Stage 0 (crate/API architecture)
-   │
-   ▼
-Stage 1 (architecture baseline)
-   │
-   ▼
-Stage 2 (RFC-0001)
-   │
-   ├──────────────────────┐
-   ▼                      ▼
-Stage 3 (RFC-0002)    Stage 4 (System Image Spec)
-   │                      │
-   │                      ▼
-   │                 Stage 5 (Kernel Spec)
-   │                      │
-   └──────────┬───────────┘
-              ▼
-        Stage 6 (Boot Spec)
-              │
-              ▼
-        Stage 7 (Prototype)
-              │
-              ▼
-        Stage 8 (Implementation)
-              │
-              ▼
-        Stage 9 (Integration)
-```
+Derive the workspace from the accepted responsibility map. A component may become a library, daemon/service, binary, or a combination where that boundary is real.
 
-Notes:
-- RFC-0001 (foundation) should precede format-specific RFCs.
-- System Image and Kernel specs inform the Boot spec.
-- Prototype should not begin before the relevant format/spec is precise enough.
+**Exit:** every planned crate has a reason to exist, ownership, dependencies and an API boundary.
 
----
+### 4. API contracts
 
-## What must NOT be treated as done
+Define inputs, outputs, state, errors, IPC and persistence before implementation.
 
-Per section 68, the following are **not yet defined** and must be designed,
-not assumed, when their stage is reached:
+### 5. RFC/specification work
 
-- exact `.lbp` binary format / structure;
-- exact Bundle and System Image TOML manifests;
-- exact `current` / `factory` formats;
-- exact kernel metadata structure;
-- exact kernel-panic detection and soft-fallback procedures;
-- exact SquashFS / hybrid loading implementation;
-- exact application permission model;
-- exact device automount backend;
-- exact OpenRC/service integration;
-- final `luna` CLI;
-- exact runtime namespace structure;
-- bundle/image signatures and cryptographic verification policy;
-- update transaction protocol.
+`RFC-0001` formalizes the architectural baseline.
 
----
+`RFC-0002` separately designs Bundle Format v1 (`.lbp`). It must not be accepted from an earlier proposal without review.
 
-## Proposed (non-committed) time framing
+System Image, kernel and boot specifications remain separate from Bundle Format.
 
-> ⚠️ These are illustrative proposals only. No dates or durations have been
-> accepted in the Source of Truth. Replace with real estimates once the team
-> explicitly accepts them.
+### 6. Prototype
 
-| Stage | Suggested effort | Status |
-|-------|------------------|--------|
-| Stage 0 — crate/API architecture | TBD (proposal) | 🔜 next |
-| Stage 1 — architecture baseline | TBD (proposal) | largely done in SoT |
-| Stage 2 — RFC-0001 | TBD (proposal) | 📋 not started |
-| Stage 3 — RFC-0002 | TBD (proposal) | 📋 not started |
-| Stage 4 — System Image Spec | TBD (proposal) | 📋 not started |
-| Stage 5 — Kernel Spec | TBD (proposal) | 📋 not started |
-| Stage 6 — Boot Spec | TBD (proposal) | 📋 not started |
-| Stage 7 — Prototype | TBD (proposal) | 📋 not started |
+Prototype the highest-risk boundaries first, especially logical-root/materialization, bundle parsing/validation, and boot compatibility where appropriate.
 
----
+### 7. Implementation
 
-## Guiding constraints for every stage
+Implement one component at a time under the Source of Truth and its API contract.
 
-From the Source of Truth:
+### 8. Integration
 
-1. **Design first** — do not start large amounts of code before the
-   architecture is precise (section 98).
-2. **One component at a time** — responsibility, boundaries, inputs, outputs,
-   dependencies, state, API, errors, then code, then tests (section 99).
-3. **No silent architectural changes** — accepted decisions are not changed
-   silently; conflicts are marked `ARCHITECTURE CONFLICT` (sections 88, 105.28).
-4. **Don't confuse "discussed" with "decided"** (section 103).
-5. **Respect the critical prohibitions** (section 72) — e.g. never move System
-   Images into DATA, never make System Image a `.lbp`, never use one global
-   manifest, never force boot-state rewrites on every boot.
+Validate end-to-end behaviour against the canonical runtime, storage, security, state and recovery models.
 
----
+## Non-negotiable constraints
 
-## Maintenance
-
-When a stage completes:
-- consolidate its accepted decisions into `docs/ARCHITECTURE.md`;
-- update this roadmap's statuses;
-- keep phase documents as historical/traceability material only (section 105.29).
-```
+- System Image = direct SquashFS, not `.lbp`.
+- `.lbp` is a separate Bundle Format/transport/archive format.
+- SYSTEM and DATA remain separate.
+- `luna-app-manager` does not own normal application execution.
+- `luna-security` remains the policy authority.
+- `luna-root-mapping` remains a narrow mapping layer.
+- `luna-fs` remains low-level filesystem abstraction.
+- One `luna-system-runtime` coordinates multiple `UserSession`s.
+- Linux namespaces/resource controls are implementation mechanisms, not the architecture itself.
+- Accepted decisions are not silently changed.
