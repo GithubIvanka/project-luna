@@ -1,13 +1,11 @@
-//! Luna Common
+//! Small, dependency-light foundational value types shared by Luna crates.
 //!
-//! Shared primitives used by all Luna components.
+//! This crate is intentionally narrow. Subsystem-specific errors, runtime state,
+//! security policy, filesystem operations, bundle semantics, and service APIs
+//! belong to their owning crates.
 
-pub mod error;
-pub mod id;
-pub mod result;
-pub mod version;
+mod id;
+mod version;
 
-pub use error::LunaError;
 pub use id::{BundleId, ComponentId};
-pub use result::LunaResult;
 pub use version::Version;
