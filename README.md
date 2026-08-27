@@ -12,9 +12,10 @@ Project Luna is in the **architecture-to-implementation transition**.
 
 - Phases **1.1–1.5** are accepted and consolidated.
 - Phase **1.6** is accepted through **1.6-HZ** and consolidated into `docs/ARCHITECTURE.md`.
-- The repository/crate audit has started from the real `main` branch.
-- The repository currently contains only the surviving `luna-common` implementation; obsolete empty crates were intentionally removed.
-- No bootloader, runtime, bundle implementation, System Image implementation, or manager subsystem is claimed as implemented.
+- The repository/Cargo audit is complete for the current baseline.
+- The architecture-driven crate map is now scaffolded.
+- The next stage is explicit crate/API contract design.
+- Scaffolding does **not** claim that the subsystems are implemented.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -61,18 +62,33 @@ luna-system-runtime
 
 `luna-security` is the central policy authority. Linux namespaces, mounts and filesystem/resource-control mechanisms are implementation primitives, not substitutes for Luna's architectural model.
 
+## Current crate map
+
+The architecture-driven workspace currently contains:
+
+```text
+luna-common
+luna-fs
+luna-root-mapping
+luna-config
+luna-security
+luna-app-manager
+luna-system-manager
+luna-update-manager
+luna-device-manager
+luna-kernel-manager
+luna-system-runtime
+luna-app-runtime
+luna-cli
+```
+
+See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for responsibility boundaries and deferred components.
+
 ## Repository rule
 
 The repository is not allowed to become a second architecture document.
 
-A crate is introduced only after:
-
-1. its responsibility is defined;
-2. its boundary is defined;
-3. inputs/outputs and dependencies are known;
-4. persistent state is identified;
-5. the API/error model is defined;
-6. the crate is ready for real development.
+A crate is introduced only when its responsibility and boundary are defined by the architecture. A scaffold establishes an ownership boundary; it is not a claim of completed functionality.
 
 See [`STATUS.md`](STATUS.md), [`ROADMAP.md`](ROADMAP.md), and [`docs/phases/PHASE-1.6.md`](docs/phases/PHASE-1.6.md).
 
@@ -81,9 +97,9 @@ See [`STATUS.md`](STATUS.md), [`ROADMAP.md`](ROADMAP.md), and [`docs/phases/PHAS
 ```text
 Architecture
     ↓
-RFC / specification
-    ↓
 crate/API contract
+    ↓
+RFC / specification where required
     ↓
 prototype
     ↓
