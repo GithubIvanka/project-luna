@@ -4,4 +4,15 @@ resolver = "3"
 members = [
   "components/luna-common",
   "components/luna-fs",
+  "components/luna-root-mapping",
+  "components/luna-config",
+  "components/luna-security",
+  "components/luna-app-manager",
+  "components/luna-system-manager",
+  "components/luna-update-manager",
+  "components/luna-device-manager",
+  "components/luna-kernel-manager",
+  "components/luna-system-runtime",
+  "components/luna-app-runtime",
+  "components/luna-cli",
 ]
