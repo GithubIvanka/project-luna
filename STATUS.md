@@ -1,201 +1,98 @@
 # Project Luna — Status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
-> This document reflects the current state of Project Luna.
-> The architectural Source of Truth is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-> This file is a status snapshot, not an architectural authority.
-
----
+> `docs/ARCHITECTURE.md` is the architectural Source of Truth. This file is a status snapshot only.
 
 ## Overall state
 
-Project Luna is in the **design-first phase**. The architecture is consolidated
-through **Phase 1.5**. The Rust workspace exists and builds, but no major
-subsystem (bootloader, runtime, bundle format implementation) is implemented yet.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The project is now performing the repository/crate audit required before implementation.
 
-Current focus: formalizing specifications — **RFC-0001** (Architecture baseline)
-and **RFC-0002** (Bundle Format v1).
+### Phase status
 
----
+| Phase | Status |
+|---|---|
+| 1.1 | Accepted and consolidated |
+| 1.2 | Accepted and consolidated |
+| 1.3 | Accepted and consolidated |
+| 1.4 | Accepted and consolidated |
+| 1.5 | Accepted and consolidated |
+| 1.6 | Accepted through HZ and consolidated |
+| Repository/crate audit | **Current** |
 
-## Phase status
+## Actual repository state
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| Phase 1.1 | Initial architecture baseline | ✅ Accepted and consolidated |
-| Phase 1.2 | Storage model, checkpoints, CLI direction | ✅ Accepted and consolidated |
-| Phase 1.3 | Component responsibility map | ✅ Accepted and consolidated |
-| Phase 1.4 | Identity, trust, authority, operations, state, resources | ✅ Accepted and consolidated |
-| Phase 1.5 | Security, Root Mapping, Runtime contracts | ✅ Accepted and consolidated |
-| Next phase | Repository/crate architecture → concrete Rust APIs | 🔜 Planned |
+The `main` branch currently contains a minimal Rust workspace:
 
-Per section 108.19: Phases 1.1–1.5 are accepted and consolidated into
-`docs/ARCHITECTURE.md`. Phase 1.5 establishes the accepted contracts between
-Security, Root Mapping, Application Runtime, System Runtime, UserSession, IPC,
-Events/Operations and Diagnostics/Health.
-
----
-
-## What exists in code
-
-### Rust workspace (builds successfully)
-
-```
+```text
 project-luna/
 ├── Cargo.toml
 ├── components/
-│   ├── luna/           # main CLI entry point
-│   ├── luna-bundle/    # bundle format representation
-│   ├── luna-common/    # shared fundamental types
-│   ├── luna-config/    # configuration
-│   ├── luna-fs/        # filesystem abstraction
-│   └── luna-log/       # logging
-└── rust-toolchain.toml
+│   └── luna-common/
+│       ├── Cargo.toml
+│       └── src/
+│           ├── id.rs
+│           ├── lib.rs
+│           └── version.rs
+└── docs/
 ```
 
-`cargo build` completes successfully (`Finished dev profile`).
+The old empty component crates were intentionally removed. This is correct: historical names are not implementation commitments.
 
-### What this means
+## Repository audit result
 
-- ✅ The base Rust workspace exists and compiles.
-- ❌ This does **not** mean the bootloader, Bundle Format, System Image,
-  kernel manager, runtime, or device manager are implemented.
+- Root workspace: `resolver = "3"`, only `luna-common` remains.
+- `luna-common` is useful as a foundation, but its old API was **not** accepted as the final API.
+- The generic `LunaError` / `LunaResult` layer was removed because subsystem-specific errors belong to their owning crates.
+- `BundleId` and `ComponentId` remain as opaque foundational value types.
+- `Version` remains as a small foundational value type.
+- No new subsystem crate was created merely to reserve a historical name.
 
-### Architectural components not yet created as crates
+These changes were applied directly to the repository as part of the Phase 1.6 audit.
 
-Per the repository rule (section 51.1): a subsystem appears in the repository
-**only when its real development starts**. The following are architectural
-subsystems, not yet repository crates:
+## Architectural subsystems not yet created as crates
 
-- `luna-boot` (luna-boot.efi)
+These names are architectural responsibility boundaries, not a list of empty crates to create immediately:
+
+- `luna-cli`
 - `luna-system-manager`
 - `luna-app-manager`
-- `luna-app-runtime`
-- `luna-system-runtime`
 - `luna-device-manager`
 - `luna-update-manager`
 - `luna-kernel-manager`
 - `luna-root-mapping`
 - `luna-security`
+- `luna-system-runtime`
+- `luna-app-runtime`
+- `luna-fs`
+- `luna-bundle`
+- `luna-config`
+- `luna-log`
+- `luna-common`
 
-> ⚠️ Component counts are illustrative. The authoritative component map is
-> section 105.23 of ARCHITECTURE.md.
+Some responsibilities may later require a library + daemon/service + thin client split. The final workspace is derived from API boundaries, not from this list mechanically.
 
----
+## Not implemented
 
-## Accepted architecture (summary)
+The following are architecture/specification work, not implemented subsystems:
 
-Full details in ARCHITECTURE.md. Key accepted invariants:
+- `luna-boot.efi`
+- System Image lifecycle
+- kernel lifecycle/compatibility implementation
+- Bundle Format v1 implementation
+- application runtime
+- system runtime
+- security backend
+- root mapping backend
+- device manager
+- update manager
+- application manager
+- GUI/CLI backend services
 
-### Storage model (105.1)
-- Four physical areas: `EFI`, `SYSTEM`, `DATA`, `SWAP`.
-- DATA layout:
-  ```
-  DATA/
-  ├── system/
-  │   ├── apps/
-  │   ├── drivers/
-  │   ├── libs/
-  │   ├── volumes/
-  │   └── config/
-  ├── users/<user>/{home, data, config}/
-  └── cache/
-  ```
+## Immediate next work
 
-### Boot (105.16)
-- Custom `luna-boot.efi` bootloader.
-- Key `B` opens Boot Menu.
-- Compatibility-aware fallback; soft fallback for image failure.
-- Boot state is event-driven, not rewritten on every boot.
-
-### System Images & kernels (105.14)
-- System Image = direct SquashFS (`*.squashfs`) + per-image manifest (`*.toml`).
-- System Images and kernels are independent and versioned separately.
-- `current` = active image/kernel combination; `factory` = immutable original.
-
-### Applications & runtime (105.8, 105.9, 109.6)
-- Applications are immutable bundles (`.lbp` is transport/archive format).
-- Launch chain: `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance`.
-- Each `ApplicationInstance` gets its own mount/filesystem namespace.
-
-### Security (105.7, 108.5, 109.1)
-- `luna-security` is the central policy authority.
-- No permanent root user; no `sudo`/`su` privilege hierarchy.
-- `Subject + Resource + Action + Context → PolicyDecision`.
-- Integrity / Authenticity / Trust / Authorization are separate concepts.
-
-### Health model (108.12, 109.9)
-- `Healthy / Degraded / Recovering / Failed / Emergency`.
-- `Emergency` is a health state, not a Boot Menu mode.
-
----
-
-## What is explicitly NOT yet defined
-
-Per section 68, the following must not be treated as finalized specifications:
-
-- exact `.lbp` binary format / structure
-- exact TOML Bundle manifest
-- exact TOML System Image manifest
-- exact `current` / `factory` format
-- exact kernel metadata structure
-- exact kernel-panic detection procedure
-- exact soft fallback procedure
-- exact SquashFS hybrid loading implementation
-- exact application permission model
-- exact device automount backend
-- exact service backend (OpenRC-like direction only)
-- final `luna` CLI command set
-- exact runtime namespace structure
-- bundle/image signatures & cryptographic verification policy
-- update transaction protocol
-
-If a chat discusses these, it must **design** them, not assume they exist.
-
----
-
-## Next steps
-
-### Immediate
-1. **RFC-0001** — Architecture baseline (fundament: purpose, principles, disk
-   layout, boot architecture, system/data separation, immutable model,
-   versioned images, kernel separation).
-2. **RFC-0002** — Bundle Format v1 (`.lbp`).
-
-### After RFCs
-3. **System Image Specification** — SquashFS + per-image manifest + versioning
-   + compatibility + retention.
-4. **Boot Specification** — luna-boot.efi behaviour, boot state, fallback, factory.
-5. **Kernel Specification** — metadata, compatibility, selection.
-6. **Repository/crate architecture** — translate Phase 1.5 contracts into
-   concrete Rust workspace boundaries and APIs.
-7. **Prototype** — only after specifications are precise enough.
-
-Development order (section 98):
-```
-Architecture → RFC → Format → Interfaces → Prototype → Implementation → Integration
-```
-
----
-
-## Risks / watchpoints
-
-1. **Design phase duration** — avoid indefinite specification without prototyping.
-2. **Hybrid SquashFS loading** — technically non-trivial; keep it a spec task,
-   don't over-commit to one kernel mechanism early (109.4).
-3. **UEFI bootloader** — `luna-boot.efi` runs in a very different environment
-   than Linux userspace; do not assume `luna-log` etc. reuse directly (54).
-4. **`luna-common` hygiene** — must not become a dumping ground (53, 105.23).
-5. **Don't confuse "discussed" with "accepted"** (103, 105.28).
-
----
-
-## Notes for maintainers
-
-- Metrics like exact LOC, test coverage, and decision counts are **not tracked
-  in the Source of Truth** and are intentionally omitted here to avoid inventing
-  numbers. Add them only when actually measured.
-- When a phase closes, consolidate its accepted decisions into
-  `docs/ARCHITECTURE.md` and update this status file.
-```
+1. Derive the concrete crate map from `docs/ARCHITECTURE.md`.
+2. Define responsibility, dependency, persistence and API boundaries.
+3. Decide which boundaries need library, daemon/service, binary, or client crates.
+4. Start the first implementation crate only after its contract is explicit.
+5. Treat RFC-0002 as a separate design task; no proposed `.lbp` layout is accepted automatically.
