@@ -6,7 +6,7 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 Phases **1.1–1.6** are accepted/consolidated, with Phase 1.6 complete through **1.6-HZ**.
 
-The repository audit is complete and the architecture-driven crate map has been scaffolded.
+The repository audit and architecture-driven crate map are complete. The first foundation/domain API pass is also complete.
 
 ## Sequence
 
@@ -17,7 +17,9 @@ Repository / Cargo audit
         ↓
 Concrete crate map
         ↓
-Crate/API contracts              ← CURRENT
+Foundation/domain API contracts  ← COMPLETED
+        ↓
+Manager/runtime API contracts     ← CURRENT
         ↓
 RFC/specification work where required
         ↓
@@ -30,32 +32,48 @@ Integration
 
 ### 1. Repository / Cargo audit — COMPLETED
 
-The actual `main` branch was reduced to useful code and then rebuilt around the accepted architecture. Historical empty crates are not treated as implementation commitments.
+The actual `main` branch was audited and aligned with the accepted architecture. Historical empty crates are not treated as implementation commitments.
 
 ### 2. `luna-common` audit — COMPLETED
 
-Keep only genuinely cross-cutting primitives. Subsystem-specific errors, runtime state, security policy, filesystem operations and bundle semantics do not belong here.
+`luna-common` now contains only small shared value types. Subsystem-specific errors, runtime state, security policy, filesystem operations and bundle semantics remain outside the crate.
 
 ### 3. Concrete crate map — COMPLETED / SCAFFOLDED
 
-The current workspace is architecture-driven and includes the foundation, mapping, configuration, security, management, runtime and CLI boundaries documented in `docs/architecture/CRATE-MAP.md`.
+The workspace is architecture-driven and includes the defined foundation, mapping, configuration, security, state/event, bundle-domain, management, runtime, session and CLI boundaries. Bootloader and logging remain separately gated.
 
-Scaffolding does not mean the APIs are final.
+See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md).
 
-### 4. API contracts — CURRENT
+### 4. Foundation/domain API contracts — COMPLETED
 
-For each crate define:
+The first explicit API pass covers:
 
-- public API;
-- ownership and state;
-- persistence;
-- errors;
-- dependencies;
-- IPC/client boundary;
-- security boundary;
-- async requirements.
+- `luna-common` value types;
+- `luna-fs` low-level filesystem operations;
+- `luna-root-mapping` per-namespace exact-file mapping;
+- `luna-config` layered configuration;
+- `luna-security` policy authority;
+- `luna-state` durable state boundary;
+- `luna-event` event contracts;
+- `luna-bundle` internal bundle domain model;
+- `luna-user-session` lifecycle model.
 
-### 5. RFC/specification work
+### 5. Manager/runtime API contracts — CURRENT
+
+Next define concrete public contracts for:
+
+- `luna-system-manager`;
+- `luna-kernel-manager`;
+- `luna-update-manager`;
+- `luna-app-manager`;
+- `luna-device-manager`;
+- `luna-system-runtime`;
+- `luna-app-runtime`;
+- `luna-cli`.
+
+Their APIs must consume the established lower-level contracts rather than moving higher-level responsibilities downward.
+
+### 6. RFC/specification work
 
 `RFC-0001` formalizes the architectural baseline.
 
@@ -63,15 +81,15 @@ For each crate define:
 
 System Image, kernel and boot specifications remain separate from Bundle Format.
 
-### 6. Prototype
+### 7. Prototype
 
-Prototype the highest-risk boundaries first, especially logical-root/materialization, bundle parsing/validation, and boot compatibility where appropriate.
+Prototype the highest-risk boundaries first, especially logical-root/materialization, bundle parsing/validation, resource control, and boot compatibility where appropriate.
 
-### 7. Implementation
+### 8. Implementation
 
 Implement one component at a time under the Source of Truth and its API contract.
 
-### 8. Integration
+### 9. Integration
 
 Validate end-to-end behaviour against the canonical runtime, storage, security, state and recovery models.
 
