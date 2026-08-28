@@ -1,0 +1,21 @@
+[package]
+name = "luna-boot"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Project Luna Contributors"]
+description = "Minimal UEFI bootloader for Project Luna"
+
+[dependencies]
+uefi = "0.28"
+uefi-services = "0.24"
+log = "0.4"
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+panic = "abort"
