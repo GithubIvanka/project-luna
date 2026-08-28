@@ -37,10 +37,16 @@ pub enum Permission {
 }
 
 /// Result of policy evaluation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Decision {
+    /// Access is allowed for the requested context.
     Allow,
+    /// Access is denied.
     Deny,
+    /// The policy requires an explicit user/system confirmation before access.
+    Ask,
+    /// Access is allowed only under additional constraints defined by policy.
+    Constrained { scope: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,5 +106,14 @@ mod tests {
             DenyAll.authorize(&request),
             Ok(super::Decision::Deny)
         ));
+    }
+
+    #[test]
+    fn constrained_decision_can_describe_limited_access() {
+        let decision = super::Decision::Constrained {
+            scope: "current-operation".to_owned(),
+        };
+
+        assert!(matches!(decision, super::Decision::Constrained { .. }));
     }
 }
