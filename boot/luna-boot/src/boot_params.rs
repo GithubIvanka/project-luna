@@ -1,21 +1,10 @@
-//! Linux x86_64 zero-page structures used by the Luna kernel handoff.
-//!
-//! The layout is intentionally represented as byte arrays for fields that are
-//! not needed yet. This avoids inventing a partial `struct boot_params` layout
-//! that could silently drift from the Linux ABI.
+//! Linux x86_64 zero-page helpers.
 
+use crate::e820::E820Entry;
 use crate::error::{BootError, BootResult};
 
 pub const BOOT_PARAMS_SIZE: usize = 4096;
 pub const E820_MAX_ENTRIES: usize = 128;
-
-#[repr(C, packed)]
-#[derive(Clone, Copy)]
-pub struct E820Entry {
-    pub addr: u64,
-    pub size: u64,
-    pub type_: u32,
-}
 
 #[derive(Clone)]
 pub struct BootParams {
@@ -23,49 +12,52 @@ pub struct BootParams {
 }
 
 impl BootParams {
-    pub const fn zeroed() -> Self {
-        Self { bytes: [0; BOOT_PARAMS_SIZE] }
-    }
+    pub const fn zeroed() -> Self { Self { bytes: [0; BOOT_PARAMS_SIZE] } }
+    pub fn as_bytes(&self) -> &[u8] { &self.bytes }
+    pub fn as_mut_bytes(&mut self) -> &mut [u8] { &mut self.bytes }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    pub fn as_mut_bytes(&mut self) -> &mut [u8] {
-        &mut self.bytes
-    }
-
-    /// Copy the setup header from the kernel into the zero page.
     pub fn copy_setup_header(&mut self, kernel: &[u8]) -> BootResult<()> {
-        let start = 0x1f1usize;
-        let end_marker = *kernel.get(0x201).ok_or(BootError::InvalidKernel)? as usize;
-        let end = 0x202usize.checked_add(end_marker).ok_or(BootError::InvalidKernel)?;
-        if end > kernel.len() || end - start > self.bytes.len() - 0x1f1 {
-            return Err(BootError::InvalidKernel);
-        }
-        self.bytes[0x1f1..end].copy_from_slice(&kernel[0x1f1..end]);
+        let start = 0x1f1;
+        let header_len = *kernel.get(0x201).ok_or(BootError::InvalidKernel)? as usize;
+        let end = 0x202usize.checked_add(header_len).ok_or(BootError::InvalidKernel)?;
+        if end > kernel.len() || end > self.bytes.len() { return Err(BootError::InvalidKernel); }
+        self.bytes[start..end].copy_from_slice(&kernel[start..end]);
         Ok(())
     }
 
-    /// Set the command-line pointer and size fields in the Linux header.
-    pub fn set_cmdline(&mut self, physical_address: u32) {
-        self.bytes[0x228..0x22c].copy_from_slice(&physical_address.to_le_bytes());
-    }
+    pub fn set_loader_type(&mut self, value: u8) { self.bytes[0x210] = value; }
+    pub fn set_loadflags(&mut self, value: u8) { self.bytes[0x211] = value; }
 
-    pub fn set_loader_type(&mut self, loader_type: u8) {
-        self.bytes[0x210] = loader_type;
-    }
-
-    pub fn set_loadflags(&mut self, flags: u8) {
-        self.bytes[0x211] = flags;
+    pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
+        if address > u32::MAX {
+            self.bytes[0x0c8..0x0cc].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
+            self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
+        } else {
+            self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
+        }
+        Ok(())
     }
 
     pub fn set_ramdisk(&mut self, address: u64, size: u64) -> BootResult<()> {
         if address > u32::MAX || size > u32::MAX {
-            return Err(BootError::Unsupported("initrd above 4 GiB requires xloadflags support"));
+            self.bytes[0xc0..0xc4].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
+            self.bytes[0xc4..0xc8].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
         }
         self.bytes[0x218..0x21c].copy_from_slice(&(address as u32).to_le_bytes());
         self.bytes[0x21c..0x220].copy_from_slice(&(size as u32).to_le_bytes());
+        Ok(())
+    }
+
+    pub fn set_e820(&mut self, entries: &[E820Entry]) -> BootResult<()> {
+        if entries.len() > E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
+        self.bytes[0x1e8] = entries.len() as u8;
+        const BASE: usize = 0x2d0;
+        for (i, entry) in entries.iter().enumerate() {
+            let p = BASE + i * 20;
+            self.bytes[p..p + 8].copy_from_slice(&entry.addr.to_le_bytes());
+            self.bytes[p + 8..p + 16].copy_from_slice(&entry.size.to_le_bytes());
+            self.bytes[p + 16..p + 20].copy_from_slice(&entry.typ.to_le_bytes());
+        }
         Ok(())
     }
 }
