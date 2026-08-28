@@ -1,12 +1,12 @@
 # Project Luna — Status
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 > `docs/ARCHITECTURE.md` is the architectural Source of Truth. This file is a status snapshot only.
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The repository has now moved from audit into the first architecture-driven crate scaffolding.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The repository is now aligned with the architecture-driven crate map at the scaffold level.
 
 ### Phase status
 
@@ -19,8 +19,8 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | 1.5 | Accepted and consolidated |
 | 1.6 | Accepted through HZ and consolidated |
 | Repository/Cargo audit | Completed for current main baseline |
-| Crate map | Established |
-| API contracts | **Next** |
+| Crate map | Established and workspace-aligned |
+| API contracts | Current work |
 
 ## Current repository structure
 
@@ -33,26 +33,40 @@ project-luna/
 │   ├── luna-root-mapping/
 │   ├── luna-config/
 │   ├── luna-security/
+│   ├── luna-state/
+│   ├── luna-event/
+│   ├── luna-bundle/
 │   ├── luna-app-manager/
 │   ├── luna-system-manager/
 │   ├── luna-update-manager/
 │   ├── luna-device-manager/
 │   ├── luna-kernel-manager/
 │   ├── luna-system-runtime/
+│   ├── luna-user-session/
 │   ├── luna-app-runtime/
 │   └── luna-cli/
 └── docs/
 ```
 
-The crates created in this step are **scaffolds only**. They establish ownership boundaries; they do not claim completed subsystem implementations.
+These crates are **scaffolds/boundary implementations only**. They do not claim completed subsystem functionality.
+
+`luna-boot`/`luna-boot.efi` and `luna-log` remain intentionally outside the workspace until their implementation boundaries require them. A future GUI crate is also deferred.
 
 ## Foundation audit
 
-`luna-common` remains intentionally small. Its existing useful value types were retained; subsystem-specific errors and behaviour do not belong there.
+`luna-common` remains intentionally small. Its useful value types were retained; subsystem-specific errors and behaviour do not belong there.
 
 `luna-fs` is the low-level filesystem layer.
 
 `luna-root-mapping` is a separate logical mapping layer and does not own security policy.
+
+`luna-config` owns configuration representation and layered lookup/persistence contracts, not authorization.
+
+`luna-state` is the durable state boundary; specialized boot metadata remains separate.
+
+`luna-event` defines event contracts without committing Luna to Kafka or another broker.
+
+`luna-bundle` is only the bundle-domain boundary for now. RFC-0002 still defines the future Bundle Format v1 details.
 
 ## Management boundaries
 
@@ -66,17 +80,12 @@ The crates created in this step are **scaffolds only**. They establish ownership
 ## Runtime boundaries
 
 - `luna-system-runtime`: single system-wide runtime supervising UserSessions.
+- `luna-user-session`: UserSession domain boundary.
 - `luna-app-runtime`: application execution and ApplicationInstance lifecycle inside a UserSession.
 
 ## User interface
 
 `luna-cli` is a thin client. Backend work is not duplicated in CLI code. Future GUI clients should use the same backend contracts.
-
-## Deliberately deferred
-
-- `luna-bundle` implementation: deferred until RFC-0002 / Bundle Format v1 is designed and accepted.
-- `luna-boot.efi`: separate bootloader implementation boundary.
-- `luna-log`: not created merely because of historical naming; create when a real ownership boundary requires it.
 
 ## Async direction
 
@@ -84,8 +93,8 @@ Phase 1.6 accepted Tokio as the Rust async-runtime direction where an async runt
 
 ## Next work
 
-1. Define API contracts for the foundation crates.
-2. Audit/refine the scaffolded public APIs against `docs/ARCHITECTURE.md`.
+1. Finish and reconcile public API contracts for the foundation crates.
+2. Audit the scaffolded APIs against `docs/ARCHITECTURE.md` and remove accidental implementation commitments.
 3. Define persistence and error boundaries.
 4. Implement the first real crate only after its contract is explicit.
-5. Keep RFC-0002 as a separate design task.
+5. Keep RFC-0002 as a separate design task; do not treat the current bundle scaffold as a Bundle Format v1 specification.
