@@ -44,7 +44,7 @@ This layer intentionally contains no authorization, logical-root policy, configu
 
 ### `luna-root-mapping`
 
-Implemented the first per-namespace exact-file mapping contract:
+Implemented the per-namespace logical mapping contract:
 
 - `LogicalPath`
 - `PhysicalPath`
@@ -52,7 +52,7 @@ Implemented the first per-namespace exact-file mapping contract:
 - `MappingTable`
 - `MappingError`
 
-Directory-wide implicit mappings are not part of this first contract. The design explicitly supports mappings such as `/bin/app` → a resource inside an installed bundle.
+Individual file mappings are the normal case. Explicit whole-directory/subtree mappings are allowed for an appropriate semantic mapping class, such as a library subtree. They are not an unrestricted implicit mapping mechanism.
 
 ### `luna-config`
 
@@ -83,14 +83,22 @@ No root/sudo user abstraction is introduced.
 
 ### `luna-state`
 
-Implemented the generic durable state contract:
+Implemented the generic durable state contract and the first concurrency hardening pass:
 
 - `StateKey`;
 - `StateValue`;
-- `StateError`;
-- `StateStore`.
+- `Revision`;
+- `StateMutation`;
+- `StateTransaction`;
+- `StateError` with revision conflict reporting;
+- `StateStore::revision`;
+- atomic `StateStore::transaction` boundary.
 
-Specialized boot state remains outside this generic crate.
+The state abstraction remains synchronous. Higher layers own asynchronous orchestration and synchronization.
+
+The accepted Phase 1.6 concurrency model is a global store revision. A transaction commits only when its expected revision matches the current revision. A stale transaction is rejected without partial writes. A successful non-empty transaction advances the revision once; an empty transaction leaves it unchanged.
+
+The contract does not select the eventual persistence backend, WAL, filesystem format, or snapshot implementation.
 
 ### `luna-event`
 
@@ -164,7 +172,15 @@ Remains a thin client. Its final command grammar and backend transport remain in
 
 ## Integration testing
 
-Added a cross-domain contract test under `luna-app-runtime/tests/contracts.rs` covering composition of bundle metadata, exact-file root mapping, security authorization, and application runtime creation.
+Added a cross-domain contract test under `luna-app-runtime/tests/contracts.rs` covering composition of bundle metadata, logical root mapping, security authorization, and application runtime creation.
+
+Added focused `luna-state` contract tests covering:
+
+- basic round-trip persistence;
+- atomic multi-mutation transactions;
+- single revision advancement per non-empty transaction;
+- stale-revision rejection without partial writes;
+- empty transactions preserving the current revision.
 
 ## Current dependency direction
 
