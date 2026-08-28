@@ -6,7 +6,7 @@ Last updated: 2026-08-28
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The repository is now aligned with the architecture-driven crate map at the scaffold level.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has moved into architecture-driven API implementation.
 
 ### Phase status
 
@@ -17,84 +17,72 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | 1.3 | Accepted and consolidated |
 | 1.4 | Accepted and consolidated |
 | 1.5 | Accepted and consolidated |
-| 1.6 | Accepted through HZ and consolidated |
-| Repository/Cargo audit | Completed for current main baseline |
-| Crate map | Established and workspace-aligned |
-| API contracts | Current work |
+| 1.6 | Accepted through 1.6-HZ and consolidated |
+| Repository/Cargo audit | Completed |
+| Crate map | Established |
+| Foundation/domain API pass | **Completed for current first wave** |
+| Manager/runtime API pass | Pending |
+| Bundle Format v1 | Pending RFC-0002 design/acceptance |
 
-## Current repository structure
+## Current workspace
 
 ```text
-project-luna/
-├── Cargo.toml
-├── components/
-│   ├── luna-common/
-│   ├── luna-fs/
-│   ├── luna-root-mapping/
-│   ├── luna-config/
-│   ├── luna-security/
-│   ├── luna-state/
-│   ├── luna-event/
-│   ├── luna-bundle/
-│   ├── luna-app-manager/
-│   ├── luna-system-manager/
-│   ├── luna-update-manager/
-│   ├── luna-device-manager/
-│   ├── luna-kernel-manager/
-│   ├── luna-system-runtime/
-│   ├── luna-user-session/
-│   ├── luna-app-runtime/
-│   └── luna-cli/
-└── docs/
+luna-common
+luna-fs
+luna-root-mapping
+luna-config
+luna-security
+luna-state
+luna-event
+luna-bundle
+luna-app-manager
+luna-system-manager
+luna-update-manager
+luna-device-manager
+luna-kernel-manager
+luna-system-runtime
+luna-user-session
+luna-app-runtime
+luna-cli
 ```
 
-These crates are **scaffolds/boundary implementations only**. They do not claim completed subsystem functionality.
+The foundational/domain crates now have explicit contracts. Higher-level managers and runtimes remain intentionally smaller until their lower-level dependencies stabilize.
 
-`luna-boot`/`luna-boot.efi` and `luna-log` remain intentionally outside the workspace until their implementation boundaries require them. A future GUI crate is also deferred.
+## Completed API work
 
-## Foundation audit
+- `luna-common`: shared `BundleId`, `ComponentId`, `UserId`, and `Version` value types.
+- `luna-fs`: low-level filesystem operation boundary with host-backed implementation for tests.
+- `luna-root-mapping`: per-namespace exact-file logical-to-physical mapping model.
+- `luna-config`: system/user/application configuration scopes and application lookup precedence.
+- `luna-security`: central authorization policy boundary.
+- `luna-state`: durable state key/value boundary.
+- `luna-event`: event publication/subscription contracts without selecting a broker.
+- `luna-bundle`: internal bundle domain model without accepting `.lbp` wire/archive details.
+- `luna-user-session`: explicit user-session identity and lifecycle state model.
 
-`luna-common` remains intentionally small. Its useful value types were retained; subsystem-specific errors and behaviour do not belong there.
+## Important architectural boundaries
 
-`luna-fs` is the low-level filesystem layer.
+`luna-app-manager` manages application installation, update, removal, verification, migration and package import. It does not own normal application execution.
 
-`luna-root-mapping` is a separate logical mapping layer and does not own security policy.
+`luna-system-manager` owns system-state modeling/query responsibilities; `luna-update-manager` executes mutations.
 
-`luna-config` owns configuration representation and layered lookup/persistence contracts, not authorization.
+`luna-kernel-manager` owns kernel modeling/compatibility queries; update execution remains with `luna-update-manager`.
 
-`luna-state` is the durable state boundary; specialized boot metadata remains separate.
+`luna-security` remains the central policy authority. Filesystem/kernel primitives enforce the resulting restrictions.
 
-`luna-event` defines event contracts without committing Luna to Kafka or another broker.
-
-`luna-bundle` is only the bundle-domain boundary for now. RFC-0002 still defines the future Bundle Format v1 details.
-
-## Management boundaries
-
-- `luna-app-manager`: installation, update, removal, verification, migrations and package import; it does not own normal application execution.
-- `luna-system-manager`: owns the system state model and queries.
-- `luna-update-manager`: executes changes.
-- `luna-kernel-manager`: kernel inventory/metadata/compatibility model; change execution remains with update-manager.
-- `luna-device-manager`: device and volume lifecycle.
-- `luna-security`: central policy authority.
-
-## Runtime boundaries
-
-- `luna-system-runtime`: single system-wide runtime supervising UserSessions.
-- `luna-user-session`: UserSession domain boundary.
-- `luna-app-runtime`: application execution and ApplicationInstance lifecycle inside a UserSession.
-
-## User interface
-
-`luna-cli` is a thin client. Backend work is not duplicated in CLI code. Future GUI clients should use the same backend contracts.
+`luna-system-runtime` is the single system-wide runtime supervising multiple `UserSession` instances. `luna-app-runtime` owns application execution and `ApplicationInstance` lifecycle.
 
 ## Async direction
 
 Phase 1.6 accepted Tokio as the Rust async-runtime direction where an async runtime is actually required. Lower-level crates must not acquire Tokio merely by association.
 
+## Verification note
+
+The repository was audited and updated through the current API/domain pass. A local `cargo test --workspace` was not executable from the connected environment because the container could not resolve `github.com`; therefore this status does not claim a locally executed build/test run. Cargo documents `cargo check --workspace` and `cargo build --workspace` as workspace-wide operations, and resolver 3 is the current resolver for Rust 2024 virtual workspaces. citeturn265243search0turn265243search1
+
 ## Next work
 
-1. Finish and reconcile public API contracts for the foundation crates.
-2. Audit the scaffolded APIs against `docs/ARCHITECTURE.md` and remove accidental implementation commitments.
-3. Define persistence and error boundaries.
-4. Implement the first real crate only after its contract is explicit.
-5. Keep RFC-0002 as a separate design task; do not treat the current bundle scaffold as a Bundle Format v1 specification.
+1. Derive concrete manager/runtime APIs from the foundation contracts.
+2. Add integration tests across mapping, security, configuration, state, and runtime boundaries.
+3. Design and accept RFC-0002 / Bundle Format v1 separately.
+4. Keep `luna-boot` and boot-state implementation separate from normal userspace crates.
