@@ -8,17 +8,12 @@ use std::fmt;
 
 use luna_common::UserId;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SessionId(u128);
 
 impl SessionId {
-    pub const fn new(value: u128) -> Self {
-        Self(value)
-    }
-
-    pub const fn get(self) -> u128 {
-        self.0
-    }
+    pub const fn new(value: u128) -> Self { Self(value) }
+    pub const fn get(self) -> u128 { self.0 }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,24 +34,12 @@ pub struct UserSession {
 
 impl UserSession {
     pub fn new(id: SessionId, user: UserId) -> Self {
-        Self {
-            id,
-            user,
-            state: SessionState::Starting,
-        }
+        Self { id, user, state: SessionState::Starting }
     }
 
-    pub fn id(&self) -> SessionId {
-        self.id.clone()
-    }
-
-    pub fn user(&self) -> &UserId {
-        &self.user
-    }
-
-    pub fn state(&self) -> SessionState {
-        self.state
-    }
+    pub const fn id(&self) -> SessionId { self.id }
+    pub fn user(&self) -> &UserId { &self.user }
+    pub const fn state(&self) -> SessionState { self.state }
 
     pub fn transition(&mut self, next: SessionState) -> Result<(), SessionError> {
         let valid = matches!(
@@ -69,14 +52,9 @@ impl UserSession {
                 | (SessionState::Restricted, SessionState::Ending)
                 | (SessionState::Ending, SessionState::Ended)
         );
-
         if !valid {
-            return Err(SessionError::InvalidTransition {
-                from: self.state,
-                to: next,
-            });
+            return Err(SessionError::InvalidTransition { from: self.state, to: next });
         }
-
         self.state = next;
         Ok(())
     }
@@ -84,10 +62,7 @@ impl UserSession {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionError {
-    InvalidTransition {
-        from: SessionState,
-        to: SessionState,
-    },
+    InvalidTransition { from: SessionState, to: SessionState },
 }
 
 impl fmt::Display for SessionError {
@@ -111,21 +86,11 @@ mod tests {
     fn session_has_explicit_lifecycle() {
         let mut session = UserSession::new(SessionId::new(1), UserId::from("alice"));
         assert_eq!(session.state(), SessionState::Starting);
-        session
-            .transition(SessionState::Active)
-            .expect("activate session");
-        session
-            .transition(SessionState::Restricted)
-            .expect("restrict session");
-        session
-            .transition(SessionState::Active)
-            .expect("restore session");
-        session
-            .transition(SessionState::Ending)
-            .expect("end session");
-        session
-            .transition(SessionState::Ended)
-            .expect("finish session");
+        session.transition(SessionState::Active).expect("activate session");
+        session.transition(SessionState::Restricted).expect("restrict session");
+        session.transition(SessionState::Active).expect("restore session");
+        session.transition(SessionState::Ending).expect("end session");
+        session.transition(SessionState::Ended).expect("finish session");
         assert_eq!(session.state(), SessionState::Ended);
     }
 }
