@@ -4,11 +4,11 @@
 **Source of truth:** `docs/ARCHITECTURE.md`
 **Related:** `docs/development/API-CONTRACTS-1.6.md`, `docs/architecture/CRATE-MAP.md`
 
-This document records the first public API boundaries for the management and runtime layer. It deliberately keeps implementation details out of the domain contracts.
+This document records the first public API boundaries for the management and runtime layer. It deliberately keeps OS-specific implementation details out of the domain contracts.
 
 ## 1. `luna-system-manager`
 
-Owns the system image state model and query side only. It does not perform update mutations.
+Owns the System Image state model and query side only. It does not perform update mutations.
 
 Implemented concepts:
 
@@ -16,7 +16,7 @@ Implemented concepts:
 - `SystemState` — current and factory image references;
 - `SystemQuery` — read/query boundary.
 
-The model deliberately keeps `current` and `factory` separate.
+The model deliberately keeps `current` and `factory` separate. The factory image is the original installed system image and is not an ordinary retention candidate.
 
 ## 2. `luna-kernel-manager`
 
@@ -25,10 +25,10 @@ Owns kernel inventory/selection queries. It does not perform installation, updat
 Implemented concepts:
 
 - `KernelRef`;
-- `KernelSelection` — current kernel plus the previous kernel available for fallback;
+- `KernelSelection` — current kernel, previous kernel, and immutable factory kernel;
 - `KernelQuery`.
 
-The compatibility algorithm itself remains to be connected to System Image manifests and the boot specification.
+The compatibility algorithm remains to be connected to System Image manifests and the boot specification. The factory kernel is explicitly modeled because Factory is an image+kernel recovery point.
 
 ## 3. `luna-update-manager`
 
@@ -41,7 +41,7 @@ Implemented concepts:
 - `UpdateError`;
 - `UpdateExecutor`.
 
-The plan represents requested changes. The executor performs them. Desired system/kernel/application state remains owned by the relevant manager/model.
+The plan represents requested changes. The executor performs mutations. Desired state remains owned by the relevant system/application/kernel model.
 
 ## 4. `luna-app-manager`
 
@@ -62,7 +62,7 @@ Supported operation categories in the current baseline:
 - verification;
 - migration.
 
-The final package-import model for `.deb` / `.rpm`, bundle assembly, dependency extraction, and migration semantics remains to be expanded after the bundle contract is mature.
+Package-import (`.deb` / `.rpm`), bundle assembly, dependency extraction, and manifest analysis remain bounded by the later bundle specification.
 
 ## 5. `luna-device-manager`
 
@@ -86,10 +86,10 @@ Implemented concepts:
 
 - `RuntimeState`;
 - `SystemRuntime`;
-- a stable event type for session state changes;
-- explicit consumption of the `luna-event` and `luna-user-session` boundaries.
+- a stable session-state event type;
+- explicit consumption of `luna-event` and `luna-user-session` boundaries.
 
-The runtime supervises multiple UserSessions. It is not duplicated per user.
+The runtime supervises multiple UserSessions and is not duplicated per user.
 
 ## 7. `luna-user-session`
 
@@ -115,51 +115,68 @@ Implemented concepts:
 - `ApplicationInstance`;
 - `ApplicationRuntime`.
 
-The runtime receives a bundle manifest and namespace mapping, then operates under the security authority. It does not install/update/remove applications.
+The runtime receives a bundle manifest and namespace mapping and can consult the Security authority. It does not install, update, or remove applications.
 
 ## 9. `luna-cli`
 
-Remains a thin client. Final command tree and alias grammar are intentionally not frozen yet.
+Remains a thin client. Final command tree, alias grammar, and IPC transport are intentionally not frozen.
 
-The architecture permits user-friendly aliases such as `app i`, `sys u`, and `dev list`, but the exact parser/service transport is a later contract.
+The architecture permits user-friendly aliases such as `app i`, `sys u`, and `dev list`, while routing to the same backend services that a GUI will use.
 
-## 10. Dependency direction
+## 10. Integration contract
+
+The current API boundaries are intended to compose in this direction:
 
 ```text
-                clients
-           ┌──────┴──────┐
-           ▼             ▼
-      luna-cli        future GUI
-           │             │
-           └──────┬──────┘
-                  ▼
-          management APIs
-                  │
-      ┌───────────┼───────────┐
-      ▼           ▼           ▼
- system-manager kernel-manager device-manager
-      │           │           │
-      └───────┬───┴──────┬────┘
-              ▼          ▼
-       update-manager   security
-              │
-              ▼
-         runtime layer
-        ┌─────┴─────┐
-        ▼           ▼
- system-runtime  UserSession
-                    │
-                    ▼
-               app-runtime
-                    │
-             root-mapping
-                    │
-                   fs
+BundleManifest
+      │
+      ▼
+MappingTable ───────► ApplicationRuntime
+      │                       │
+      ▼                       ▼
+   luna-fs              Security policy
+                              │
+                              ▼
+                         Decision
+
+UserSession ──────────► ApplicationInstance
+      ▲                       │
+      │                       ▼
+SystemRuntime ─────── supervision
+
+SystemManager ───────► desired/query state
+KernelManager ───────► kernel state
+AppManager ──────────► application lifecycle requests
+DeviceManager ───────► device/volume state
+UpdateManager ───────► mutation execution
 ```
 
-The diagram is conceptual. Exact IPC and process separation remain implementation decisions.
+No line in this diagram implies that the crates must all live in one process. Process separation and IPC remain later implementation decisions.
 
-## 11. Explicitly deferred
+## 11. Current API status
+
+The following contracts are now explicit enough for integration-test design:
+
+- shared identity/version values;
+- low-level filesystem operations;
+- per-namespace exact-file mapping;
+- layered configuration lookup;
+- security authorization requests;
+- durable generic state;
+- event publication/subscription;
+- bundle domain metadata/resources;
+- user-session lifecycle;
+- system image query state;
+- kernel current/previous/factory state;
+- update plans;
+- application lifecycle operations;
+- device/volume query state;
+- system runtime supervision;
+- application instance lifecycle.
+
+These are **API/domain baselines**, not declarations that the operating system is implemented.
+
+## 12. Explicitly deferred
 
 - actual persistence backends;
 - update transaction protocol;
