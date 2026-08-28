@@ -1,74 +1,35 @@
-//! UEFI memory management
+//! UEFI memory-map helpers.
 
 use alloc::vec::Vec;
-use uefi::prelude::*;
-use uefi::table::boot::{MemoryDescriptor, MemoryType};
+
+use uefi::boot;
+use uefi::mem::memory_map::{MemoryMapOwned, MemoryType};
+
 use crate::error::{BootError, BootResult};
 
-/// Memory map information for kernel
-#[derive(Debug)]
-pub struct MemoryMap {
-    pub descriptors: Vec<MemoryDescriptor>,
-    pub map_key: usize,
-    pub descriptor_size: usize,
-    pub descriptor_version: u32,
+/// Obtain a snapshot using uefi-rs' allocation-safe memory-map API.
+///
+/// The snapshot is only valid while boot services remain active. For the final
+/// handoff use `boot::exit_boot_services`, whose returned map is the final map.
+pub fn current_memory_map() -> BootResult<MemoryMapOwned> {
+    boot::memory_map(MemoryType::LOADER_DATA).map_err(|_| BootError::UefiError(uefi::Status::ABORTED))
 }
 
-/// Get UEFI memory map
-pub fn get_memory_map(boot_services: &BootServices) -> BootResult<MemoryMap> {
-    let mut map_size = 0;
-    let mut map_key = 0;
-    let mut descriptor_size = 0;
-    let mut descriptor_version = 0;
-
-    // First call to get required size
-    let _ = boot_services.memory_map_size();
-
-    // Allocate buffer (over-allocate to be safe)
-    let buffer_size = map_size + 2 * descriptor_size;
-    let mut buffer = vec![0u8; buffer_size];
-
-    // Get actual memory map
-    let status = unsafe {
-        boot_services.get_memory_map(
-            &mut buffer,
-            &mut map_size,
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        )
-    };
-
-    if status.is_err() {
-        return Err(BootError::MemoryAllocationFailed);
-    }
-
-    // Parse memory descriptors
-    let num_descriptors = map_size / descriptor_size;
-    let mut descriptors = Vec::with_capacity(num_descriptors);
-
-    for i in 0..num_descriptors {
-        let offset = i * descriptor_size;
-        let descriptor = unsafe {
-            &*(buffer.as_ptr().add(offset) as *const MemoryDescriptor)
-        };
-        descriptors.push(*descriptor);
-    }
-
-    Ok(MemoryMap {
-        descriptors,
-        map_key,
-        descriptor_size,
-        descriptor_version,
-    })
+/// Copy only the scalar information needed by code that must not retain UEFI
+/// references across the ExitBootServices boundary.
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryRegion {
+    pub start: u64,
+    pub pages: u64,
+    pub ty: MemoryType,
 }
 
-/// Exit UEFI boot services and return memory map
-pub fn exit_boot_services(
-    boot_services: BootServices,
-    memory_map: &MemoryMap,
-) -> BootResult<()> {
-    // This is a destructive operation - after this, UEFI boot services are no longer available
-    let _ = unsafe { boot_services.exit_boot_services(memory_map.map_key) };
-    Ok(())
+pub fn snapshot_regions(map: &MemoryMapOwned) -> Vec<MemoryRegion> {
+    map.entries()
+        .map(|d| MemoryRegion {
+            start: d.phys_start,
+            pages: d.page_count,
+            ty: d.ty,
+        })
+        .collect()
 }
