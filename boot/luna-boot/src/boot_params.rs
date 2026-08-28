@@ -26,7 +26,7 @@ impl BootParams {
     pub fn set_loadflags(&mut self, value: u8) { self.bytes[0x211] = value; }
 
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
-        if address > u32::MAX {
+        if address > u32::MAX as u64 {
             self.bytes[0x0c8..0x0cc].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
         }
         self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
@@ -34,7 +34,7 @@ impl BootParams {
     }
 
     pub fn set_ramdisk(&mut self, address: u64, size: u64) -> BootResult<()> {
-        if address > u32::MAX || size > u32::MAX {
+        if address > u32::MAX as u64 || size > u32::MAX as u64 {
             self.bytes[0xc0..0xc4].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
             self.bytes[0xc4..0xc8].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
         }
