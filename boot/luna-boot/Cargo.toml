@@ -6,6 +6,10 @@ license = "Apache-2.0"
 authors = ["Project Luna Contributors"]
 description = "Minimal UEFI bootloader for Project Luna"
 
+# Keep the bootloader as a standalone Cargo package. It intentionally does not
+# belong to the normal Project Luna userspace workspace.
+[workspace]
+
 [dependencies]
 uefi = "0.28"
 uefi-services = "0.24"
