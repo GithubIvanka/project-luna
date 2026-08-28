@@ -3,5 +3,72 @@
 version = 4
 
 [[package]]
+name = "luna-app-manager"
+version = "0.1.0"
+
+[[package]]
+name = "luna-app-runtime"
+version = "0.1.0"
+
+[[package]]
+name = "luna-bundle"
+version = "0.1.0"
+dependencies = [
+ "luna-common",
+]
+
+[[package]]
+name = "luna-cli"
+version = "0.1.0"
+
+[[package]]
 name = "luna-common"
+version = "0.1.0"
+
+[[package]]
+name = "luna-config"
+version = "0.1.0"
+
+[[package]]
+name = "luna-device-manager"
+version = "0.1.0"
+
+[[package]]
+name = "luna-event"
+version = "0.1.0"
+
+[[package]]
+name = "luna-fs"
+version = "0.1.0"
+
+[[package]]
+name = "luna-kernel-manager"
+version = "0.1.0"
+
+[[package]]
+name = "luna-root-mapping"
+version = "0.1.0"
+
+[[package]]
+name = "luna-security"
+version = "0.1.0"
+
+[[package]]
+name = "luna-state"
+version = "0.1.0"
+
+[[package]]
+name = "luna-system-manager"
+version = "0.1.0"
+
+[[package]]
+name = "luna-system-runtime"
+version = "0.1.0"
+
+[[package]]
+name = "luna-update-manager"
+version = "0.1.0"
+
+[[package]]
+name = "luna-user-session"
 version = "0.1.0"
