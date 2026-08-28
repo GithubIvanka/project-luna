@@ -5,9 +5,6 @@ extern crate alloc;
 
 use uefi::prelude::*;
 
-#[global_allocator]
-static GLOBAL_ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
-
 mod block;
 mod boot;
 mod boot_key;
