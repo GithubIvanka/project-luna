@@ -5,6 +5,9 @@ extern crate alloc;
 
 use uefi::prelude::*;
 
+#[global_allocator]
+static GLOBAL_ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
+
 mod block;
 mod boot;
 mod boot_key;
@@ -23,7 +26,7 @@ mod paging;
 mod target;
 
 #[entry]
-fn efi_main(_image_handle: Handle, _system_table: SystemTable<Boot>) -> Status {
+fn efi_main() -> Status {
     uefi::helpers::init().expect("failed to initialize UEFI services");
     match boot::boot_flow() {
         Ok(()) => Status::SUCCESS,
