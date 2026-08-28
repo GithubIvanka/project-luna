@@ -6,7 +6,7 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 Phases **1.1–1.6** are accepted/consolidated, with Phase 1.6 complete through **1.6-HZ**.
 
-The repository audit and architecture-driven crate map are complete. The first foundation/domain API pass is also complete.
+Repository audit, crate map, foundation/domain APIs, and the first manager/runtime API baseline are complete.
 
 ## Sequence
 
@@ -19,7 +19,9 @@ Concrete crate map
         ↓
 Foundation/domain API contracts  ← COMPLETED
         ↓
-Manager/runtime API contracts     ← CURRENT
+Manager/runtime API contracts     ← COMPLETED BASELINE
+        ↓
+Integration contract/testing      ← CURRENT
         ↓
 RFC/specification work where required
         ↓
@@ -36,7 +38,7 @@ The actual `main` branch was audited and aligned with the accepted architecture.
 
 ### 2. `luna-common` audit — COMPLETED
 
-`luna-common` now contains only small shared value types. Subsystem-specific errors, runtime state, security policy, filesystem operations and bundle semantics remain outside the crate.
+`luna-common` contains only small shared identity/version value types. Subsystem-specific errors, runtime state, security policy, filesystem operations and bundle semantics remain outside the crate.
 
 ### 3. Concrete crate map — COMPLETED / SCAFFOLDED
 
@@ -58,9 +60,9 @@ The first explicit API pass covers:
 - `luna-bundle` internal bundle domain model;
 - `luna-user-session` lifecycle model.
 
-### 5. Manager/runtime API contracts — CURRENT
+### 5. Manager/runtime API contracts — COMPLETED BASELINE
 
-Next define concrete public contracts for:
+Initial contracts now exist for:
 
 - `luna-system-manager`;
 - `luna-kernel-manager`;
@@ -68,12 +70,22 @@ Next define concrete public contracts for:
 - `luna-app-manager`;
 - `luna-device-manager`;
 - `luna-system-runtime`;
-- `luna-app-runtime`;
-- `luna-cli`.
+- `luna-app-runtime`.
 
-Their APIs must consume the established lower-level contracts rather than moving higher-level responsibilities downward.
+`luna-cli` remains a thin client whose final grammar and backend transport are intentionally not frozen.
 
-### 6. RFC/specification work
+### 6. Integration contract/testing — CURRENT
+
+The next work is to test boundaries together rather than merely testing isolated types. Focus first on:
+
+- logical mapping + security authorization;
+- configuration precedence + user/application identity;
+- bundle manifest + mapping;
+- session + application-instance lifecycle;
+- manager query models + update plans;
+- event contracts across runtime boundaries.
+
+### 7. RFC/specification work
 
 `RFC-0001` formalizes the architectural baseline.
 
@@ -81,15 +93,15 @@ Their APIs must consume the established lower-level contracts rather than moving
 
 System Image, kernel and boot specifications remain separate from Bundle Format.
 
-### 7. Prototype
+### 8. Prototype
 
-Prototype the highest-risk boundaries first, especially logical-root/materialization, bundle parsing/validation, resource control, and boot compatibility where appropriate.
+Prototype the highest-risk boundaries first, especially logical-root/materialization, bundle parsing/validation, resource control, persistence/update transactions, and boot compatibility.
 
-### 8. Implementation
+### 9. Implementation
 
-Implement one component at a time under the Source of Truth and its API contract.
+Implement one subsystem at a time under the Source of Truth and its API contract.
 
-### 9. Integration
+### 10. Integration
 
 Validate end-to-end behaviour against the canonical runtime, storage, security, state and recovery models.
 
