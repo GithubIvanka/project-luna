@@ -2,28 +2,56 @@
 
 ## Stage 0 — contract
 
-Accepted decisions are recorded in `BOOT-CONTRACT.md`:
+Accepted decisions:
 
-- system partition: ext4;
-- kernel: Linux x86_64 bzImage;
-- boot menu: non-blocking B check, no two-second delay;
-- target: System Image manifest + compatible kernel;
-- normal failure: Factory pair;
-- Factory failure: Recovery;
+- `system` is ext4;
+- kernel is a Linux x86_64 `bzImage`;
+- boot menu is entered only when B is already present in the UEFI input queue; there is no two-second delay;
+- a resolved target is a System Image plus a compatible kernel and optional initramfs;
+- normal boot failure falls back only to the immutable Factory pair;
 - System Image mounting belongs to early userspace, not `luna-boot`.
+
+The exact physical representation of `current` and the final manifest schema remain separate architecture work and are therefore not silently invented here.
 
 ## Stage 1 — UEFI foundation
 
-The foundation must identify the boot device, locate the system partition, provide a read-only ext4 block-device reader, prepare all allocations before `ExitBootServices`, and perform a final memory-map/exit sequence without post-exit UEFI calls.
+Implemented:
+
+- modern `uefi` 0.40 API;
+- boot-device discovery from the loaded image device path;
+- parent-disk Block I/O discovery;
+- GPT discovery by canonical `system` partition name;
+- read-only ext4 superblock, inode, directory and extent reader;
+- all loader allocations use UEFI `LOADER_DATA` pages;
+- final memory map and `ExitBootServices` use `uefi::boot::exit_boot_services`.
 
 ## Stage 2 — selection
 
-Selection resolves the current manifest, validates the image/kernel architecture and compatibility, handles the immediate B menu request, and implements normal → Factory → Recovery fallback.
+Implemented in prototype form:
+
+- immediate B sampling with no wait;
+- target model contains System Image + kernel + initramfs;
+- automatic fallback is Factory only.
+
+Still deliberately provisional:
+
+- manifest discovery and `current` physical format;
+- full Boot Menu recovery/USB actions;
+- final Recovery environment handoff.
 
 ## Stage 3 — Linux handoff
 
-The loader validates the bzImage setup header, allocates the kernel/boot_params/command-line/initrd regions, creates the Linux zero page and E820 data, exits boot services, establishes the required 64-bit execution environment, and jumps to the kernel entry point.
+Implemented:
 
-### Current implementation state
+- Linux x86 boot-protocol header parsing with current documented offsets;
+- relocatable 64-bit `bzImage` validation;
+- kernel placement below 4 GiB;
+- zero page and command line allocation;
+- initramfs allocation;
+- E820 population from the final UEFI map;
+- loader-owned identity page tables covering the first 64 GiB;
+- final x86_64 assembly transition with flat Linux boot GDT and `RSI = boot_params`.
 
-The repository now contains the contracts and parsing/data layers for ext4, Linux setup headers, boot_params, E820 conversion, and the post-ExitBootServices handoff boundary. The remaining work is the hardware-facing ext4 block reader, real UEFI allocation/memory-map integration, complete target manifest parser, initramfs loading, and the final x86_64 assembly transition. These are intentionally not represented as fake working implementations.
+## Test status
+
+The repository contains the source-side OVMF/QEMU harness. A real QEMU run still has to be performed on a machine with QEMU + OVMF and a test `bzImage`, initramfs and SquashFS. This environment cannot execute QEMU against the user's local firmware/files.
