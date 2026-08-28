@@ -84,14 +84,18 @@ Per-namespace logical filesystem mapping.
 - `MappingTable`
 - `MappingError`
 
-A `MappingTable` belongs to one logical namespace. A rule maps an **individual logical file** to one backing path. Directory-wide implicit mapping is deliberately not part of this first contract.
+A `MappingTable` belongs to one logical namespace. Individual file mappings are the normal case. Explicit whole-directory/subtree mappings are also permitted when required by a semantic mapping class, for example a library subtree such as GTK resources. Directory mappings are therefore not an unrestricted fallback mechanism and must still pass validation/conflict checks.
 
-Example concept:
+Example concepts:
 
 ```text
 /bin/app
     ↓
 DATA/system/apps/example/resources/bin/app
+
+/lib/gtk
+    ↓
+DATA/system/apps/example/resources/lib/gtk
 ```
 
 Each application namespace may have its own mapping table. Authorization is not evaluated here; `luna-security` owns policy.
@@ -147,16 +151,25 @@ No global `root`/`sudo` abstraction is introduced by this crate.
 ## 7. `luna-state`
 
 ### Responsibility
-Durable state boundary.
+Durable state boundary with atomic transaction and optimistic-concurrency contracts.
 
 ### Implemented concepts
 
 - `StateKey`
 - `StateValue`
+- `Revision`
+- `StateMutation`
+- `StateTransaction`
 - `StateError`
 - `StateStore`
 
-This crate is intentionally generic. Specialized state remains with its owning subsystem:
+`StateStore` remains synchronous. Higher layers own async orchestration and synchronization around store instances.
+
+A store exposes a monotonically increasing global `Revision`. A transaction supplies the revision observed by its caller; a mismatch returns `StateError::RevisionConflict` and must not partially apply the transaction. A successful non-empty transaction advances the store revision exactly once. Empty transactions do not advance it.
+
+The contract deliberately does not prescribe a database, WAL, Btrfs snapshot, file format, or other persistence backend. A backend must provide atomic all-or-nothing transaction semantics.
+
+Specialized state remains with its owning subsystem:
 
 - boot state → boot subsystem;
 - configuration → `luna-config`;
@@ -272,10 +285,10 @@ Completed in this API pass:
 
 - `luna-common` value-type foundation refined;
 - `luna-fs` low-level contract implemented;
-- `luna-root-mapping` exact-file mapping contract implemented;
+- `luna-root-mapping` logical mapping contract implemented;
 - `luna-config` layered configuration contract implemented;
 - `luna-security` policy contract implemented;
-- `luna-state` persistence boundary implemented;
+- `luna-state` persistence boundary implemented with transactions and revision-based conflict detection;
 - `luna-event` event boundary implemented;
 - `luna-bundle` domain model implemented without final `.lbp` wire format;
 - `luna-user-session` lifecycle model implemented.
