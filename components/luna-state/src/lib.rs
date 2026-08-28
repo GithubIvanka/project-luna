@@ -61,6 +61,15 @@ impl Revision {
     pub const fn value(self) -> u64 {
         self.0
     }
+
+    /// Returns the next revision.
+    ///
+    /// Saturation avoids wrapping the revision counter. A backend that ever
+    /// reaches `u64::MAX` must treat further mutation as an implementation
+    /// error rather than reusing an old revision.
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
 }
 
 /// A single mutation inside an atomic state transaction.
@@ -216,13 +225,13 @@ mod tests {
 
         fn set(&mut self, key: StateKey, value: StateValue) -> Result<(), StateError> {
             self.values.insert(key, value);
-            self.revision = Revision::from(self.revision.value() + 1);
+            self.revision = self.revision.next();
             Ok(())
         }
 
         fn remove(&mut self, key: &StateKey) -> Result<(), StateError> {
             self.values.remove(key);
-            self.revision = Revision::from(self.revision.value() + 1);
+            self.revision = self.revision.next();
             Ok(())
         }
 
@@ -249,14 +258,8 @@ mod tests {
             let mut next = self.values.clone();
             Self::apply(&mut next, &transaction);
             self.values = next;
-            self.revision = Revision::from(self.revision.value() + 1);
+            self.revision = self.revision.next();
             Ok(self.revision)
-        }
-    }
-
-    impl From<u64> for Revision {
-        fn from(value: u64) -> Self {
-            Self(value)
         }
     }
 
@@ -289,7 +292,7 @@ mod tests {
             .transaction(base, transaction)
             .expect("transaction should commit");
 
-        assert_eq!(next.value(), base.value() + 1);
+        assert_eq!(next, base.next());
         assert_eq!(store.get(&key_a).unwrap().unwrap().as_slice(), b"one");
         assert_eq!(store.get(&key_b).unwrap().unwrap().as_slice(), b"two");
     }
