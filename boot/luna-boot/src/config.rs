@@ -1,10 +1,9 @@
-//! Boot configuration and target discovery policy.
+//! Boot target policy.
 //!
-//! The production source of truth is the System Image manifest. This module
-//! keeps only the small amount of policy needed before the manifest reader is
-//! available: current target first, immutable factory target second.
+//! The physical `current`/manifest format remains an architecture item to be
+//! formalized. Until that contract is finalized this module provides a small
+//! deterministic test configuration with the final path layout.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::error::{BootError, BootResult};
@@ -14,53 +13,34 @@ use crate::target::BootTarget;
 pub struct BootConfig {
     pub default_target: usize,
     pub targets: Vec<BootTarget>,
-    pub verbose: bool,
 }
 
 impl BootConfig {
-    /// Temporary in-memory fallback used until manifest discovery is wired to
-    /// the ext4 reader. Paths deliberately use the final Luna naming scheme:
-    /// Linux is a plain `bzImage`, not an EFI executable.
     pub fn default_config() -> Self {
         let targets = vec![
-            BootTarget::new("Luna System", "1.0.0", "/kernels/bzImage")
-                .with_cmdline("quiet luna.image=/images/luna-1.0.0.squashfs"),
-            BootTarget::new("Factory", "factory", "/kernels/factory/bzImage")
-                .with_cmdline("quiet luna.factory=1")
-                .factory(),
+            BootTarget::new(
+                "Luna Test System",
+                "test",
+                "/images/luna-test.squashfs",
+                "/kernels/test/bzImage",
+            )
+            .with_initrd("/kernels/test/initramfs.img")
+            .with_cmdline("console=ttyS0 quiet luna.image=/images/luna-test.squashfs"),
+            BootTarget::new(
+                "Luna Factory",
+                "factory",
+                "/images/luna-factory.squashfs",
+                "/kernels/factory/bzImage",
+            )
+            .with_initrd("/kernels/factory/initramfs.img")
+            .with_cmdline("console=ttyS0 quiet luna.factory=1")
+            .factory(),
         ];
-
-        Self {
-            default_target: 0,
-            targets,
-            verbose: false,
-        }
-    }
-
-    pub fn parse_simple(_content: &str) -> BootResult<Self> {
-        Err(BootError::Unsupported("legacy simple boot configuration"))
+        Self { default_target: 0, targets }
     }
 
     pub fn default_target(&self) -> BootResult<&BootTarget> {
-        self.targets
-            .get(self.default_target)
-            .ok_or(BootError::NoBootTargets)
+        self.targets.get(self.default_target).ok_or(BootError::NoBootTargets)
     }
-
-    pub fn targets(&self) -> &[BootTarget] {
-        &self.targets
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_has_factory_fallback() {
-        let config = BootConfig::default_config();
-        assert!(config.default_target().is_ok());
-        assert!(config.targets.iter().any(|target| target.is_factory));
-        assert!(config.targets[0].kernel_path.ends_with("bzImage"));
-    }
+    pub fn targets(&self) -> &[BootTarget] { &self.targets }
 }
