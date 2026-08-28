@@ -92,11 +92,11 @@ impl FileSystem for HostFileSystem {
     }
 }
 
-/// Returns a normalized owned path without resolving it through the host OS.
+/// Returns an owned copy of a path without resolving or normalizing it through the host OS.
 ///
-/// This is intentionally only a value helper. It does not implement Luna's
-/// logical-root mapping or authorization rules.
-pub fn owned_path(path: impl AsRef<Path>) -> PathBuf {
+/// Lexical logical-path normalization belongs to the mapping layer; this helper
+/// intentionally performs no semantic normalization.
+pub fn to_owned_path(path: impl AsRef<Path>) -> PathBuf {
     path.as_ref().to_path_buf()
 }
 
