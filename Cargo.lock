@@ -13,7 +13,11 @@ dependencies = [
 name = "luna-app-runtime"
 version = "0.1.0"
 dependencies = [
+ "luna-bundle",
  "luna-common",
+ "luna-root-mapping",
+ "luna-security",
+ "luna-user-session",
 ]
 
 [[package]]
@@ -93,6 +97,8 @@ name = "luna-system-runtime"
 version = "0.1.0"
 dependencies = [
  "luna-common",
+ "luna-event",
+ "luna-user-session",
 ]
 
 [[package]]
