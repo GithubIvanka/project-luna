@@ -1,5 +1,6 @@
 //! Linux bzImage loader and physical-memory preparation.
 
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ptr;
 
