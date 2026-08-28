@@ -6,7 +6,7 @@ Last updated: 2026-08-28
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has moved into architecture-driven API implementation.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has moved into architecture-driven API implementation and integration-contract hardening.
 
 ### Phase status
 
@@ -20,10 +20,13 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | 1.6 | Accepted through 1.6-HZ and consolidated |
 | Repository/Cargo audit | Completed |
 | Crate map | Established |
-| Foundation/domain API pass | **Completed** |
-| Manager/runtime API baseline | **Completed** |
-| Bundle Format v1 | Pending RFC-0002 design/acceptance |
-| Integration test pass | Next |
+| Foundation/domain API pass | Completed |
+| Manager/runtime API baseline | Completed |
+| Integration-contract hardening | **Completed as a prototype pass** |
+| Namespace/materialization prototype | **Completed as a pure contract prototype** |
+| Persistence/update transaction prototype | **Completed as an in-memory atomic prototype** |
+| Bundle Format v1 | RFC-0002 remains Draft / Proposal; implementation notes added |
+| luna-boot | Parallel prototype work; outside userspace workspace |
 
 ## Current workspace
 
@@ -49,30 +52,23 @@ luna-cli
 
 These crates are a mix of implemented domain/API contracts and intentionally incomplete subsystem scaffolds. API presence must not be confused with a finished operating-system implementation.
 
-## API work completed in the current pass
+## Integration hardening completed
 
-Foundation/domain contracts:
+- `luna-root-mapping`: deterministic namespace materialization contract added; no kernel mounts are performed.
+- `luna-security`: explicit-grant `StaticPolicyAuthority` added for deterministic policy tests; no privileged/root-user abstraction introduced.
+- `luna-bundle`: logical/source path validation hardened against traversal, absolute payload sources and duplicate logical resources.
+- `luna-config`: existing application precedence remains user/application override → application default → system default.
+- `luna-user-session` + `luna-app-runtime`: application launch prototype now requires an active session and a valid mapping for every declared resource; instance stop/failure lifecycle is explicit.
+- `luna-event`: deterministic in-memory FIFO delivery prototype added; broker/async transport remains a higher-level concern.
+- `luna-state`: public `MemoryStateStore` added with atomic revision-checked transactions and validation before mutation.
+- `luna-update-manager`: transactional executor prototype records an update plan through one atomic state transaction; real image/bundle mutation remains deferred.
+- RFC-0002: implementation-boundary companion notes added without silently accepting the proposed `.lbp` wire format.
 
-- `luna-common`: `BundleId`, `ComponentId`, `UserId`, `Version`.
-- `luna-fs`: low-level filesystem contract and host-backed implementation for tests.
-- `luna-root-mapping`: per-namespace exact-file logical-to-physical mappings.
-- `luna-config`: system/user/application scopes and application precedence.
-- `luna-security`: central policy authority and authorization request model.
-- `luna-state`: durable state key/value boundary.
-- `luna-event`: event type/publication/subscription contracts.
-- `luna-bundle`: internal bundle domain model; `.lbp` wire/archive format remains deferred.
-- `luna-user-session`: session identity and lifecycle model.
+## CI / supply-chain
 
-Manager/runtime API baseline:
-
-- `luna-system-manager`: current/factory System Image state query model.
-- `luna-kernel-manager`: current/previous kernel selection query model.
-- `luna-update-manager`: update operation/plan/execution model.
-- `luna-app-manager`: application lifecycle operation model.
-- `luna-device-manager`: device/volume query model.
-- `luna-system-runtime`: single system-wide supervision boundary.
-- `luna-app-runtime`: ApplicationInstance lifecycle and integration boundary.
-- `luna-cli`: remains a thin client; final command grammar is not frozen.
+- Rust CI now checks formatting, workspace check/test, clippy, release build and the separate `luna-boot` UEFI target.
+- `luna-boot.efi` is uploaded as a CI artifact.
+- The SLSA workflow now hashes real Luna release subjects instead of demonstration `artifact1`/`artifact2` files and references the versioned generic generator.
 
 ## Important boundaries
 
@@ -86,17 +82,28 @@ Manager/runtime API baseline:
 
 `luna-system-runtime` is the single system-wide runtime supervising multiple `UserSession` instances. `luna-app-runtime` owns application execution and `ApplicationInstance` lifecycle.
 
-## Async direction
+## Explicitly still deferred
 
-Tokio remains the accepted Rust async-runtime direction where an async runtime is actually required. Lower-level crates should not acquire Tokio merely by association.
+- production Linux namespace/mount implementation;
+- durable on-disk state/WAL/snapshot backend;
+- real update checkpoint/rollback protocol;
+- final IPC transport;
+- final async event broker/channel implementation;
+- System Image specification and implementation;
+- kernel compatibility resolver implementation;
+- boot-state metadata;
+- production `luna-boot.efi` Linux boot protocol handoff;
+- final `.lbp` wire/archive implementation and RFC-0002 acceptance;
+- signature/trust verification implementation;
+- final CLI grammar and GUI.
 
 ## Verification note
 
-The repository was updated through the foundation and manager/runtime API passes. A local `cargo test --workspace` was not executable from the connected environment because the container could not resolve `github.com`; this status therefore makes no claim of a locally executed build/test run. Cargo documents workspace-wide build/check operations, and resolver 3 is the current resolver for Rust 2024 virtual workspaces. citeturn265243search0turn265243search1
+Changes were made directly in the repository. The connected environment used for this session does not provide a reliable local Cargo execution path, so no successful local `cargo test --workspace` claim is made. GitHub Actions is now configured to perform the workspace and UEFI builds on push/PR.
 
 ## Next work
 
-1. Add integration tests across the new crate boundaries.
-2. Review the manager/runtime API baseline against `docs/ARCHITECTURE.md` and remove any accidental overcommitments.
-3. Design and accept RFC-0002 / Bundle Format v1 separately.
-4. Begin higher-risk prototypes: namespace/materialization, persistence, update transactions, and boot compatibility.
+1. Review CI results and fix any compiler/API incompatibilities surfaced by the new checks.
+2. Promote the pure prototypes only when their backend contracts are accepted.
+3. Resolve the explicit RFC-0002 decision list before calling Bundle Format v1 Accepted.
+4. Continue toward real namespace, persistence/update, and boot compatibility implementations.
