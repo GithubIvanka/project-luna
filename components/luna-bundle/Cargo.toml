@@ -1,0 +1,7 @@
+[package]
+name = "luna-bundle"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+luna-common = { path = "../luna-common" }
