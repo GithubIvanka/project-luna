@@ -22,7 +22,6 @@ luna_linux_entry:
     mov %ax, %fs
     mov %ax, %gs
     mov %rdi, %rax
-    /* Linux 64-bit boot protocol: RSI = boot_params. */
     pushq $0x10
     pushq %rax
     lretq
@@ -35,11 +34,10 @@ luna_boot_gdt:
 luna_boot_gdt_ptr:
     .word 0x17
     .quad luna_boot_gdt
-
     .size luna_linux_entry, .-luna_linux_entry
 "#);
 
-extern "sysv64" {
+unsafe extern "sysv64" {
     fn luna_linux_entry(kernel_entry: u64, boot_params: u64, page_table: u64) -> !;
 }
 
@@ -63,10 +61,10 @@ impl KernelHandoff {
             && self.page_table != 0
     }
 
-    /// No Rust/UEFI code may execute after this call returns: the assembly
-    /// routine transfers control directly to the Linux 64-bit entry point.
+    /// Transfer control directly to the Linux 64-bit entry point. No UEFI
+    /// service, allocator or logger may be touched after this call.
     pub unsafe fn enter(self) -> ! {
-        luna_linux_entry(self.kernel_entry, self.boot_params_address, self.page_table)
+        unsafe { luna_linux_entry(self.kernel_entry, self.boot_params_address, self.page_table) }
     }
 }
 
