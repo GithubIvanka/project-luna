@@ -6,39 +6,43 @@ use crate::boot_params::BootParams;
 use crate::error::{BootError, BootResult};
 use crate::linux::LinuxSetupHeader;
 
-// Keep this deliberately small and independent of UEFI. The Linux 64-bit
+// Keep this deliberately small and independent of UEFI. The Linux x86-64
 // protocol enters with interrupts disabled, a flat 64-bit GDT, CR3 pointing
-// at identity-mapped page tables, and RSI pointing at boot_params.
+// at the page tables prepared by the loader, and RSI pointing at boot_params.
+//
+// Rust/LLVM's integrated assembler uses Intel syntax for this target. Do not
+// use ELF-only directives such as `.type ...,@function`: the UEFI target is
+// PE/COFF, not ELF.
 global_asm!(r#"
     .section .text.luna_handoff,"ax"
     .global luna_linux_entry
 luna_linux_entry:
     cli
-    mov %rdx, %cr3
-    lgdt luna_boot_gdt_ptr(%rip)
+    mov cr3, rdx
+    lgdt [rip + luna_boot_gdt_ptr]
 
-    mov $0x18, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %ss
-    xor %eax, %eax
-    mov %ax, %fs
-    mov %ax, %gs
+    // GDT: 0x08 = 64-bit code, 0x10 = data.
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    xor eax, eax
+    mov fs, ax
+    mov gs, ax
 
-    // SysV ABI arguments are:
-    //   RDI = Linux 64-bit entry
-    //   RSI = boot_params
-    //   RDX = CR3
-    // RSI is intentionally preserved for Linux.
-    mov %rdi, %rax
-    pushq $0x10
-    pushq %rax
-    lretq
+    // Enter the Linux 64-bit entry point with CS=0x08.
+    // RDI = kernel entry, RSI = boot_params, RDX = CR3.
+    mov rax, rdi
+    push 0x08
+    push rax
+    retfq
 
     .align 8
 luna_boot_gdt:
     .quad 0x0000000000000000
+    // 64-bit code: present, ring 0, executable/readable, long mode.
     .quad 0x00af9a000000ffff
+    // Data: present, ring 0, writable.
     .quad 0x00cf92000000ffff
 luna_boot_gdt_ptr:
     .word 0x17
@@ -77,5 +81,9 @@ impl KernelHandoff {
 }
 
 pub fn validate(handoff: &KernelHandoff) -> BootResult<()> {
-    if handoff.is_ready() { Ok(()) } else { Err(BootError::InvalidKernel) }
+    if handoff.is_ready() {
+        Ok(())
+    } else {
+        Err(BootError::InvalidKernel)
+    }
 }
