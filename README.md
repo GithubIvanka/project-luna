@@ -13,8 +13,8 @@ Project Luna is in the **architecture-to-implementation transition**.
 - Phases **1.1–1.5** are accepted and consolidated.
 - Phase **1.6** is accepted through **1.6-HZ** and consolidated into `docs/ARCHITECTURE.md`.
 - The repository/Cargo audit is complete for the current baseline.
-- The architecture-driven crate map is now scaffolded.
-- The next stage is explicit crate/API contract design.
+- The architecture-driven crate map is scaffolded in the workspace.
+- The current work is explicit crate/API contract design.
 - Scaffolding does **not** claim that the subsystems are implemented.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
@@ -44,7 +44,7 @@ DATA
 
 The four physical areas are **EFI / SYSTEM / DATA / SWAP**. SYSTEM is immutable/versioned and OS-managed; DATA contains mutable state.
 
-Applications use immutable bundles and isolated logical filesystem views. `.lbp` is the transport/archive Bundle Format; a System Image is directly a SquashFS image and is not an `.lbp` bundle.
+Applications use immutable bundles and isolated logical filesystem views. `.lbp` is the transport/archive representation; its final Bundle Format v1 details remain a separate RFC-0002 task. A System Image is directly a SquashFS image and is not an `.lbp` bundle.
 
 ## Runtime model
 
@@ -64,7 +64,7 @@ luna-system-runtime
 
 ## Current crate map
 
-The architecture-driven workspace currently contains:
+The architecture-driven workspace currently contains these scaffolded boundaries:
 
 ```text
 luna-common
@@ -72,17 +72,23 @@ luna-fs
 luna-root-mapping
 luna-config
 luna-security
+luna-state
+luna-event
+luna-bundle
 luna-app-manager
 luna-system-manager
 luna-update-manager
 luna-device-manager
 luna-kernel-manager
 luna-system-runtime
+luna-user-session
 luna-app-runtime
 luna-cli
 ```
 
-See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for responsibility boundaries and deferred components.
+`luna-boot`, `luna-boot-state`, and `luna-log` remain separate architecture boundaries that are not yet workspace implementation targets. A future GUI client is also deferred.
+
+See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for responsibility boundaries and deferred implementation details.
 
 ## Repository rule
 
