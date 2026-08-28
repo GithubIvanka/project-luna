@@ -56,9 +56,6 @@ impl BlockDevice for UefiBlockDevice {
 
         let mut temp = Vec::new();
         temp.resize(bytes, 0);
-        // The backing Vec is sufficiently aligned for the UEFI implementations
-        // used by the test harness; the actual protocol read is performed in
-        // the explicitly 4096-aligned chunk buffer above when possible.
         let mut copied = 0usize;
         let mut remaining = bytes;
         let mut lba = first_lba;
@@ -101,7 +98,7 @@ pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     let mut parent = Vec::with_capacity(cut + 4);
     parent.extend_from_slice(&bytes[..cut]);
     parent.extend_from_slice(&[0x7f, 0xff, 0x04, 0x00]);
-    let parent_path = uefi::proto::device_path::DevicePath::try_from(parent.as_slice())
+    let parent_path = <&DevicePath>::try_from(parent.as_slice())
         .map_err(|_| BootError::FilesystemError)?;
     let mut remaining = parent_path;
     boot::locate_device_path::<BlockIO>(&mut remaining).map_err(|_| BootError::FilesystemError)
