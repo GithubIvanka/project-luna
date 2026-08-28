@@ -4,6 +4,7 @@
 //! formalized. Until that contract is finalized this module provides a small
 //! deterministic test configuration with the final path layout.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::{BootError, BootResult};
