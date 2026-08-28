@@ -1,14 +1,12 @@
-//! Luna UEFI bootloader entry point
-
-#![no_std]
 #![no_main]
+#![no_std]
 
 extern crate alloc;
 
-use log::{error, info};
 use uefi::prelude::*;
 
 mod boot;
+mod boot_key;
 mod boot_params;
 mod config;
 mod e820;
@@ -17,7 +15,6 @@ mod ext4;
 mod filesystem;
 mod handoff;
 mod kernel;
-mod keyboard;
 mod linux;
 mod memory;
 mod menu;
@@ -25,21 +22,13 @@ mod recovery;
 mod target;
 
 #[entry]
-fn efi_main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
-    uefi_services::init(&mut system_table).expect("failed to initialize UEFI services");
+fn efi_main(_image_handle: Handle, _system_table: SystemTable<Boot>) -> Status {
+    uefi::helpers::init().expect("failed to initialize UEFI services");
 
-    info!("Luna bootloader starting");
-    info!("UEFI revision: {:?}", system_table.uefi_revision());
-
-    let boot_services = system_table.boot_services();
-
-    match boot::boot_flow(image_handle, boot_services) {
-        Ok(()) => {
-            error!("boot flow returned unexpectedly");
-            Status::ABORTED
-        }
-        Err(err) => {
-            error!("boot failed: {}", err);
+    match boot::boot_flow() {
+        Ok(()) => Status::SUCCESS,
+        Err(error) => {
+            log::error!("Luna boot failed: {error}");
             Status::ABORTED
         }
     }
