@@ -7,7 +7,7 @@
 use luna_bundle::BundleManifest;
 use luna_common::{BundleId, Version};
 use luna_root_mapping::MappingTable;
-use luna_security::{AuthorizationRequest, PolicyAuthority};
+use luna_security::{AuthorizationRequest, Decision, PolicyAuthority};
 use luna_user_session::SessionId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -49,7 +49,7 @@ impl ApplicationInstance {
     pub const fn id(&self) -> ApplicationInstanceId { self.id }
     pub fn application(&self) -> &BundleId { &self.application }
     pub const fn version(&self) -> Version { self.version }
-    pub const fn session(&self) -> SessionId { self.session.clone() }
+    pub fn session(&self) -> SessionId { self.session }
     pub const fn state(&self) -> InstanceState { self.state }
 
     pub fn transition(&mut self, next: InstanceState) -> Result<(), RuntimeError> {
@@ -79,17 +79,17 @@ pub trait ApplicationRuntime {
         mapping: &MappingTable,
     ) -> Result<ApplicationInstance, Self::Error>;
 
-    fn authorize<P: PolicyAuthority>(
+    fn authorize(
         &self,
-        policy: &P,
+        policy: &dyn PolicyAuthority,
         request: &AuthorizationRequest,
-    ) -> Result<luna_security::Decision, Self::Error>;
+    ) -> Result<Decision, Self::Error>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::{ApplicationInstance, ApplicationInstanceId, InstanceState};
-    use luna_common::{BundleId, Version, UserId};
+    use luna_common::{BundleId, Version};
     use luna_user_session::SessionId;
 
     #[test]
@@ -104,6 +104,5 @@ mod tests {
         instance.transition(InstanceState::Running).expect("start instance");
         instance.transition(InstanceState::Stopping).expect("stop instance");
         instance.transition(InstanceState::Stopped).expect("finish instance");
-        let _ = UserId::from("alice");
     }
 }
