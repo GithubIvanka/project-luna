@@ -1,7 +1,7 @@
 //! Application lifecycle management backend for Project Luna.
 //!
-//! Installation, update, removal, verification, migration, and package import
-//! belong here. Normal application execution belongs to app-runtime.
+//! This crate plans and validates application lifecycle operations. Actual
+//! mutation execution is delegated to `luna-update-manager`.
 
 use luna_common::{BundleId, Version};
 
@@ -26,6 +26,16 @@ pub enum ApplicationOperation {
     Migrate { from: Version, to: Version, id: BundleId },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApplicationPlan {
+    operation: ApplicationOperation,
+}
+
+impl ApplicationPlan {
+    pub const fn new(operation: ApplicationOperation) -> Self { Self { operation } }
+    pub const fn operation(&self) -> &ApplicationOperation { &self.operation }
+}
+
 #[derive(Debug)]
 pub struct AppManagerError(String);
 
@@ -39,18 +49,20 @@ impl std::fmt::Display for AppManagerError {
 impl std::error::Error for AppManagerError {}
 
 pub trait ApplicationManager {
-    fn execute(&mut self, operation: &ApplicationOperation) -> Result<(), AppManagerError>;
+    fn plan(&self, operation: &ApplicationOperation) -> Result<ApplicationPlan, AppManagerError>;
+    fn verify(&self, application: &ApplicationRef) -> Result<(), AppManagerError>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationOperation, ApplicationRef};
+    use super::{ApplicationOperation, ApplicationPlan, ApplicationRef};
     use luna_common::{BundleId, Version};
 
     #[test]
-    fn application_operation_keeps_version_identity() {
+    fn plan_preserves_requested_operation_without_executing_it() {
         let app = ApplicationRef::new(BundleId::from("example.app"), Version::new(2, 0, 0));
-        let op = ApplicationOperation::Install(app.clone());
-        assert_eq!(op, ApplicationOperation::Install(app));
+        let operation = ApplicationOperation::Install(app.clone());
+        let plan = ApplicationPlan::new(operation.clone());
+        assert_eq!(plan.operation(), &operation);
     }
 }
