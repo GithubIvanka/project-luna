@@ -9,7 +9,7 @@ description = "Minimal UEFI bootloader for Project Luna"
 [workspace]
 
 [dependencies]
-uefi = { version = "0.40", features = ["alloc", "logger", "panic_handler", "log-debugcon"] }
+uefi = { version = "0.40", features = ["alloc", "global_allocator", "logger", "panic_handler", "log-debugcon"] }
 log = "0.4"
 
 [profile.release]
