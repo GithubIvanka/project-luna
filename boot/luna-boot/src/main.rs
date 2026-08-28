@@ -5,6 +5,7 @@ extern crate alloc;
 
 use uefi::prelude::*;
 
+mod block;
 mod boot;
 mod boot_key;
 mod boot_params;
@@ -13,18 +14,20 @@ mod e820;
 mod error;
 mod ext4;
 mod filesystem;
+mod gpt;
 mod handoff;
 mod kernel;
+mod keyboard;
 mod linux;
 mod memory;
 mod menu;
+mod paging;
 mod recovery;
 mod target;
 
 #[entry]
 fn efi_main(_image_handle: Handle, _system_table: SystemTable<Boot>) -> Status {
     uefi::helpers::init().expect("failed to initialize UEFI services");
-
     match boot::boot_flow() {
         Ok(()) => Status::SUCCESS,
         Err(error) => {
