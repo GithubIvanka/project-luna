@@ -48,6 +48,9 @@ dependencies = [
 [[package]]
 name = "luna-event"
 version = "0.1.0"
+dependencies = [
+ "luna-common",
+]
 
 [[package]]
 name = "luna-fs"
@@ -102,3 +105,6 @@ dependencies = [
 [[package]]
 name = "luna-user-session"
 version = "0.1.0"
+dependencies = [
+ "luna-common",
+]
