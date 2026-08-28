@@ -1,12 +1,12 @@
 //! Non-blocking boot-menu key detection.
 
-use uefi::proto::console::text::Input;
-use uefi::table::boot::BootServices;
+use uefi::proto::console::text::{Input, Key};
 
-/// Read the current console input buffer once. There is deliberately no delay.
-pub fn boot_menu_requested(_boot_services: &BootServices, input: &mut Input) -> bool {
-    match input.read_key() {
-        Ok(Some(key)) => matches!(key, uefi::proto::console::text::Key::Printable(c) if c == 'B' || c == 'b'),
-        _ => false,
-    }
+/// Sample the firmware input queue once. There is deliberately no timeout or
+/// stall: normal boot must not pay a boot-menu delay.
+pub fn boot_menu_requested(input: &mut Input) -> bool {
+    matches!(
+        input.read_key(),
+        Ok(Some(Key::Printable(c))) if c == 'B' || c == 'b'
+    )
 }
