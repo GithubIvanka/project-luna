@@ -1,11 +1,14 @@
 //! Small, dependency-light foundational value types shared by Luna crates.
 //!
-//! This crate is intentionally narrow. Subsystem-specific errors, runtime state,
-//! security policy, filesystem operations, bundle semantics, and service APIs
-//! belong to their owning crates.
+//! This crate intentionally contains only values whose meaning is genuinely
+//! shared across subsystem boundaries. Subsystem-specific errors, policy,
+//! persistence, runtime state, filesystem operations, and serialization belong
+//! to their owning crates.
 
 mod id;
+mod user;
 mod version;
 
 pub use id::{BundleId, ComponentId};
+pub use user::UserId;
 pub use version::Version;
