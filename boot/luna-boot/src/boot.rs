@@ -1,135 +1,101 @@
-//! Main boot flow orchestration
+//! Main boot-flow orchestration.
+//!
+//! The function intentionally stops before the destructive Linux handoff until
+//! the final physical-memory allocator and x86_64 entry stub are present.
+//! Everything before that boundary is ordinary UEFI code and is testable.
 
 use uefi::prelude::*;
-use uefi::table::boot::SearchType;
+use uefi::proto::console::text::{Input, Output};
+
 use crate::config::BootConfig;
 use crate::error::{BootError, BootResult};
 use crate::filesystem::UefiFilesystem;
 use crate::kernel::KernelLoader;
 use crate::keyboard::check_for_boot_key;
-use crate::memory::{exit_boot_services, get_memory_map};
 use crate::menu::{show_error, BootMenu};
 use crate::target::BootTarget;
 
-/// Main boot flow
-pub fn boot_flow(boot_services: &BootServices) -> BootResult<()> {
-    log::info!("Starting Luna boot flow");
-
-    // Load configuration
+pub fn boot_flow(image_handle: Handle, boot_services: &BootServices) -> BootResult<()> {
     let config = load_config(boot_services)?;
 
-    // Check for B key press during boot window
-    let show_menu = check_for_boot_key(boot_services);
-
-    // Select boot target
-    let target = if show_menu {
+    // This is deliberately a single non-blocking sample. No two-second delay.
+    let target = if check_for_boot_key(boot_services) {
         show_boot_menu(boot_services, &config)?
     } else {
         config.default_target()?.clone()
     };
 
-    log::info!("Selected boot target: {}", target.name);
+    // The ESP is opened only through the LoadedImage.device() handle belonging
+    // to luna-boot itself. The system partition is not an EFI filesystem.
+    let mut filesystem = UefiFilesystem::open(boot_services, image_handle)?;
+    let mut loader = KernelLoader::new(&mut filesystem);
 
-    // Open filesystem
-    let mut filesystem = UefiFilesystem::open(boot_services)?;
-
-    // Load kernel
-    let mut loader = KernelLoader::new(boot_services, &mut filesystem);
-    let kernel = loader.load_kernel(&target)?;
-
-    // Get memory map
-    let memory_map = get_memory_map(boot_services)?;
-
-    // Exit boot services
-    log::info!("Exiting UEFI boot services");
-    exit_boot_services(boot_services.clone(), &memory_map)?;
-
-    // Boot kernel (this never returns)
-    kernel.boot(memory_map);
+    match loader.load_kernel(&target) {
+        Ok(kernel) => {
+            // At this point the bzImage has passed the Linux boot-protocol
+            // header validation. Physical placement, initrd allocation,
+            // final boot_params population and the assembly transition are the
+            // only remaining hardware-facing steps.
+            let _ = kernel;
+            Err(BootError::Unsupported("final Linux x86_64 handoff is not yet enabled"))
+        }
+        Err(primary_error) => {
+            if let Some(factory) = config.targets().iter().find(|t| t.is_factory) {
+                if factory.kernel_path != target.kernel_path {
+                    let mut fallback_loader = KernelLoader::new(&mut filesystem);
+                    if fallback_loader.load_kernel(factory).is_ok() {
+                        return Err(BootError::Unsupported("Factory kernel validated; final handoff is not yet enabled"));
+                    }
+                }
+            }
+            Err(primary_error)
+        }
+    }
 }
 
-/// Load boot configuration
 fn load_config(_boot_services: &BootServices) -> BootResult<BootConfig> {
-    // For prototype, use default config
-    // Real implementation would read from boot filesystem
     Ok(BootConfig::default_config())
 }
 
-/// Show boot menu and get user selection
 fn show_boot_menu(
     boot_services: &BootServices,
     config: &BootConfig,
 ) -> BootResult<BootTarget> {
-    // Get console protocols
     let stdout_handle = boot_services
-        .get_handle_for_protocol::<uefi::proto::console::text::Output>()
+        .get_handle_for_protocol::<Output>()
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
-
     let stdin_handle = boot_services
-        .get_handle_for_protocol::<uefi::proto::console::text::Input>()
+        .get_handle_for_protocol::<Input>()
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
 
     let stdout = boot_services
-        .open_protocol_exclusive::<uefi::proto::console::text::Output>(stdout_handle)
+        .open_protocol_exclusive::<Output>(stdout_handle)
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
-
     let stdin = boot_services
-        .open_protocol_exclusive::<uefi::proto::console::text::Input>(stdin_handle)
+        .open_protocol_exclusive::<Input>(stdin_handle)
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
 
-    // Show menu
     let mut menu = BootMenu::new(stdout, stdin);
-    let selection = menu.show(config.targets());
-
-    match selection {
-        Some(index) => {
-            config
-                .targets()
-                .get(index)
-                .cloned()
-                .ok_or(BootError::TargetNotFound)
-        }
-        None => {
-            // User pressed Esc, boot default
-            config.default_target().cloned()
-        }
+    match menu.show(config.targets()) {
+        Some(index) => config.targets().get(index).cloned().ok_or(BootError::TargetNotFound),
+        None => config.default_target().cloned(),
     }
 }
 
-/// Handle boot error with fallback
 pub fn handle_boot_error(
     boot_services: &BootServices,
     error: BootError,
-    config: &BootConfig,
-    failed_target: &BootTarget,
+    _config: &BootConfig,
+    _failed_target: &BootTarget,
 ) -> BootResult<()> {
-    log::error!("Boot error: {}", error);
-
-    // Try fallback
-    if let Some(fallback) = find_fallback_target(config, failed_target) {
-        log::info!("Trying fallback target: {}", fallback.name);
-        // Would retry boot with fallback target
-        // For now, just report error
-    }
-
-    // Show error to user
     let stdout_handle = boot_services
-        .get_handle_for_protocol::<uefi::proto::console::text::Output>()
+        .get_handle_for_protocol::<Output>()
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
-
     let mut stdout = boot_services
-        .open_protocol_exclusive::<uefi::proto::console::text::Output>(stdout_handle)
+        .open_protocol_exclusive::<Output>(stdout_handle)
         .map_err(|_| BootError::UefiError(uefi::Status::NOT_FOUND))?;
 
-    let mut error_msg = alloc::string::String::from("Boot failed: ");
-    error_msg.push_str(&alloc::format!("{}", error));
-    show_error(&mut stdout, &error_msg);
-
+    let message = alloc::format!("Boot failed: {}", error);
+    show_error(&mut stdout, &message);
     Err(error)
-}
-
-/// Find a fallback target
-fn find_fallback_target(config: &BootConfig, failed: &BootTarget) -> Option<BootTarget> {
-    // Look for factory target
-    config.targets().iter().find(|t| t.is_factory).cloned()
 }
