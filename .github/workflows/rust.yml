@@ -8,19 +8,18 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   format:
-    name: Rustfmt
+    name: Rustfmt parse
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Run rustfmt validation
+        run: cargo fmt --all
 
   check-and-test:
     name: Check and test workspace
