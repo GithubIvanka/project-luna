@@ -17,12 +17,9 @@ mod filesystem;
 mod gpt;
 mod handoff;
 mod kernel;
-mod keyboard;
 mod linux;
-mod memory;
 mod menu;
 mod paging;
-mod recovery;
 mod target;
 
 #[entry]
