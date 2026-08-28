@@ -5,6 +5,7 @@
 //! attributes are not interpreted. The implementation supports the common
 //! ext4 extent format and legacy direct/indirect block maps.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::{BootError, BootResult};
@@ -233,7 +234,7 @@ impl<D: BlockDevice> Ext4<D> {
                 let phys_lo = u32_at(node, p + 8) as u64;
                 let phys_hi = u16_at(node, p + 6) as u64;
                 let phys = phys_lo | (phys_hi << 32);
-                self.copy_extent( logical, len, phys, file_block_base, out)?;
+                self.copy_extent(logical, len, phys, file_block_base, out)?;
             }
         } else {
             for i in 0..entries {
