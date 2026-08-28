@@ -6,14 +6,17 @@ use crate::boot_params::BootParams;
 use crate::error::{BootError, BootResult};
 use crate::linux::LinuxSetupHeader;
 
+// Keep this deliberately small and independent of UEFI. The Linux 64-bit
+// protocol enters with interrupts disabled, a flat 64-bit GDT, CR3 pointing
+// at identity-mapped page tables, and RSI pointing at boot_params.
 global_asm!(r#"
     .section .text.luna_handoff,"ax"
     .global luna_linux_entry
-    .type luna_linux_entry,@function
 luna_linux_entry:
     cli
     mov %rdx, %cr3
     lgdt luna_boot_gdt_ptr(%rip)
+
     mov $0x18, %ax
     mov %ax, %ds
     mov %ax, %es
@@ -21,6 +24,12 @@ luna_linux_entry:
     xor %eax, %eax
     mov %ax, %fs
     mov %ax, %gs
+
+    // SysV ABI arguments are:
+    //   RDI = Linux 64-bit entry
+    //   RSI = boot_params
+    //   RDX = CR3
+    // RSI is intentionally preserved for Linux.
     mov %rdi, %rax
     pushq $0x10
     pushq %rax
@@ -34,7 +43,6 @@ luna_boot_gdt:
 luna_boot_gdt_ptr:
     .word 0x17
     .quad luna_boot_gdt
-    .size luna_linux_entry, .-luna_linux_entry
 "#);
 
 unsafe extern "sysv64" {
