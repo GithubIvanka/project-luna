@@ -6,8 +6,3 @@ license = "Apache-2.0"
 
 [dependencies]
 luna-fs = { path = "../luna-fs" }
-libc = { version = "0.2", optional = true }
-
-[features]
-default = ["linux-backend"]
-linux-backend = ["dep:libc"]
