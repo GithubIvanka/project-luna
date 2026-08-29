@@ -1,6 +1,7 @@
 # Added by cargo
 
 /target
+/boot/luna-boot/target
 
 .idea/
 .vscode/
