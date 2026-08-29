@@ -23,7 +23,7 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Foundation/domain API pass | Completed |
 | Manager/runtime API baseline | Completed |
 | Integration-contract hardening | Prototype completed |
-| Namespace/materialization | Contract prototype completed; real Linux backend next |
+| Linux namespace/materialization | First real Linux mount-namespace backend implemented; full logical-root materializer next |
 | Persistence/update transaction | In-memory atomic prototype completed; durable backend next |
 | Bundle Format v1 | RFC-0002 still Draft / Proposal |
 | `luna-boot.efi` | Working prototype reaches kernel + test init + `sh`; production hardening remains |
@@ -34,6 +34,7 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 luna-common
 luna-fs
 luna-root-mapping
+luna-namespace
 luna-config
 luna-security
 luna-state
@@ -93,21 +94,11 @@ The logical application root remains a conventional Linux-compatible `/`, while 
 
 ## Current implementation direction
 
-### Real Linux namespace/materialization backend
+### Linux namespace/materialization backend
 
-Use existing Linux mechanisms as primitives rather than inventing a custom VFS. The target behavior remains:
+The first real OS-specific backend is now isolated in `luna-namespace`. It uses Linux mount namespaces, private mount propagation, and controlled read-only bind mounts. `luna-root-mapping` remains a domain/mapping layer and contains no Linux namespace syscalls. Linux mount namespaces provide isolated mount views, and bind mounts can expose selected resources at controlled logical destinations. citeturn415334search2turn415334search6
 
-```text
-logical Linux root
-    ↓
-per-namespace mapping
-    ↓
-controlled mounts/bind mounts
-    ↓
-security-enforced resource view
-```
-
-The application must see a normal Linux-compatible filesystem interface and must not be exposed to an artificial container-style filesystem layout.
+The backend is intentionally a low-level primitive. It does not yet build the complete logical Linux `/` tree, create `/proc`/`/sys`/`/dev` views, enforce policy, or own application lifecycle. ID-mapped mounts remain an optional implementation mechanism for later user/resource ownership work. citeturn415334search1turn415334search4
 
 ### Persistent state backend
 
@@ -135,7 +126,7 @@ GitHub Actions is configured for Rust workspace verification and the separate UE
 
 ## Explicitly still deferred
 
-- production Linux namespace/mount implementation;
+- full logical-root materialization above the low-level namespace backend;
 - durable on-disk state backend;
 - production update/checkpoint/rollback protocol;
 - final IPC transport;
@@ -151,7 +142,7 @@ GitHub Actions is configured for Rust workspace verification and the separate UE
 
 ## Next work
 
-1. Implement and test the real Linux namespace + logical-root materialization backend.
+1. Build the higher-level logical-root materializer on top of `luna-root-mapping` + `luna-namespace`.
 2. Implement durable `luna-state` persistence and crash-safe recovery.
 3. Implement the real update/checkpoint/rollback engine.
 4. Resolve and accept RFC-0002, then implement `.lbp`.
