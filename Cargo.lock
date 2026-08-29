@@ -106,6 +106,7 @@ name = "luna-update-manager"
 version = "0.1.0"
 dependencies = [
  "luna-common",
+ "luna-state",
 ]
 
 [[package]]

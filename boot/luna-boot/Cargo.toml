@@ -1,18 +1,15 @@
 [package]
 name = "luna-boot"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 authors = ["Project Luna Contributors"]
 description = "Minimal UEFI bootloader for Project Luna"
 
-# Keep the bootloader as a standalone Cargo package. It intentionally does not
-# belong to the normal Project Luna userspace workspace.
 [workspace]
 
 [dependencies]
-uefi = "0.28"
-uefi-services = "0.24"
+uefi = { version = "0.40", features = ["alloc", "global_allocator", "logger", "panic_handler", "log-debugcon"] }
 log = "0.4"
 
 [profile.release]

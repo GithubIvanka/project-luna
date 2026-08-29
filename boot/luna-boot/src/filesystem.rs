@@ -1,70 +1,33 @@
-//! UEFI filesystem access
+//! Storage discovery for Luna's ext4 system partition.
 
-use alloc::vec::Vec;
-use uefi::prelude::*;
-use uefi::proto::media::file::{
-    Directory, File, FileAttribute, FileInfo, FileMode, FileSystemVolumeLabel,
-};
-use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::table::boot::{ScopedProtocol, SearchType};
-use crate::error::{BootError, BootResult};
+use crate::block::{parent_disk_handle, UefiBlockDevice};
+use crate::error::BootResult;
+use crate::ext4::Ext4;
+use crate::gpt::find_system_partition;
 
-/// UEFI filesystem wrapper
-pub struct UefiFilesystem<'a> {
-    fs: ScopedProtocol<'a, SimpleFileSystem>,
+pub struct SystemFilesystem {
+    fs: Ext4<UefiBlockDevice>,
 }
 
-impl<'a> UefiFilesystem<'a> {
-    /// Open the first available filesystem
-    pub fn open(boot_services: &'a BootServices) -> BootResult<Self> {
-        let handle = boot_services
-            .locate_handle_buffer(SearchType::ByProtocol(&SimpleFileSystem::GUID))
-            .map_err(|_| BootError::FilesystemError)?;
-
-        let first_handle = handle.first().ok_or(BootError::FilesystemError)?;
-
-        let fs = boot_services
-            .open_protocol_exclusive::<SimpleFileSystem>(*first_handle)
-            .map_err(|_| BootError::FilesystemError)?;
-
+impl SystemFilesystem {
+    pub fn open() -> BootResult<Self> {
+        let disk = parent_disk_handle(uefi::boot::image_handle())?;
+        let mut probe = UefiBlockDevice::new(disk, 0)?;
+        let partition = find_system_partition(&mut probe)?;
+        let device = UefiBlockDevice::new(disk, partition.first_lba)?;
+        let fs = Ext4::open(device)?;
         Ok(Self { fs })
     }
 
-    /// Read a file into memory
-    pub fn read_file(&mut self, path: &str) -> BootResult<Vec<u8>> {
-        let mut root = self.fs.open_volume().map_err(|_| BootError::FilesystemError)?;
-
-        let handle = root
-            .open(path, FileMode::Read, FileAttribute::empty())
-            .map_err(|_| BootError::FilesystemError)?;
-
-        let mut file = match handle.into_type().map_err(|_| BootError::FilesystemError)? {
-            File::Regular(f) => f,
-            File::Dir(_) => return Err(BootError::FilesystemError),
-        };
-
-        // Get file info to determine size
-        let mut info_buffer = vec![0; 128];
-        let info = file
-            .get_info::<FileInfo>(&mut info_buffer)
-            .map_err(|_| BootError::FilesystemError)?;
-
-        let file_size = info.file_size() as usize;
-
-        // Read file content
-        let mut buffer = vec![0; file_size];
-        file.read(&mut buffer).map_err(|_| BootError::FilesystemError)?;
-
-        Ok(buffer)
+    pub fn read_file(&mut self, path: &str) -> BootResult<alloc::vec::Vec<u8>> {
+        self.fs.read_file(path)
     }
+}
 
-    /// Check if a file exists
-    pub fn file_exists(&mut self, path: &str) -> bool {
-        let mut root = match self.fs.open_volume() {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-
-        root.open(path, FileMode::Read, FileAttribute::empty()).is_ok()
-    }
+/// Kept as a named boundary for callers that need to distinguish storage
+/// discovery failures from a missing UEFI ESP. The system partition is not a
+/// SimpleFileSystem volume and is never accessed through UEFI's FAT API.
+pub fn validate_system_filesystem() -> BootResult<()> {
+    let _ = SystemFilesystem::open()?;
+    Ok(())
 }
