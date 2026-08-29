@@ -64,7 +64,7 @@ impl<'a> KernelLoader<'a> {
 
         let cmdline = target.kernel_cmdline.as_bytes();
         let max_cmdline = setup.cmdline_size as usize;
-        if cmdline.len() > max_cmdline {
+        if cmdline.len() + 1 > max_cmdline {
             return Err(BootError::Unsupported("kernel command line exceeds Linux cmdline_size"));
         }
         let cmdline_addr = allocate_pages(1, 0xffff_ffff)?;
@@ -76,12 +76,18 @@ impl<'a> KernelLoader<'a> {
 
         let mut initrd_address = 0;
         let mut initrd_size = 0;
+        let mut initrd_pages = 0;
         if !target.initrd_path.is_empty() {
             let initrd = self.filesystem.read_file(&target.initrd_path)?;
+            if initrd.is_empty() {
+                return Err(BootError::InvalidKernel);
+            }
             initrd_size = initrd.len();
+            initrd_pages = div_ceil(initrd.len(), PAGE_SIZE);
             let max = if setup.initrd_addr_max == 0 { 0xffff_ffff } else { setup.initrd_addr_max as u64 };
-            initrd_address = allocate_pages(div_ceil(initrd.len(), PAGE_SIZE), max)?;
+            initrd_address = allocate_pages(initrd_pages, max)?;
             unsafe {
+                ptr::write_bytes(initrd_address as *mut u8, 0, initrd_pages * PAGE_SIZE);
                 ptr::copy_nonoverlapping(initrd.as_ptr(), initrd_address as *mut u8, initrd.len());
             }
             boot_params.set_ramdisk(initrd_address, initrd.len() as u64)?;
@@ -97,6 +103,15 @@ impl<'a> KernelLoader<'a> {
             );
         }
 
+        let mut allocations = vec![
+            (kernel_address, div_ceil(init_size, PAGE_SIZE)),
+            (bp_addr, 1),
+            (cmdline_addr, 1),
+        ];
+        if initrd_pages != 0 {
+            allocations.push((initrd_address, initrd_pages));
+        }
+
         Ok(PreparedKernel {
             setup,
             kernel_address,
@@ -107,11 +122,7 @@ impl<'a> KernelLoader<'a> {
             initrd_address,
             initrd_size,
             boot_params,
-            allocations: vec![
-                (kernel_address, div_ceil(init_size, PAGE_SIZE)),
-                (bp_addr, 1),
-                (cmdline_addr, 1),
-            ],
+            allocations,
         })
     }
 }
