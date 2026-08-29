@@ -28,7 +28,9 @@ impl BootConfig {
                 "/boot/bzImage",
             )
             .with_initrd("/boot/initramfs-test.img")
-            .with_cmdline("console=ttyS0 quiet root=/dev/sda2 rootfstype=ext4 break=premount"),
+            // This stage is deliberately a kernel+initramfs test only. Do not
+            // ask Linux to discover or mount a real Luna root filesystem yet.
+            .with_cmdline("console=ttyS0 rdinit=/init"),
         ];
         Self { default_target: 0, targets }
     }
