@@ -5,6 +5,7 @@ members = [
   "components/luna-common",
   "components/luna-fs",
   "components/luna-root-mapping",
+  "components/luna-namespace",
   "components/luna-config",
   "components/luna-security",
   "components/luna-state",
