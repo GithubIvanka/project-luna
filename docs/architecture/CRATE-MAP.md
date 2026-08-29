@@ -12,7 +12,10 @@ This document translates the accepted architecture into concrete Rust package bo
 | `luna-common` | Small cross-cutting value types only | lib |
 | `luna-fs` | Low-level filesystem abstraction and primitives | lib |
 | `luna-root-mapping` | Logical filesystem/path mapping | lib |
+| `luna-namespace` | Linux namespace/materialization mechanisms | lib |
 | `luna-config` | Configuration model and scoped configuration | lib |
+
+`luna-root-mapping` describes and resolves logical resources. It must not contain Linux namespace syscalls. `luna-namespace` contains the OS-specific enforcement/materialization primitives that consume validated mapping plans.
 
 ## Policy and management
 
@@ -82,6 +85,8 @@ luna-common
 luna-fs
     ↑
 luna-root-mapping
+    ↑
+luna-namespace
 
 luna-config ───────┐
 luna-security ─────┤
