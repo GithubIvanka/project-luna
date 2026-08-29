@@ -9,7 +9,6 @@ use uefi::boot::{self, AllocateType, MemoryType, PAGE_SIZE};
 use crate::boot_params::BootParams;
 use crate::e820::E820Entry;
 use crate::error::{BootError, BootResult};
-use crate::ext4::Ext4;
 use crate::filesystem::SystemFilesystem;
 use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;

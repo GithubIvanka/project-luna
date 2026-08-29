@@ -1,7 +1,7 @@
 //! Storage discovery for Luna's ext4 system partition.
 
 use crate::block::{parent_disk_handle, UefiBlockDevice};
-use crate::error::{BootError, BootResult};
+use crate::error::BootResult;
 use crate::ext4::Ext4;
 use crate::gpt::find_system_partition;
 
