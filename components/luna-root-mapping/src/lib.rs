@@ -8,9 +8,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-#[cfg(target_os = "linux")]
-pub mod linux;
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct LogicalPath(String);
 
@@ -177,14 +174,9 @@ impl MappingTable {
     }
 
     /// Resolves a logical resource to its physical backing path.
-    ///
-    /// Exact file mappings win first. Otherwise the most specific explicit
-    /// subtree mapping is selected and the logical suffix is appended to the
-    /// subtree's physical root.
     pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
         if let Some(rule) = self.rules.iter().find(|rule| {
-            rule.kind == MappingKind::File && rule.logical == *logical
-                || rule.kind == MappingKind::Subtree && rule.logical == *logical
+            rule.logical == *logical
         }) {
             return Ok(rule.physical.clone());
         }
@@ -204,8 +196,8 @@ impl MappingTable {
         Ok(PhysicalPath::new(rule.physical.as_path().join(relative)))
     }
 
-    /// Produces a deterministic logical namespace description without making
-    /// Linux mount calls. The actual Linux backend lives in `linux`.
+    /// Produces a deterministic namespace description without making Linux
+    /// mount calls. The OS-specific backend lives in `luna-namespace`.
     pub fn materialize(&self) -> Result<MaterializedNamespace, MappingError> {
         let mut entries = BTreeMap::new();
         for rule in &self.rules {
