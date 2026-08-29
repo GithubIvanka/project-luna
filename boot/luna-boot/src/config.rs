@@ -2,9 +2,9 @@
 //!
 //! The physical `current`/manifest format remains an architecture item to be
 //! formalized. Until that contract is finalized this module provides the
-//! smallest deterministic test configuration: load the kernel directly from
-//! `/boot/bzImage` on the ext4 `system` partition. System Image and initramfs
-//! loading are intentionally disabled for this bring-up stage.
+//! smallest deterministic test configuration: load the kernel and a temporary
+//! test initramfs directly from the ext4 `system` partition. The initramfs is
+//! only a bring-up aid; the real Luna System Image will be added later.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -27,7 +27,8 @@ impl BootConfig {
                 "",
                 "/boot/bzImage",
             )
-            .with_cmdline("console=ttyS0 quiet"),
+            .with_initrd("/boot/initramfs-test.img")
+            .with_cmdline("console=ttyS0 quiet root=/dev/sda2 rootfstype=ext4 break=premount"),
         ];
         Self { default_target: 0, targets }
     }
