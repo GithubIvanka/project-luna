@@ -1,12 +1,12 @@
 # Project Luna — Status
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 > `docs/ARCHITECTURE.md` is the architectural Source of Truth. This file is a status snapshot only.
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has moved into architecture-driven API implementation and integration-contract hardening.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The project is now in architecture-driven backend implementation and high-risk integration work.
 
 ### Phase status
 
@@ -19,14 +19,14 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | 1.5 | Accepted and consolidated |
 | 1.6 | Accepted through 1.6-HZ and consolidated |
 | Repository/Cargo audit | Completed |
-| Crate map | Established |
+| Crate map | Synchronized with repository |
 | Foundation/domain API pass | Completed |
 | Manager/runtime API baseline | Completed |
-| Integration-contract hardening | **Completed as a prototype pass** |
-| Namespace/materialization prototype | **Completed as a pure contract prototype** |
-| Persistence/update transaction prototype | **Completed as an in-memory atomic prototype** |
-| Bundle Format v1 | RFC-0002 remains Draft / Proposal; implementation notes added |
-| luna-boot | Parallel prototype work; outside userspace workspace |
+| Integration-contract hardening | Prototype completed |
+| Namespace/materialization | Contract prototype completed; real Linux backend next |
+| Persistence/update transaction | In-memory atomic prototype completed; durable backend next |
+| Bundle Format v1 | RFC-0002 still Draft / Proposal |
+| `luna-boot.efi` | Working prototype reaches kernel + test init + `sh`; production hardening remains |
 
 ## Current workspace
 
@@ -50,60 +50,109 @@ luna-app-runtime
 luna-cli
 ```
 
-These crates are a mix of implemented domain/API contracts and intentionally incomplete subsystem scaffolds. API presence must not be confused with a finished operating-system implementation.
+These crates represent current architecture boundaries. Their presence does not mean every backend is production-complete.
 
-## Integration hardening completed
+## Current runtime model
 
-- `luna-root-mapping`: deterministic namespace materialization contract added; no kernel mounts are performed.
-- `luna-security`: explicit-grant `StaticPolicyAuthority` added for deterministic policy tests; no privileged/root-user abstraction introduced.
-- `luna-bundle`: logical/source path validation hardened against traversal, absolute payload sources and duplicate logical resources.
-- `luna-config`: existing application precedence remains user/application override → application default → system default.
-- `luna-user-session` + `luna-app-runtime`: application launch prototype now requires an active session and a valid mapping for every declared resource; instance stop/failure lifecycle is explicit.
-- `luna-event`: deterministic in-memory FIFO delivery prototype added; broker/async transport remains a higher-level concern.
-- `luna-state`: public `MemoryStateStore` added with atomic revision-checked transactions and validation before mutation.
-- `luna-update-manager`: transactional executor prototype records an update plan through one atomic state transaction; real image/bundle mutation remains deferred.
-- RFC-0002: implementation-boundary companion notes added without silently accepting the proposed `.lbp` wire format.
+```text
+luna-system-runtime
+├── UserSession A
+│   └── luna-app-runtime
+│       └── ApplicationInstance(s)
+└── UserSession B
+    └── luna-app-runtime
+        └── ApplicationInstance(s)
+```
 
-## CI / supply-chain
+There is no separate `lunad` architecture component and no separate Session Manager. `UserSession` is the combined user/session domain entity. `luna-system-runtime` is the single system-wide runtime/supervisor.
 
-- Rust CI now checks formatting, workspace check/test, clippy, release build and the separate `luna-boot` UEFI target.
-- `luna-boot.efi` is uploaded as a CI artifact.
-- The SLSA workflow now hashes real Luna release subjects instead of demonstration `artifact1`/`artifact2` files and references the versioned generic generator.
+## Current storage model
 
-## Important boundaries
+```text
+EFI
+SYSTEM
+DATA
+└── system/{apps,drivers,libs,volumes,config,state}
+    users/<user>/{home,data,config}
+    cache
+SWAP / ZRAM
+```
 
-`luna-app-manager` does not own normal application execution.
+The logical application root remains a conventional Linux-compatible `/`, while the physical DATA layout stays Luna-native. Application namespace composition is controlled by mapping plus security policy.
 
-`luna-system-manager` owns the system state model; `luna-update-manager` executes mutations.
+## Completed implementation-contract work
 
-`luna-kernel-manager` owns kernel modeling/compatibility queries; update execution remains with `luna-update-manager`.
+- `luna-root-mapping`: deterministic mapping/materialization contract with file mappings by default and explicit subtree mappings for suitable semantic classes.
+- `luna-security`: central policy boundary with explicit authorization decisions and structured restrictions.
+- `luna-bundle`: internal Bundle model and manifest/resource validation.
+- `luna-config`: layered user/application/system configuration model.
+- `luna-user-session` + `luna-app-runtime`: lifecycle contract for UserSession and ApplicationInstance.
+- `luna-event`: event domain and bounded-delivery contract.
+- `luna-state`: synchronous state abstraction, global revision and atomic transaction contract.
+- `luna-update-manager`: update-plan/executor contract and in-memory atomic prototype.
 
-`luna-security` remains the central policy authority. Low-level kernel/filesystem/runtime mechanisms enforce policy decisions.
+## Current implementation direction
 
-`luna-system-runtime` is the single system-wide runtime supervising multiple `UserSession` instances. `luna-app-runtime` owns application execution and `ApplicationInstance` lifecycle.
+### Real Linux namespace/materialization backend
+
+Use existing Linux mechanisms as primitives rather than inventing a custom VFS. The target behavior remains:
+
+```text
+logical Linux root
+    ↓
+per-namespace mapping
+    ↓
+controlled mounts/bind mounts
+    ↓
+security-enforced resource view
+```
+
+The application must see a normal Linux-compatible filesystem interface and must not be exposed to an artificial container-style filesystem layout.
+
+### Persistent state backend
+
+The state abstraction remains backend-agnostic. The first durable implementation direction is a small embedded transactional key/value backend; the backend choice is an implementation decision, not a new Luna architectural boundary. State ownership remains above the raw storage mechanism.
+
+### Update/rollback engine
+
+`luna-update-manager` remains the execution side. `luna-system-manager` and other managers own domain state/query models. Update execution must be checkpoint-aware, interruption-safe and explicitly reversible where rollback is supported.
+
+### Bundle Format v1
+
+`luna-bundle` owns Bundle domain/format concerns. `luna-app-manager` owns install/update/remove/import lifecycle. `.lbp` is transport/archive representation only. RFC-0002 is not accepted yet.
+
+### Security / signatures
+
+The architecture requires separation of signature verification, trust decision and runtime permission. Production publisher/repository signature verification and trust storage are still implementation work.
+
+## `luna-boot.efi`
+
+Bootloader work is maintained separately under `boot/luna-boot/`. The current prototype has progressed to real kernel loading and a test init handoff that reaches `sh` in the other boot-focused development track. This work is not represented as a userspace crate.
+
+## CI / supply chain
+
+GitHub Actions is configured for Rust workspace verification and the separate UEFI boot target. SLSA provenance generation is also enabled. GitHub's Rust CI guidance supports using hosted runners for Cargo build/test and dependency caching. citeturn642891search1
 
 ## Explicitly still deferred
 
 - production Linux namespace/mount implementation;
-- durable on-disk state/WAL/snapshot backend;
-- real update checkpoint/rollback protocol;
+- durable on-disk state backend;
+- production update/checkpoint/rollback protocol;
 - final IPC transport;
-- final async event broker/channel implementation;
-- System Image specification and implementation;
-- kernel compatibility resolver implementation;
-- boot-state metadata;
-- production `luna-boot.efi` Linux boot protocol handoff;
+- final async event transport/broker;
+- System Image manifest specification and compatibility implementation;
+- persistent boot-state metadata;
 - final `.lbp` wire/archive implementation and RFC-0002 acceptance;
-- signature/trust verification implementation;
-- final CLI grammar and GUI.
-
-## Verification note
-
-Changes were made directly in the repository. The connected environment used for this session does not provide a reliable local Cargo execution path, so no successful local `cargo test --workspace` claim is made. GitHub Actions is now configured to perform the workspace and UEFI builds on push/PR.
+- production signature/trust chain;
+- final CLI grammar/alias persistence;
+- GUI implementation;
+- device automount backend;
+- final resource policy tuning.
 
 ## Next work
 
-1. Review CI results and fix any compiler/API incompatibilities surfaced by the new checks.
-2. Promote the pure prototypes only when their backend contracts are accepted.
-3. Resolve the explicit RFC-0002 decision list before calling Bundle Format v1 Accepted.
-4. Continue toward real namespace, persistence/update, and boot compatibility implementations.
+1. Implement and test the real Linux namespace + logical-root materialization backend.
+2. Implement durable `luna-state` persistence and crash-safe recovery.
+3. Implement the real update/checkpoint/rollback engine.
+4. Resolve and accept RFC-0002, then implement `.lbp`.
+5. Continue production security/signature integration.
