@@ -21,38 +21,40 @@ This record documents repository work performed after the Phase 1.6 decision led
 
 ### `luna-common`
 
-Retained and refined:
+Retained and refined the small shared value types:
 
-- `BundleId`
-- `ComponentId`
-- `UserId`
-- `Version`
+- `BundleId`;
+- `ComponentId`;
+- `UserId`;
+- `Version`.
 
-Removed the old global `LunaError` / `LunaResult` model so subsystem-specific failures remain local to their owners.
+The old global `LunaError` / `LunaResult` model was removed so subsystem-specific failures remain local to their owners.
 
 ### `luna-fs`
 
 Implemented the initial low-level filesystem boundary:
 
-- `FsError`
-- `FileHandle`
-- `FileMetadata`
-- `FileSystem`
-- `HostFileSystem`
+- `FsError`;
+- `FileHandle`;
+- `FileMetadata`;
+- `FileSystem`;
+- `HostFileSystem`.
 
-This layer intentionally contains no authorization, logical-root policy, configuration, bundle or application policy.
+No authorization, logical-root policy, configuration, bundle or application policy lives here.
 
 ### `luna-root-mapping`
 
-Implemented the per-namespace logical mapping contract:
+Implemented the per-namespace logical mapping domain:
 
-- `LogicalPath`
-- `PhysicalPath`
-- `MappingRule`
-- `MappingTable`
-- `MappingError`
+- `LogicalPath`;
+- `PhysicalPath`;
+- `MappingKind`;
+- `MappingRule`;
+- `MappingTable`;
+- `MappingError`;
+- deterministic logical namespace description.
 
-File mappings are the default case. Explicit subtree/directory mappings are allowed for suitable semantic classes such as shared library trees; they are never an unrestricted implicit overlay.
+Logical paths now undergo lexical normalization without host filesystem resolution. `..` traversal is rejected. Exact file mappings are the default, while explicit subtree mappings are supported for suitable semantic classes such as libraries. The crate contains no Linux namespace syscalls and no authorization policy.
 
 ### `luna-config`
 
@@ -66,7 +68,7 @@ Implemented:
 - `LayeredConfig`;
 - application lookup precedence.
 
-System-wide mutable configuration belongs under `DATA/system/config/`; user-specific configuration belongs under `DATA/users/<user>/config/`.
+Application precedence is user/application override → application default → system default where that semantic class permits fallback.
 
 ### `luna-security`
 
@@ -79,11 +81,11 @@ Implemented the central policy boundary:
 - `Decision`;
 - `PolicyAuthority`.
 
-No permanent root/sudo user abstraction is introduced.
+The decision model includes `Allow`, `Deny`, `Ask`, and structured `Constrained` results. No root/sudo user abstraction is introduced.
 
 ### `luna-state`
 
-Implemented the generic durable-state contract and concurrency hardening:
+Implemented the synchronous state contract and first concurrency hardening pass:
 
 - `StateKey`;
 - `StateValue`;
@@ -93,11 +95,11 @@ Implemented the generic durable-state contract and concurrency hardening:
 - revision conflict reporting;
 - atomic transaction boundary.
 
-The abstraction remains synchronous. Higher layers own asynchronous orchestration and synchronization. The accepted first implementation uses a global store revision: stale transactions fail atomically and successful non-empty transactions advance the revision once.
+The accepted model is a global store revision. A transaction commits only when its expected revision matches the current revision. Stale transactions are rejected without partial writes. The state crate remains backend-agnostic; checkpoint/snapshot internals remain separate.
 
 ### `luna-event`
 
-Implemented the event-domain boundary:
+Implemented the event domain boundary:
 
 - `EventType`;
 - `Event`;
@@ -105,7 +107,7 @@ Implemented the event-domain boundary:
 - `EventSubscriber`;
 - `Subscription`.
 
-No Kafka dependency is committed. Kafka is only a conceptual model where useful; the implementation can remain local and lightweight.
+Kafka remains only a conceptual analogy. The final transport/broker is not selected here.
 
 ### `luna-bundle`
 
@@ -118,7 +120,7 @@ Implemented the internal Bundle domain model:
 - `BundleError`;
 - structural manifest validation.
 
-`.lbp` remains a transport/archive representation and is not yet an accepted final wire format.
+Bundle identity is conceptually `BundleId + Version + ContentIdentity`. `.lbp` remains the transport/archive representation and RFC-0002 remains unaccepted until final format review.
 
 ### `luna-user-session`
 
@@ -129,75 +131,68 @@ Implemented:
 - `UserSession`;
 - lifecycle transition validation.
 
-`UserSession` is the combined user/session domain entity. It is not a Linux TTY abstraction.
+`UserSession` is the combined user/session domain entity; no separate Session Manager is introduced.
 
 ## Completed — manager/runtime API baseline
 
 ### `luna-system-manager`
 
-Implemented `SystemImageRef`, `SystemState`, and `SystemQuery`.
+Owns System Image state/query semantics. It does not execute updates.
 
 ### `luna-kernel-manager`
 
-Implemented `KernelRef`, `KernelSelection`, and `KernelQuery`. Current, previous and immutable factory kernel identities are modeled separately.
+Owns kernel inventory/query/compatibility semantics. Current, previous and immutable factory kernel identities are distinct concepts; fallback is not reduced to a single `previous` slot for System Images.
 
 ### `luna-update-manager`
 
-Implemented `UpdateOperation`, `UpdatePlan`, `UpdateError`, and `UpdateExecutor`. It is the mutation/execution side and does not become the owner of desired system state.
+Owns execution of system/application changes. It does not become the owner of desired domain state.
 
 ### `luna-app-manager`
 
-Implemented `ApplicationRef`, `ApplicationOperation`, `AppManagerError`, and `ApplicationManager`. It manages lifecycle changes and package import but does not own normal application execution.
+Owns install/update/removal/verification/migration/package-import planning. Normal application execution belongs to runtime.
 
 ### `luna-device-manager`
 
-Implemented device/volume query concepts and explicit volume lifecycle states. Security and mount policy remain outside this crate.
+Owns device and volume discovery/lifecycle concepts. Permission and mount policy remain separate.
 
 ### `luna-system-runtime`
 
-Implemented the system-wide runtime boundary. One `luna-system-runtime` supervises multiple `UserSession` instances and their app runtimes. There is no separate `lunad` component.
+One system-wide runtime supervises multiple `UserSession`s and their application runtimes. There is no separate `lunad` architectural component.
 
 ### `luna-app-runtime`
 
-Implemented `ApplicationInstanceId`, `InstanceState`, `ApplicationInstance`, and `ApplicationRuntime`. It consumes validated bundle/mapping/session/security contracts and owns execution/lifecycle of application instances.
+Owns `ApplicationInstance` lifecycle and consumes validated bundle/mapping/security/session contracts. It does not own installation/update/removal policy.
 
 ### `luna-cli`
 
-Remains a thin client. Final command grammar and transport remain specification work.
+Remains a thin client over backend contracts. Human-readable and machine-readable output are both supported conceptually; final grammar remains a separate CLI concern.
 
-## Integration hardening completed
+## Namespace/materialization — first real Linux backend
 
-- Cross-domain contract tests cover bundle + mapping + security + runtime composition.
-- `luna-state` tests cover atomic transactions, global revisions, stale revision rejection and empty transactions.
-- Namespace/materialization exists as a pure deterministic contract prototype; it does not yet perform kernel mounts.
-- Update execution exists as an in-memory atomic prototype; it does not yet mutate real System Images/Bundles/checkpoints.
+A dedicated `luna-namespace` crate is now part of the workspace. It owns Linux-specific namespace/materialization primitives so `luna-root-mapping` stays a pure domain/mapping layer.
 
-## Accepted post-HZ clarifications — 2026-08-29
+Current implementation provides:
 
-The following points were explicitly accepted after re-checking the architecture against the repository and the previous phase history.
+- `unshare(CLONE_NEWNS)` for a private mount namespace;
+- private mount propagation using `MS_PRIVATE | MS_REC`;
+- controlled bind mounts from validated physical resources to logical destinations;
+- read-only remounting of those bind mounts.
 
-### Runtime and sessions
+The backend deliberately assumes authorization has already succeeded. It does not implement Security policy, build the full logical `/` tree, or own application lifecycle.
 
-- `luna-system-runtime` is the single system-wide runtime/supervisor; no separate `lunad` architectural component is introduced.
-- `UserSession` is the single combined user/session entity.
-- Runtime hierarchy is `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance`.
-- `luna-app-manager` is not part of the normal execution chain.
-- Application execution belongs to `luna-app-runtime`.
+Linux mount namespaces provide isolated mount views, and bind mounts provide the mechanism for exposing selected existing filesystem resources at controlled logical destinations. citeturn415334search2turn415334search6
 
-### Logical root and namespace
+ID-mapped mounts remain an optional later mechanism for localized UID/GID views. citeturn415334search1turn415334search4
 
-- Applications receive a conventional Linux-compatible logical `/`, not an artificial reduced container filesystem.
-- The physical Luna `DATA` layout remains Luna-native and is composed into the logical root through mappings/materialization.
-- Mapping tables remain namespace-specific and RAM-resident at runtime.
-- File mapping is the default; explicit subtree mapping is permitted for suitable semantic resources such as libraries.
-- Linux namespaces, bind mounts and related mechanisms are implementation primitives.
-- Container-visible identity is not a goal; applications should not be designed around the assumption that they are running inside a container.
-- Root semantics are not granted to ordinary applications merely because Linux user namespaces are used.
-- `idmapped` mounts are allowed as an implementation primitive when they simplify safe user/namespace ownership handling; they are not a mandatory Luna abstraction.
+## Accepted post-HZ implementation clarifications
 
-### DATA and state
+The 2026-08-29 audit additionally fixed the following boundaries:
 
-The canonical user-visible mutable layout is:
+1. `luna-system-runtime` is the system-wide runtime/supervisor; do not introduce a second `lunad` concept.
+2. `UserSession` combines the user/session identity.
+3. The application sees a normal Linux-compatible logical `/`; it is not given an artificially truncated fake root.
+4. The physical Luna DATA tree remains Luna-native and is not exposed verbatim as a hidden `/data` application root.
+5. The canonical DATA structure is:
 
 ```text
 DATA/
@@ -208,74 +203,71 @@ DATA/
 │   ├── volumes/
 │   ├── config/
 │   └── state/
-├── users/<user>/
-│   ├── home/
-│   ├── data/
-│   └── config/
+├── users/
+│   └── <user>/
+│       ├── home/
+│       ├── data/
+│       └── config/
 └── cache/
 ```
 
-- `DATA/system/state/` is the canonical location for persistent system state that is not ordinary configuration.
-- State ownership remains with the relevant system subsystem; applications do not gain direct filesystem-level access to the state store.
-- `DATA/system/config/` remains for system-wide mutable configuration.
+6. Mapping is file-based by default, but explicit directory/subtree mappings are valid where the semantic class calls for them.
+7. Manifest-declared mappings are requests/description; final mapping and authorization are built by higher-level runtime/manager logic.
+8. Security policy is central and instance restrictions may tighten but cannot weaken an enforced application/system denial.
+9. Applications use filtered resource views for devices, D-Bus and other host services rather than receiving unrestricted host access.
+10. `cgroups v2` and other existing Linux resource-control mechanisms are preferred for enforcement of the already accepted resource-protection policy.
+11. `DATA/system/state` is the preferred home for persistent system state; a backend implementation may use an embedded transactional key/value store without becoming a new architectural boundary.
+12. A boot-success marker and watchdog participate in update/fallback health determination; a kernel boot alone does not prove that the new system is healthy.
+13. Recovery remains a separate Recovery System Image with temporary RAM-backed identity/state; it is not the Factory System Image and does not use a normal persistent user session.
+14. `.lbp` remains an archive/transport representation of a Bundle; it is not the runtime representation and is not the System Image format.
+15. `luna-bundle` owns Bundle domain/format concerns; `luna-app-manager` owns Bundle lifecycle management and package import.
+16. A new generic `luna-runtime` crate is not introduced; `luna-system-runtime` and `luna-app-runtime` are the runtime boundaries.
+17. No separate `luna-update` crate is introduced; `luna-update-manager` is the update execution component.
+18. `dependi` is build/install/dependency tooling, not a runtime dependency resolver service.
+19. Final `.lbp` and dependency format compatibility are deferred to RFC/specification work rather than inferred from current placeholder code.
 
-### Security and device views
+## Integration testing
 
-- Security remains a separate central policy authority.
-- Permission decisions are multi-level and may return Ask or structured constrained access.
-- D-Bus access should use a filtered/limited interface rather than exposing a full unrestricted system bus to applications.
-- `/dev` should be presented as a filtered device view containing only resources authorized for the application/session.
-- USB and other external-device access follows device discovery → policy → authorized application visibility/access; no automatic arbitrary execution.
+Cross-domain tests cover composition of bundle metadata, logical root mapping, security authorization, session state and application runtime creation.
 
-### Resource control
+`luna-state` tests cover:
 
-- Linux cgroups v2 and related kernel mechanisms are the initial enforcement primitives for CPU, memory and process/resource limits.
-- A protected system-critical resource budget is reserved.
-- Memory pressure reclamation remains globally controlled by the system rather than by the current interactive user.
-- Process-count and file-descriptor limits are ordinary resource safeguards; they do not create new Luna architectural components.
-- Disk usage limits may be enforced through the underlying filesystem/resource facilities when required.
+- round-trip state access;
+- atomic multi-mutation transactions;
+- revision advancement;
+- stale-revision rejection without partial writes;
+- empty transactions preserving revision.
 
-### Persistent storage implementation direction
+The Linux namespace backend currently has host-testable error behavior only; privileged namespace/mount execution is a dedicated integration-test target.
 
-For the first durable `luna-state` backend, use a small embedded transactional key/value database rather than introducing a client/server database or a custom WAL layer. `redb` is the current implementation choice for the prototype/backend; it is an implementation decision and not an architectural invariant.
+## Explicitly deferred
 
-A separate Luna WAL is not required when the selected storage backend already provides the required atomic durability semantics.
-
-### Operations and recovery
-
-- A successful boot should eventually be confirmed by a userspace health/boot-success marker rather than treating kernel handoff alone as success.
-- A watchdog/timeout mechanism may mark a boot attempt failed when the system does not reach its healthy state.
-- Crash recovery remains event-driven and user-visible after repeated failures, with options such as diagnostics, restart, rollback or close according to policy.
-- Recovery remains the dedicated Recovery System Image + temporary RAM-backed recovery identity model, not Factory and not a normal persistent user session.
-
-### Bundle and distribution
-
-- `luna-bundle` owns Bundle domain representation and format codec concerns.
-- `luna-app-manager` owns install/update/remove/verify/migration/package-import lifecycle.
-- No separate `.lbp` parser crate is introduced merely for parsing the archive format.
-- `.lbp` remains transport/archive representation, while the installed Bundle remains the immutable runtime unit.
-- Reproducible build information and artifact provenance are desirable implementation properties for the future signature/trust chain.
-
-### Documentation/repository consistency
-
-- Historical phase records preserve traceability but do not compete with `docs/ARCHITECTURE.md`.
-- `docs/architecture/CRATE-MAP.md`, `README.md`, `STATUS.md` and this implementation record must describe repository reality and never invent components that do not exist.
-
-## `luna-boot.efi` status
-
-Bootloader implementation is maintained under `boot/luna-boot/`, outside the normal userspace workspace. The current parallel boot track has progressed beyond the original scaffold: kernel loading and a test init path have been demonstrated through to `sh`.
-
-Production signature/trust integration, final compatibility policy, production boot-state persistence and remaining hardening are still separate tasks.
+- complete logical-root construction and per-application mount layout;
+- privileged helper separation and hardened syscall/FD lifecycle;
+- `/proc`, `/sys`, `/dev`, `/run`, Wayland, PipeWire and D-Bus policy-specific materialization;
+- user/PID/network/IPC/UTS namespace policy profiles;
+- optional OverlayFS and idmapped-mount integration;
+- durable `luna-state` backend and crash-consistency implementation;
+- update/checkpoint/rollback engine;
+- System Image manifest/compatibility implementation;
+- persistent boot-state metadata;
+- final IPC transport and async event transport;
+- Bundle Format v1 / RFC-0002 acceptance and `.lbp` codec;
+- production signature/trust chain, fs-verity/IMA/TPM integration decisions;
+- device automount backend;
+- final CLI/GUI implementation and resource policy tuning.
 
 ## Verification status
 
-Repository changes are verified structurally through GitHub. GitHub Actions is configured for Rust formatting/check/test/clippy/build validation and the separate UEFI target. Local interactive Cargo execution is not claimed when the connected environment cannot run it.
+The connected GitHub environment allows repository inspection and edits but does not provide a trusted local Linux execution environment for every privileged namespace operation. CI remains the authoritative place to run workspace and Linux-backend tests that require the appropriate runner capabilities. No unverified local success is claimed.
 
-## Next real backend work
+## Next stage
 
-1. Real Linux namespace/materialization backend.
-2. Durable `luna-state` backend and crash-safe recovery.
-3. Real update/checkpoint/rollback engine.
-4. Final Bundle Format v1 and RFC-0002 acceptance.
-5. Production signature/trust chain.
-6. System Image and kernel compatibility specifications/implementations.
+The next high-risk implementation sequence is:
+
+1. complete logical-root materialization on top of `luna-root-mapping` + `luna-namespace`;
+2. durable `luna-state` storage and crash recovery;
+3. update/checkpoint/rollback transaction engine;
+4. RFC-0002 Bundle Format v1 design and acceptance;
+5. bundle codec and package import integration;
+6. production signature/trust/integrity chain.
