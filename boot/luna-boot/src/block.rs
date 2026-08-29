@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use uefi::boot::{self, open_protocol_exclusive, ScopedProtocol};
+use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
 use uefi::Handle;
 
@@ -10,6 +10,31 @@ use crate::error::{BootError, BootResult};
 use crate::ext4::BlockDevice;
 
 const IO_CHUNK: usize = 4096;
+
+/// Open a protocol for read-only inspection without taking exclusive ownership
+/// away from the firmware's disk stack.
+///
+/// UEFI already owns the disk protocols used to boot the image. Requesting
+/// `Exclusive` access here can therefore return `ACCESS_DENIED` under OVMF (or
+/// disconnect firmware disk drivers as a side effect). `GetProtocol` is the
+/// correct mode for immutable/read-only protocol access; the caller keeps the
+/// handle alive for the duration of the returned `ScopedProtocol`.
+unsafe fn open_shared<P: uefi::proto::ProtocolPointer + ?Sized>(
+    handle: Handle,
+) -> BootResult<ScopedProtocol<P>> {
+    // SAFETY: the protocol is only borrowed while the returned ScopedProtocol
+    // is alive; we do not uninstall or replace the protocol.
+    Ok(unsafe {
+        boot::open_protocol::<P>(
+            OpenProtocolParams {
+                handle,
+                agent: boot::image_handle(),
+                controller: None,
+            },
+            OpenProtocolAttributes::GetProtocol,
+        )?
+    })
+}
 
 pub struct UefiBlockDevice {
     io: ScopedProtocol<BlockIO>,
@@ -19,7 +44,7 @@ pub struct UefiBlockDevice {
 
 impl UefiBlockDevice {
     pub fn new(handle: Handle, start_lba: u64) -> BootResult<Self> {
-        let io = open_protocol_exclusive::<BlockIO>(handle)?;
+        let io = unsafe { open_shared::<BlockIO>(handle)? };
         let media = io.media();
         let block_size = media.block_size() as u64;
         if block_size == 0 || IO_CHUNK as u64 % block_size != 0 {
@@ -77,9 +102,9 @@ impl BlockDevice for UefiBlockDevice {
 pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     use uefi::proto::device_path::DevicePath;
 
-    let loaded = boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(image_handle)?;
+    let loaded = unsafe { open_shared::<uefi::proto::loaded_image::LoadedImage>(image_handle)? };
     let device = loaded.device().ok_or(BootError::FilesystemError)?;
-    let path = boot::open_protocol_exclusive::<DevicePath>(device)?;
+    let path = unsafe { open_shared::<DevicePath>(device)? };
     let bytes = path.as_bytes();
 
     let mut cut = None;
