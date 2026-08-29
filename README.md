@@ -8,14 +8,14 @@ Project Luna is an open-source operating system project focused on a small immut
 
 ## Current status
 
-Project Luna is in the **architecture-to-implementation transition**.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and is now moving from contracts/prototypes into real backend implementation.
 
 - Phases **1.1–1.5** are accepted and consolidated.
-- Phase **1.6** is accepted through **1.6-HZ** and consolidated into `docs/ARCHITECTURE.md`.
-- The repository/Cargo audit is complete for the current baseline.
-- The architecture-driven crate map is scaffolded in the workspace.
-- The current work is explicit crate/API contract design.
-- Scaffolding does **not** claim that the subsystems are implemented.
+- Phase **1.6** is accepted through **1.6-HZ** and consolidated.
+- The repository/Cargo audit and crate map are established.
+- Foundation, domain, manager/runtime and integration-contract prototypes exist.
+- `luna-boot.efi` is developed separately and has reached real kernel loading plus a test init handoff to `sh`.
+- The remaining work is concentrated in real Linux namespace/materialization, durable state, update/rollback, final Bundle Format v1, and production security/signature infrastructure.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -38,13 +38,14 @@ DATA
   ├── system/libs
   ├── system/volumes
   ├── system/config
+  ├── system/state
   ├── users/<user>/{home,data,config}
   └── cache
 ```
 
 The four physical areas are **EFI / SYSTEM / DATA / SWAP**. SYSTEM is immutable/versioned and OS-managed; DATA contains mutable state.
 
-Applications use immutable bundles and isolated logical filesystem views. `.lbp` is the transport/archive representation; its final Bundle Format v1 details remain a separate RFC-0002 task. A System Image is directly a SquashFS image and is not an `.lbp` bundle.
+Applications use immutable bundles and isolated logical filesystem views. `.lbp` is the transport/archive representation of a Bundle; RFC-0002 is still a separate design/acceptance task. A System Image is directly a SquashFS image and is not an `.lbp` bundle.
 
 ## Runtime model
 
@@ -58,13 +59,15 @@ luna-system-runtime
         └── ApplicationInstance(s)
 ```
 
+`luna-system-runtime` is the single system-wide runtime/supervisor. `UserSession` is the combined user/session domain entity. There is no separate `lunad` architectural component and no separate Session Manager.
+
 `luna-app-manager` manages installation, update, removal, verification, migrations and package import. It does **not** own normal application execution.
 
-`luna-security` is the central policy authority. Linux namespaces, mounts and filesystem/resource-control mechanisms are implementation primitives, not substitutes for Luna's architectural model.
+`luna-security` is the central policy authority. Linux namespaces, mounts, cgroups and related kernel/filesystem mechanisms are implementation primitives used to enforce the Luna model rather than replacements for it.
 
 ## Current crate map
 
-The architecture-driven workspace currently contains these scaffolded boundaries:
+The current userspace workspace contains these architecture-defined crates:
 
 ```text
 luna-common
@@ -86,17 +89,17 @@ luna-app-runtime
 luna-cli
 ```
 
-`luna-boot`, `luna-boot-state`, and `luna-log` remain separate architecture boundaries that are not yet workspace implementation targets. A future GUI client is also deferred.
+The bootloader is intentionally outside the userspace workspace. `luna-log` and `luna-boot-state` remain separate conceptual boundaries until their implementation/API ownership requires dedicated crates.
 
-See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for responsibility boundaries and deferred implementation details.
+See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for responsibility boundaries and current implementation status.
 
 ## Repository rule
 
 The repository is not allowed to become a second architecture document.
 
-A crate is introduced only when its responsibility and boundary are defined by the architecture. A scaffold establishes an ownership boundary; it is not a claim of completed functionality.
+A crate represents an architectural responsibility only when that responsibility is defined by `docs/ARCHITECTURE.md`. Existing code is reusable source material but does not override the architecture.
 
-See [`STATUS.md`](STATUS.md), [`ROADMAP.md`](ROADMAP.md), and [`docs/phases/PHASE-1.6.md`](docs/phases/PHASE-1.6.md).
+Historical phase records preserve traceability; they are not competing Sources of Truth.
 
 ## Development direction
 
@@ -105,14 +108,22 @@ Architecture
     ↓
 crate/API contract
     ↓
-RFC / specification where required
-    ↓
 prototype
     ↓
-implementation
+backend implementation
     ↓
 integration
+    ↓
+production hardening
 ```
+
+## Current next targets
+
+1. Real Linux namespace/materialization backend.
+2. Durable persistent-state backend.
+3. Real update/checkpoint/rollback engine.
+4. Final `.lbp` / Bundle Format v1 and RFC-0002 acceptance.
+5. Production signature/trust chain.
 
 ## License
 
