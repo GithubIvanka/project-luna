@@ -1,0 +1,9 @@
+[package]
+name = "luna-namespace"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+luna-root-mapping = { path = "../luna-root-mapping" }
+libc = "0.2"
