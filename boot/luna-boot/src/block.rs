@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
+use uefi::proto::ProtocolPointer;
 use uefi::Handle;
 
 use crate::error::{BootError, BootResult};
@@ -14,7 +15,7 @@ const IO_CHUNK: usize = 4096;
 /// Open a firmware-owned protocol without trying to disconnect the firmware's
 /// disk driver. Disk protocols are commonly already opened by UEFI drivers,
 /// so Exclusive access can legitimately return ACCESS_DENIED.
-fn open_shared<P: uefi::boot::ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<ScopedProtocol<P>> {
+fn open_shared<P: ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<ScopedProtocol<P>> {
     // SAFETY: the handle and protocol remain valid while the returned scoped
     // protocol is alive; this function only borrows an existing firmware
     // protocol and never uninstalls or replaces it.
