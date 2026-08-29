@@ -1,6 +1,6 @@
 # Project Luna — Phase 1.6 Crate Map
 
-**Status:** implementation scaffold / API design pending
+**Status:** architecture-driven implementation map
 **Source of Truth:** `docs/ARCHITECTURE.md`
 
 This document translates the accepted architecture into concrete Rust package boundaries. It is not a replacement for the architecture and must not introduce new architectural responsibilities.
@@ -19,20 +19,40 @@ This document translates the accepted architecture into concrete Rust package bo
 | Crate | Responsibility | Form |
 |---|---|---|
 | `luna-security` | Central security/policy authority | lib/backend |
-| `luna-app-manager` | Install, update, removal, verification, migrations and package import | lib + bin |
-| `luna-system-manager` | System state model and queries | lib + bin |
-| `luna-update-manager` | Executes system/application changes | lib + bin |
-| `luna-kernel-manager` | Kernel inventory, metadata and compatibility queries | lib + bin |
-| `luna-device-manager` | Device discovery, volumes and device lifecycle | lib + bin |
+| `luna-app-manager` | Install, update, removal, verification, migrations and package import | lib + bin where required |
+| `luna-system-manager` | System state model and queries | lib + bin where required |
+| `luna-update-manager` | Executes system/application changes | lib + bin where required |
+| `luna-kernel-manager` | Kernel inventory, metadata and compatibility queries | lib + bin where required |
+| `luna-device-manager` | Device discovery, volumes and device lifecycle | lib + bin where required |
 
 ## Runtime
 
 | Crate | Responsibility | Form |
 |---|---|---|
-| `luna-system-runtime` | System-wide supervision and UserSession orchestration | lib + bin |
-| `luna-app-runtime` | ApplicationInstance execution boundary | lib + bin |
+| `luna-system-runtime` | Single system-wide supervision and `UserSession` orchestration | lib + bin where required |
+| `luna-user-session` | `UserSession` domain model and lifecycle contract | lib |
+| `luna-app-runtime` | `ApplicationInstance` execution/lifecycle boundary | lib + bin where required |
+
+There is no separate `lunad` architecture component and no separate Session Manager. `luna-system-runtime` is the single system-wide runtime/supervisor. `UserSession` is the combined user/session entity.
 
 Runtime ownership is intentionally separate from management ownership. `luna-app-manager` does not own normal application execution.
+
+## Bundle
+
+| Crate | Responsibility | Form |
+|---|---|---|
+| `luna-bundle` | Internal Bundle domain model, manifest/resource representation and eventual format codec | lib |
+
+The crate exists in the current workspace. `.lbp` remains the transport/archive representation of a Bundle, and RFC-0002 has not yet been accepted as the final wire/archive specification.
+
+## State and events
+
+| Crate | Responsibility | Form |
+|---|---|---|
+| `luna-state` | Persistent state abstraction, revision and atomic transaction contracts | lib |
+| `luna-event` | Event domain, subscriptions and delivery contracts | lib |
+
+The current prototypes are in-memory/contract-level where the durable or OS-backed backend has not yet been implemented.
 
 ## User interface
 
@@ -40,25 +60,21 @@ Runtime ownership is intentionally separate from management ownership. `luna-app
 |---|---|---|
 | `luna-cli` | Thin CLI client over backend APIs | lib + bin (`luna`) |
 
-GUI is not forced into the CLI crate. A future GUI client may use the same backend contracts.
+A future GUI client is separate and uses the same backend contracts.
 
-## Deliberately not scaffolded yet
+## Boot
 
-### `luna-bundle`
+`luna-boot.efi` is a separate boot-specific project under `boot/luna-boot/`. It is intentionally outside the ordinary userspace workspace because it targets UEFI and operates before the userspace architecture exists.
 
-Not created as an implementation crate yet. `.lbp` and Bundle Format v1 remain subject to RFC-0002 design. The existing architecture explicitly says not to accept an earlier `.lbp` proposal automatically.
+The current boot implementation has progressed beyond the original scaffold: kernel loading and the test init handoff have been demonstrated through the shell (`sh`). Production trust/signature integration and final boot-compatibility work remain separate tasks.
 
-### `luna-boot.efi`
+`luna-boot-state` remains a conceptual architecture boundary and is not yet a separate workspace crate.
 
-Not part of the ordinary userspace workspace scaffold. Bootloader implementation requires its own target/toolchain/API boundary and remains a separate implementation task.
+## Logging
 
-### `luna-log`
-
-Not created merely as a historical name. Logging requirements will be introduced when an owning boundary requires them.
+`luna-log` is not created merely because the name existed historically. A dedicated logging boundary will be introduced when ownership/API requirements justify it.
 
 ## Dependency direction
-
-The initial dependency direction is deliberately shallow:
 
 ```text
 luna-common
@@ -69,19 +85,22 @@ luna-root-mapping
 
 luna-config ───────┐
 luna-security ─────┤
+luna-state ────────┤
+luna-event ────────┤
+luna-bundle ───────┤
                    │
 management crates ─┤
 runtime crates ────┤
 luna-cli ──────────┘
 ```
 
-No higher-level crate is allowed to pull application lifecycle, security policy, runtime state or bundle semantics into `luna-common` or `luna-fs`.
+Higher-level crates consume lower-level contracts. No higher-level crate is allowed to pull application lifecycle, security policy, runtime state, bundle lifecycle or service APIs into `luna-common` or `luna-fs` merely for convenience.
 
-## Scaffold rule
+## Current implementation rule
 
-The current crates are architectural scaffolds, not completed implementations. Empty public structs are placeholders for the ownership boundary only; they are not final APIs.
+The repository may contain a scaffolded crate before its full backend implementation exists, but the scaffold must represent a responsibility boundary already defined by the architecture.
 
-Before implementation of a crate, define:
+Before expanding a crate into a real backend, define:
 
 1. responsibility;
 2. public API;
@@ -91,3 +110,5 @@ Before implementation of a crate, define:
 6. dependencies;
 7. IPC/client boundary where applicable;
 8. security boundary.
+
+Existing implementation code is reusable source material, not an authority over the architecture.
