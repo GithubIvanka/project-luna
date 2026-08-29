@@ -131,7 +131,7 @@ Bootloader work is maintained separately under `boot/luna-boot/`. The current pr
 
 ## CI / supply chain
 
-GitHub Actions is configured for Rust workspace verification and the separate UEFI boot target. SLSA provenance generation is also enabled. GitHub's Rust CI guidance supports using hosted runners for Cargo build/test and dependency caching. citeturn642891search1
+GitHub Actions is configured for Rust workspace verification and the separate UEFI boot target. SLSA provenance generation is also enabled.
 
 ## Explicitly still deferred
 
