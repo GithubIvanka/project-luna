@@ -15,5 +15,6 @@ path = "src/main.rs"
 luna-common = { path = "../luna-common" }
 luna-bundle = { path = "../luna-bundle" }
 luna-root-mapping = { path = "../luna-root-mapping" }
+luna-namespace = { path = "../luna-namespace" }
 luna-security = { path = "../luna-security" }
 luna-user-session = { path = "../luna-user-session" }
