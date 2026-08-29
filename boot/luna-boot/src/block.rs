@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use uefi::boot::{self, open_protocol_exclusive, ScopedProtocol};
+use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
 use uefi::Handle;
 
@@ -10,6 +10,26 @@ use crate::error::{BootError, BootResult};
 use crate::ext4::BlockDevice;
 
 const IO_CHUNK: usize = 4096;
+
+/// Open a firmware-owned protocol without trying to disconnect the firmware's
+/// disk driver. Disk protocols are commonly already opened by UEFI drivers,
+/// so Exclusive access can legitimately return ACCESS_DENIED.
+fn open_shared<P: uefi::boot::ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<ScopedProtocol<P>> {
+    // SAFETY: the handle and protocol remain valid while the returned scoped
+    // protocol is alive; this function only borrows an existing firmware
+    // protocol and never uninstalls or replaces it.
+    unsafe {
+        open_protocol::<P>(
+            OpenProtocolParams {
+                handle,
+                agent: boot::image_handle(),
+                controller: None,
+            },
+            OpenProtocolAttributes::GetProtocol,
+        )
+        .map_err(BootError::from)
+    }
+}
 
 pub struct UefiBlockDevice {
     io: ScopedProtocol<BlockIO>,
@@ -19,7 +39,7 @@ pub struct UefiBlockDevice {
 
 impl UefiBlockDevice {
     pub fn new(handle: Handle, start_lba: u64) -> BootResult<Self> {
-        let io = open_protocol_exclusive::<BlockIO>(handle)?;
+        let io = open_shared::<BlockIO>(handle)?;
         let media = io.media();
         let block_size = media.block_size() as u64;
         if block_size == 0 || IO_CHUNK as u64 % block_size != 0 {
@@ -77,9 +97,9 @@ impl BlockDevice for UefiBlockDevice {
 pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     use uefi::proto::device_path::DevicePath;
 
-    let loaded = boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(image_handle)?;
+    let loaded = open_shared::<uefi::proto::loaded_image::LoadedImage>(image_handle)?;
     let device = loaded.device().ok_or(BootError::FilesystemError)?;
-    let path = boot::open_protocol_exclusive::<DevicePath>(device)?;
+    let path = open_shared::<DevicePath>(device)?;
     let bytes = path.as_bytes();
 
     let mut cut = None;
