@@ -6,6 +6,11 @@ use crate::error::{BootError, BootResult};
 pub const BOOT_PARAMS_SIZE: usize = 4096;
 pub const E820_MAX_ENTRIES: usize = 128;
 
+// setup_header begins at 0x1f1. There is no one-byte header length at 0x201;
+// deriving a copy length from that byte corrupts/truncates the zero page.
+const SETUP_HEADER_START: usize = 0x1f1;
+const SETUP_HEADER_END: usize = 0x290;
+
 #[derive(Clone)]
 pub struct BootParams { bytes: [u8; BOOT_PARAMS_SIZE] }
 
@@ -14,11 +19,11 @@ impl BootParams {
     pub fn as_bytes(&self) -> &[u8] { &self.bytes }
 
     pub fn copy_setup_header(&mut self, kernel: &[u8]) -> BootResult<()> {
-        let start = 0x1f1;
-        let header_len = *kernel.get(0x201).ok_or(BootError::InvalidKernel)? as usize;
-        let end = 0x202usize.checked_add(header_len).ok_or(BootError::InvalidKernel)?;
-        if end > kernel.len() || end > self.bytes.len() { return Err(BootError::InvalidKernel); }
-        self.bytes[start..end].copy_from_slice(&kernel[start..end]);
+        if kernel.len() < SETUP_HEADER_END {
+            return Err(BootError::InvalidKernel);
+        }
+        self.bytes[SETUP_HEADER_START..SETUP_HEADER_END]
+            .copy_from_slice(&kernel[SETUP_HEADER_START..SETUP_HEADER_END]);
         Ok(())
     }
 
@@ -28,6 +33,8 @@ impl BootParams {
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
         if address > u32::MAX as u64 {
             self.bytes[0x0c8..0x0cc].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
+        } else {
+            self.bytes[0x0c8..0x0cc].fill(0);
         }
         self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
         Ok(())
@@ -37,6 +44,8 @@ impl BootParams {
         if address > u32::MAX as u64 || size > u32::MAX as u64 {
             self.bytes[0xc0..0xc4].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
             self.bytes[0xc4..0xc8].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
+        } else {
+            self.bytes[0xc0..0xc8].fill(0);
         }
         self.bytes[0x218..0x21c].copy_from_slice(&(address as u32).to_le_bytes());
         self.bytes[0x21c..0x220].copy_from_slice(&(size as u32).to_le_bytes());
