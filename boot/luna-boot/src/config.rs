@@ -1,8 +1,10 @@
 //! Boot target policy.
 //!
 //! The physical `current`/manifest format remains an architecture item to be
-//! formalized. Until that contract is finalized this module provides a small
-//! deterministic test configuration with the final path layout.
+//! formalized. Until that contract is finalized this module provides the
+//! smallest deterministic test configuration: load the kernel directly from
+//! `/boot/bzImage` on the ext4 `system` partition. System Image and initramfs
+//! loading are intentionally disabled for this bring-up stage.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -20,22 +22,12 @@ impl BootConfig {
     pub fn default_config() -> Self {
         let targets = vec![
             BootTarget::new(
-                "Luna Test System",
+                "Luna Kernel Test",
                 "test",
-                "/images/luna-test.squashfs",
-                "/kernels/test/bzImage",
+                "",
+                "/boot/bzImage",
             )
-            .with_initrd("/kernels/test/initramfs.img")
-            .with_cmdline("console=ttyS0 quiet luna.image=/images/luna-test.squashfs"),
-            BootTarget::new(
-                "Luna Factory",
-                "factory",
-                "/images/luna-factory.squashfs",
-                "/kernels/factory/bzImage",
-            )
-            .with_initrd("/kernels/factory/initramfs.img")
-            .with_cmdline("console=ttyS0 quiet luna.factory=1")
-            .factory(),
+            .with_cmdline("console=ttyS0 quiet"),
         ];
         Self { default_target: 0, targets }
     }
@@ -43,5 +35,6 @@ impl BootConfig {
     pub fn default_target(&self) -> BootResult<&BootTarget> {
         self.targets.get(self.default_target).ok_or(BootError::NoBootTargets)
     }
+
     pub fn targets(&self) -> &[BootTarget] { &self.targets }
 }
