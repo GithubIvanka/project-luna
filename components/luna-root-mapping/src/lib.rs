@@ -176,10 +176,17 @@ impl MappingTable {
         Ok(())
     }
 
-    /// Resolves an exact file mapping or an explicitly declared subtree rule.
-    pub fn resolve(&self, logical: &LogicalPath) -> Result<&PhysicalPath, MappingError> {
-        if let Some(rule) = self.rules.iter().find(|rule| rule.logical == *logical) {
-            return Ok(&rule.physical);
+    /// Resolves a logical resource to its physical backing path.
+    ///
+    /// Exact file mappings win first. Otherwise the most specific explicit
+    /// subtree mapping is selected and the logical suffix is appended to the
+    /// subtree's physical root.
+    pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
+        if let Some(rule) = self.rules.iter().find(|rule| {
+            rule.kind == MappingKind::File && rule.logical == *logical
+                || rule.kind == MappingKind::Subtree && rule.logical == *logical
+        }) {
+            return Ok(rule.physical.clone());
         }
 
         let candidate = self
@@ -189,9 +196,12 @@ impl MappingTable {
             .filter(|rule| is_descendant(logical.as_path(), rule.logical.as_path()))
             .max_by_key(|rule| path_depth(rule.logical.as_path()));
 
-        candidate
-            .map(|rule| &rule.physical)
-            .ok_or(MappingError::NotMapped)
+        let rule = candidate.ok_or(MappingError::NotMapped)?;
+        let relative = logical
+            .as_path()
+            .strip_prefix(rule.logical.as_path())
+            .map_err(|_| MappingError::NotMapped)?;
+        Ok(PhysicalPath::new(rule.physical.as_path().join(relative)))
     }
 
     /// Produces a deterministic logical namespace description without making
@@ -284,21 +294,27 @@ mod tests {
         let physical = PhysicalPath::new("/data/system/apps/example/resources/bin/app");
         let mut table = MappingTable::new();
         table.insert(MappingRule::new(logical.clone(), physical.clone())).unwrap();
-        assert_eq!(table.resolve(&logical).unwrap(), &physical);
+        assert_eq!(table.resolve(&logical).unwrap(), physical);
     }
 
     #[test]
     fn explicit_subtree_mapping_resolves_descendants() {
         let logical = LogicalPath::new("/lib/gtk").unwrap();
         let child = LogicalPath::new("/lib/gtk/libgtk.so").unwrap();
+        let nested = LogicalPath::new("/lib/gtk/themes/default.ini").unwrap();
         let outside = LogicalPath::new("/lib/gtk4.so").unwrap();
         let physical = PhysicalPath::new("/data/system/libs/gtk/4");
         let mut table = MappingTable::new();
-        table
-            .insert(MappingRule::subtree(logical, physical.clone()))
-            .unwrap();
+        table.insert(MappingRule::subtree(logical, physical)).unwrap();
         assert_eq!(table.iter().next().unwrap().kind(), MappingKind::Subtree);
-        assert_eq!(table.resolve(&child).unwrap(), &physical);
+        assert_eq!(
+            table.resolve(&child).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/libgtk.so")
+        );
+        assert_eq!(
+            table.resolve(&nested).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/themes/default.ini")
+        );
         assert_eq!(table.resolve(&outside), Err(MappingError::NotMapped));
     }
 
