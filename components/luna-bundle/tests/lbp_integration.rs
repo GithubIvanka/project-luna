@@ -79,9 +79,9 @@ fn rejects_overlapping_sections() {
 
     let mut normalized = [0u8; HEADER_SIZE];
     normalized.copy_from_slice(&bytes[..HEADER_SIZE]);
-    normalized[20..52].fill(0);
+    normalized[32..64].fill(0);
     let digest = blake3::hash(&normalized);
-    bytes[20..52].copy_from_slice(digest.as_bytes());
+    bytes[32..64].copy_from_slice(digest.as_bytes());
 
     assert!(matches!(
         LbpArchive::from_bytes(bytes),
