@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use luna_common::{BundleId, Version};
 
+#[allow(clippy::collapsible_if)]
 #[path = "lbp_v1.rs"]
 pub mod lbp;
 
