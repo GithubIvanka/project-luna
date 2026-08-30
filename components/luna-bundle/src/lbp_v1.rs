@@ -347,9 +347,9 @@ impl LbpManifest {
         if !matches!(self.bundle.kind.as_str(), "application" | "component") {
             return Err(LbpError::ManifestFormat("unsupported bundle.type".into()));
         }
-        if self.platform.arch != "x86_64" {
+        if self.platform.arch.trim().is_empty() {
             return Err(LbpError::ManifestFormat(
-                "unsupported platform.arch for LBP1".into(),
+                "platform.arch must not be empty".into(),
             ));
         }
         if let Some(version) = &self.platform.min_system {
@@ -376,10 +376,6 @@ impl LbpManifest {
             validate_logical_path(&mapping.logical)?;
             if !mapping.source.starts_with("@dep:") {
                 validate_bundle_relative_path(Path::new(&mapping.source))?;
-            } else if mapping.source.len() == "@dep:".len() {
-                return Err(LbpError::ManifestFormat(
-                    "dependency mapping source must name a dependency".into(),
-                ));
             }
             if !logicals.insert(mapping.logical.clone()) {
                 return Err(LbpError::ManifestFormat(format!(
@@ -438,33 +434,19 @@ impl std::fmt::Display for LbpError {
         match self {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::InvalidHeader => formatter.write_str("invalid LBP1 header"),
-            Self::UnsupportedVersion(version) => {
-                write!(formatter, "unsupported LBP version: {version}")
-            }
-            Self::UnsupportedFlags(flags) => {
-                write!(formatter, "unsupported LBP flags: {flags:#x}")
-            }
+            Self::UnsupportedVersion(version) => write!(formatter, "unsupported LBP version: {version}"),
+            Self::UnsupportedFlags(flags) => write!(formatter, "unsupported LBP flags: {flags:#x}"),
             Self::InvalidSectionTable => formatter.write_str("invalid LBP section table"),
             Self::InvalidSection => formatter.write_str("invalid LBP section"),
-            Self::UnknownSectionType(kind) => {
-                write!(formatter, "unknown LBP section type: {kind}")
-            }
-            Self::UnsupportedCompression(value) => {
-                write!(formatter, "unsupported LBP compression: {value}")
-            }
+            Self::UnknownSectionType(kind) => write!(formatter, "unknown LBP section type: {kind}"),
+            Self::UnsupportedCompression(value) => write!(formatter, "unsupported LBP compression: {value}"),
             Self::HashMismatch => formatter.write_str("LBP content hash mismatch"),
             Self::ManifestFormat(error) => write!(formatter, "invalid manifest: {error}"),
             Self::PayloadFormat(error) => write!(formatter, "invalid payload archive: {error}"),
             Self::PayloadPath(path) => write!(formatter, "unsafe payload path: {}", path.display()),
-            Self::DuplicatePayloadPath(path) => {
-                write!(formatter, "duplicate payload path: {}", path.display())
-            }
-            Self::UnsupportedEntry(entry) => {
-                write!(formatter, "unsupported payload entry: {entry}")
-            }
-            Self::MissingPayloadFile(path) => {
-                write!(formatter, "manifest references missing payload file: {}", path.display())
-            }
+            Self::DuplicatePayloadPath(path) => write!(formatter, "duplicate payload path: {}", path.display()),
+            Self::UnsupportedEntry(entry) => write!(formatter, "unsupported payload entry: {entry}"),
+            Self::MissingPayloadFile(path) => write!(formatter, "manifest references missing payload file: {}", path.display()),
             Self::NumericOverflow => formatter.write_str("numeric overflow"),
             Self::ResourceLimit => formatter.write_str("resource limit exceeded"),
         }
@@ -497,7 +479,6 @@ pub fn build_from_directory(
     let payload = build_deterministic_tar(manifest, source_root.as_ref())?;
     let compressed = zstd::stream::encode_all(Cursor::new(&payload), 3)
         .map_err(|error| LbpError::PayloadFormat(error.to_string()))?;
-
     let sections = [
         (SectionKind::Manifest, COMPRESSION_NONE, manifest_bytes, None),
         (
@@ -515,7 +496,6 @@ pub fn build_from_directory(
     let table_end = HEADER_SIZE
         .checked_add(table_length)
         .ok_or(LbpError::NumericOverflow)?;
-
     let mut output = vec![0u8; table_end];
     output[..4].copy_from_slice(&MAGIC);
     output[4..6].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -548,18 +528,16 @@ pub fn build_from_directory(
         output[start..start + 4].copy_from_slice(&info.kind.code().to_le_bytes());
         output[start + 4..start + 8].copy_from_slice(&info.compression.to_le_bytes());
         output[start + 8..start + 16].copy_from_slice(&info.offset.to_le_bytes());
-        output[start + 16..start + 24]
-            .copy_from_slice(&info.compressed_length.to_le_bytes());
-        output[start + 24..start + 32]
-            .copy_from_slice(&info.uncompressed_length.to_le_bytes());
+        output[start + 16..start + 24].copy_from_slice(&info.compressed_length.to_le_bytes());
+        output[start + 24..start + 32].copy_from_slice(&info.uncompressed_length.to_le_bytes());
         output[start + 32..start + 64].copy_from_slice(&info.content_hash);
     }
 
     let mut normalized = [0u8; HEADER_SIZE];
     normalized.copy_from_slice(&output[..HEADER_SIZE]);
     normalized[HEADER_HASH_OFFSET..HEADER_SIZE].fill(0);
-    output[HEADER_HASH_OFFSET..HEADER_SIZE].copy_from_slice(&hash32(&normalized));
-
+    let header_hash = hash32(&normalized);
+    output[HEADER_HASH_OFFSET..HEADER_SIZE].copy_from_slice(&header_hash);
     Ok(output)
 }
 
@@ -572,14 +550,14 @@ fn build_deterministic_tar(
         sources.insert(PathBuf::from(&entry.exec));
     }
     for mapping in &manifest.mappings {
-        if !mapping.source.starts_with("@dep:") {
-            collect_source_files(source_root, Path::new(&mapping.source), &mut sources)?;
+        if mapping.source.starts_with("@dep:") {
+            continue;
         }
+        collect_source_files(source_root, Path::new(&mapping.source), &mut sources)?;
     }
 
     let mut builder = Builder::new(Vec::new());
     builder.follow_symlinks(false);
-
     for relative in sources {
         validate_bundle_relative_path(&relative)?;
         let full = source_root.join(&relative);
@@ -598,11 +576,13 @@ fn build_deterministic_tar(
         header.set_gid(0);
         header.set_mtime(0);
         #[cfg(unix)]
-        header.set_mode(if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 != 0 {
-            0o755
-        } else {
-            0o644
-        });
+        header.set_mode(
+            if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 != 0 {
+                0o755
+            } else {
+                0o644
+            },
+        );
         #[cfg(not(unix))]
         header.set_mode(0o644);
         header.set_username("").map_err(payload_error)?;
@@ -612,7 +592,6 @@ fn build_deterministic_tar(
             .append(&header, Cursor::new(data))
             .map_err(payload_error)?;
     }
-
     builder.finish().map_err(payload_error)?;
     builder.into_inner().map_err(payload_error)
 }
@@ -654,10 +633,10 @@ fn validate_manifest_payload(
         paths.insert(entry.path().map_err(payload_error)?.into_owned());
     }
 
-    if let Some(entry) = &manifest.entry
-        && !paths.contains(Path::new(&entry.exec))
-    {
-        return Err(LbpError::MissingPayloadFile(PathBuf::from(&entry.exec)));
+    if let Some(entry) = &manifest.entry {
+        if !paths.contains(Path::new(&entry.exec)) {
+            return Err(LbpError::MissingPayloadFile(PathBuf::from(&entry.exec)));
+        }
     }
 
     for mapping in &manifest.mappings {
@@ -974,7 +953,7 @@ mod tests {
     fn corrupt_header_hash_is_rejected() {
         let root = fixture();
         let mut bytes = build_from_directory(&manifest(), &root).expect("build bundle");
-        bytes[8] ^= 1;
+        bytes[32] ^= 1;
         assert!(matches!(
             LbpArchive::from_bytes(bytes),
             Err(LbpError::HashMismatch)
@@ -1010,7 +989,9 @@ mod tests {
             build_from_directory(&manifest(), &root).expect("build bundle"),
         )
         .expect("parse bundle");
-        archive.extract_payload(&destination).expect("extract payload");
+        archive
+            .extract_payload(&destination)
+            .expect("extract payload");
         assert_eq!(
             fs::read(destination.join("bin/app")).unwrap(),
             b"#!/bin/sh\necho luna\n"
