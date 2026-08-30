@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use luna_common::{BundleId, Version};
 
+#[path = "lbp_v1.rs"]
 pub mod lbp;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
