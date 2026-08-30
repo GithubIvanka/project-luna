@@ -5,15 +5,21 @@ on:
   release:
     types: [created]
 
+concurrency:
+  group: slsa-provenance-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build release subjects
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
