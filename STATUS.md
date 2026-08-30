@@ -18,10 +18,10 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Foundation/domain APIs | Completed baseline |
 | Manager/runtime APIs | Completed baseline |
 | Integration contracts | Prototype completed |
-| Linux namespace/materialization | **Logical-root backend implemented on top of Linux mount namespaces; security/device integration remains** |
+| Linux namespace/materialization | **Logical-root backend implemented on top of Linux mount namespaces; application-runtime preparation boundary added; security/device integration remains** |
 | Persistent state | **Durable redb backend implemented under DATA/system/state; crash/reopen contract tested** |
 | Update/checkpoint/rollback | **Checkpointed orchestration engine implemented; domain-manager backends remain to be connected** |
-| Bundle Format v1 | RFC-0002 Draft / Proposal; not yet accepted |
+| Bundle Format v1 | RFC-0002 Draft / Proposal; **candidate decision set added, not yet accepted** |
 | `luna-boot.efi` | Working prototype reaches kernel + test init + `sh`; production hardening remains |
 
 ## Current workspace
@@ -96,6 +96,12 @@ The logical application root remains a conventional Linux-compatible `/`, while 
 
 The crate remains a low-level OS backend. It does not decide policy, own application lifecycle, or replace `luna-root-mapping`.
 
+### Application runtime integration
+
+`luna-app-runtime` now has an explicit namespace-preparation boundary in addition to its in-memory lifecycle model. The runtime validates the bundle/mapping contract, tracks `ApplicationInstance`, and can ask `luna-namespace` to materialize the logical root for an existing instance without moving process creation or policy ownership into the namespace crate.
+
+The final process-exec/supervision step remains outside this preparation API by design.
+
 ### Persistent state
 
 `luna-state` now has a durable `RedbStateStore` using `redb` as the accepted first embedded backend. The database defaults to:
@@ -124,11 +130,31 @@ commit
 
 Failures trigger reverse-order rollback through the domain `UpdateBackend`. A non-terminal durable phase can be reconciled after interruption. The engine remains independent of concrete filesystem/domain mutation; domain managers provide the backend.
 
+## RFC-0002 work
+
+`docs/rfc/RFC-0002.md` remains the normative draft/proposal document. A new companion file, `docs/rfc/RFC-0002-V1-DECISION-SET.md`, records one coherent candidate for the open v1 decisions without silently promoting it to architecture.
+
+The candidate currently proposes:
+
+- structured `LBP1` container;
+- fixed little-endian header and section table;
+- BLAKE3-256 content hashing;
+- TOML manifest;
+- v1 bundle types limited to `application` and `component`;
+- Luna semantic versioning;
+- bundle-relative payload paths and logical mappings;
+- opaque, request-only capability declarations;
+- optional Ed25519 signature section;
+- deterministic tar semantics inside the payload section with zstd compression;
+- fail-closed handling of unknown versions, bad paths, overlaps and integrity failures.
+
+The final acceptance gate still requires a tested writer/reader, payload validation, integrity tests, signature coverage tests and a decision-history update. Until then, the candidate is not an accepted architecture decision.
+
 ## Remaining work in the current sequence
 
-1. Connect the logical-root backend to `luna-security` authorization and `luna-app-runtime` process creation.
+1. Connect the logical-root backend to `luna-security` authorization and real process creation/supervision.
 2. Connect update backends to `luna-system-manager`, `luna-kernel-manager` and `luna-app-manager` without moving lifecycle ownership into `luna-update-manager`.
-3. Resolve and accept RFC-0002, then implement the final `.lbp` codec in `luna-bundle`.
+3. Turn the RFC-0002 candidate into a tested `.lbp` codec and then promote the agreed decisions into the normative RFC.
 4. Continue production signature/trust integration.
 5. Formalize System Image/kernel compatibility and persistent boot-state metadata.
 6. Select final IPC/event transport.
