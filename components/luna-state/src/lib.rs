@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct StateKey(String);
@@ -184,63 +184,21 @@ fn storage_error(error: impl fmt::Display) -> StateError { StateError::Storage(e
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_db_path() -> PathBuf {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("luna-state-test-{}-{stamp}.redb", std::process::id()))
-    }
+    fn temp_db_path() -> PathBuf { let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(); std::env::temp_dir().join(format!("luna-state-test-{}-{stamp}.redb", std::process::id())) }
 
     #[test]
-    fn round_trip() {
-        let key = StateKey::new("a");
-        let mut store = MemoryStateStore::new();
-        store.set(key.clone(), StateValue::new(b"v".to_vec())).unwrap();
-        assert_eq!(store.get(&key).unwrap().unwrap().as_slice(), b"v");
-    }
-
+    fn round_trip() { let key = StateKey::new("a"); let mut store = MemoryStateStore::new(); store.set(key.clone(), StateValue::new(b"v".to_vec())).unwrap(); assert_eq!(store.get(&key).unwrap().unwrap().as_slice(), b"v"); }
     #[test]
-    fn atomic_revision() {
-        let mut store = MemoryStateStore::new();
-        let revision = store.revision();
-        let mut transaction = StateTransaction::new();
-        transaction.set(StateKey::new("a"), StateValue::new(b"1".to_vec())).set(StateKey::new("b"), StateValue::new(b"2".to_vec()));
-        assert_eq!(store.transaction(revision, transaction).unwrap(), revision.next());
-    }
-
+    fn atomic_revision() { let mut store = MemoryStateStore::new(); let revision = store.revision(); let mut tx = StateTransaction::new(); tx.set(StateKey::new("a"), StateValue::new(b"1".to_vec())).set(StateKey::new("b"), StateValue::new(b"2".to_vec())); assert_eq!(store.transaction(revision, tx).unwrap(), revision.next()); }
     #[test]
-    fn stale_is_rejected() {
-        let mut store = MemoryStateStore::new();
-        let stale = store.revision();
-        store.set(StateKey::new("a"), StateValue::new(b"current".to_vec())).unwrap();
-        let mut transaction = StateTransaction::new();
-        transaction.set(StateKey::new("a"), StateValue::new(b"stale".to_vec()));
-        assert!(matches!(store.transaction(stale, transaction), Err(StateError::RevisionConflict { .. })));
-        assert_eq!(store.get(&StateKey::new("a")).unwrap().unwrap().as_slice(), b"current");
-    }
-
+    fn stale_is_rejected() { let mut store = MemoryStateStore::new(); let stale = store.revision(); store.set(StateKey::new("a"), StateValue::new(b"current".to_vec())).unwrap(); let mut tx = StateTransaction::new(); tx.set(StateKey::new("a"), StateValue::new(b"stale".to_vec())); assert!(matches!(store.transaction(stale, tx), Err(StateError::RevisionConflict { .. }))); assert_eq!(store.get(&StateKey::new("a")).unwrap().unwrap().as_slice(), b"current"); }
     #[test]
-    fn invalid_key_does_not_mutate() {
-        let mut store = MemoryStateStore::new();
-        assert!(matches!(store.set(StateKey::new("../bad"), StateValue::new(vec![1])), Err(StateError::InvalidKey)));
-        assert_eq!(store.revision(), Revision::initial());
-    }
-
+    fn invalid_key_does_not_mutate() { let mut store = MemoryStateStore::new(); assert!(matches!(store.set(StateKey::new("../bad"), StateValue::new(vec![1])), Err(StateError::InvalidKey))); assert_eq!(store.revision(), Revision::initial()); }
     #[test]
     fn durable_store_survives_reopen() {
         let path = temp_db_path();
-        {
-            let mut store = RedbStateStore::open(&path).unwrap();
-            let mut tx = StateTransaction::new();
-            tx.set(StateKey::new("system/boot/current"), StateValue::new(b"luna-1.0.0".to_vec()));
-            tx.set(StateKey::new("system/update/checkpoint"), StateValue::new(b"checkpointed".to_vec()));
-            assert_eq!(store.transaction(Revision::initial(), tx).unwrap(), Revision::initial().next());
-        }
-        {
-            let store = RedbStateStore::open(&path).unwrap();
-            assert_eq!(store.revision(), Revision::initial().next());
-            assert_eq!(store.get(&StateKey::new("system/boot/current")).unwrap().unwrap().as_slice(), b"luna-1.0.0");
-            assert_eq!(store.get(&StateKey::new("system/update/checkpoint")).unwrap().unwrap().as_slice(), b"checkpointed");
-        }
+        { let mut store = RedbStateStore::open(&path).unwrap(); let mut tx = StateTransaction::new(); tx.set(StateKey::new("system/boot/current"), StateValue::new(b"luna-1.0.0".to_vec())).set(StateKey::new("system/update/checkpoint"), StateValue::new(b"checkpointed".to_vec())); assert_eq!(store.transaction(Revision::initial(), tx).unwrap(), Revision::initial().next()); }
+        { let store = RedbStateStore::open(&path).unwrap(); assert_eq!(store.revision(), Revision::initial().next()); assert_eq!(store.get(&StateKey::new("system/boot/current")).unwrap().unwrap().as_slice(), b"luna-1.0.0"); assert_eq!(store.get(&StateKey::new("system/update/checkpoint")).unwrap().unwrap().as_slice(), b"checkpointed"); }
         let _ = std::fs::remove_file(path);
     }
 }
