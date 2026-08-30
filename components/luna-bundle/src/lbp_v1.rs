@@ -849,28 +849,26 @@ fn decode_section(bytes: &[u8], section: &SectionInfo) -> Result<Vec<u8>, LbpErr
     Ok(decoded)
 }
 
-fn read_u16(bytes: &[u8], start: usize) -> Result<u16, LbpError> {
-    let end = start.checked_add(2).ok_or(LbpError::NumericOverflow)?;
+fn read_exact<const N: usize>(bytes: &[u8], start: usize) -> Result<[u8; N], LbpError> {
+    let end = start.checked_add(N).ok_or(LbpError::NumericOverflow)?;
     if end > bytes.len() {
         return Err(LbpError::InvalidHeader);
     }
-    Ok(u16::from_le_bytes(bytes[start..end].try_into().unwrap()))
+    bytes[start..end]
+        .try_into()
+        .map_err(|_| LbpError::InvalidHeader)
+}
+
+fn read_u16(bytes: &[u8], start: usize) -> Result<u16, LbpError> {
+    Ok(u16::from_le_bytes(read_exact::<2>(bytes, start)?))
 }
 
 fn read_u32(bytes: &[u8], start: usize) -> Result<u32, LbpError> {
-    let end = start.checked_add(4).ok_or(LbpError::NumericOverflow)?;
-    if end > bytes.len() {
-        return Err(LbpError::InvalidHeader);
-    }
-    Ok(u32::from_le_bytes(bytes[start..end].try_into().unwrap()))
+    Ok(u32::from_le_bytes(read_exact::<4>(bytes, start)?))
 }
 
 fn read_u64(bytes: &[u8], start: usize) -> Result<u64, LbpError> {
-    let end = start.checked_add(8).ok_or(LbpError::NumericOverflow)?;
-    if end > bytes.len() {
-        return Err(LbpError::InvalidHeader);
-    }
-    Ok(u64::from_le_bytes(bytes[start..end].try_into().unwrap()))
+    Ok(u64::from_le_bytes(read_exact::<8>(bytes, start)?))
 }
 
 fn payload_error<E: std::fmt::Display>(error: E) -> LbpError {
@@ -934,12 +932,12 @@ mod tests {
         let root = fixture();
         let bytes = build_from_directory(&manifest(), &root).expect("build bundle");
         assert_eq!(&bytes[..4], b"LBP1");
-        assert_eq!(u16::from_le_bytes(bytes[4..6].try_into().unwrap()), 1);
-        assert_eq!(u16::from_le_bytes(bytes[6..8].try_into().unwrap()), 0);
-        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 2);
-        assert_eq!(u64::from_le_bytes(bytes[12..20].try_into().unwrap()), 64);
-        assert_eq!(u64::from_le_bytes(bytes[20..28].try_into().unwrap()), 128);
-        assert_eq!(u32::from_le_bytes(bytes[28..32].try_into().unwrap()), 64);
+        assert_eq!(u16::from_le_bytes(bytes[4..6].try_into().expect("header version")), 1);
+        assert_eq!(u16::from_le_bytes(bytes[6..8].try_into().expect("flags")), 0);
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().expect("section count")), 2);
+        assert_eq!(u64::from_le_bytes(bytes[12..20].try_into().expect("table offset")), 64);
+        assert_eq!(u64::from_le_bytes(bytes[20..28].try_into().expect("table length")), 128);
+        assert_eq!(u32::from_le_bytes(bytes[28..32].try_into().expect("header length")), 64);
         assert_ne!(&bytes[32..64], &[0u8; 32]);
         let _ = fs::remove_dir_all(root);
     }
@@ -953,7 +951,13 @@ mod tests {
         assert_eq!(first, second);
         let parsed = LbpArchive::from_bytes(first).expect("parse bundle");
         assert_eq!(parsed.manifest, manifest);
-        assert_eq!(parsed.content_identity().unwrap().len(), 32);
+        assert_eq!(
+            parsed
+                .content_identity()
+                .expect("stable content identity")
+                .len(),
+            32
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1001,7 +1005,7 @@ mod tests {
             .extract_payload(&destination)
             .expect("extract payload");
         assert_eq!(
-            fs::read(destination.join("bin/app")).unwrap(),
+            fs::read(destination.join("bin/app")).expect("read extracted payload"),
             b"#!/bin/sh\necho luna\n"
         );
         let _ = fs::remove_dir_all(root);
