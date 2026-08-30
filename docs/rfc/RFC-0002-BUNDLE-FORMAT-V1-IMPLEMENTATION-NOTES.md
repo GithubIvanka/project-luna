@@ -19,7 +19,7 @@ The runtime validates that logical resource paths are absolute, contain no paren
 
 The `.lbp` archive/container is not implemented as a binary parser in the domain crate. The domain model is deliberately independent from the transport representation.
 
-The proposed outer container, section table, compression, hashing, signature block and exact manifest schema remain proposals in RFC-0002 until the RFC is explicitly accepted.
+The current candidate is recorded separately in `docs/rfc/RFC-0002-V1-DECISION-SET.md`. It proposes the existing structured `LBP1` container with a fixed little-endian header/section table, BLAKE3-256 integrity, TOML manifest, deterministic tar semantics with zstd payload compression, and an optional Ed25519 signature section. These are candidate decisions, not accepted architecture, until the acceptance gate is completed.
 
 ## 3. Mapping boundary
 
@@ -35,30 +35,44 @@ A deterministic `StaticPolicyAuthority` now exists for contract tests and early 
 
 ## 5. Runtime boundary
 
-`luna-app-runtime` now has an in-memory lifecycle prototype that validates bundle structure and mappings, requires an active `UserSession`, creates an `ApplicationInstance`, and supports stop/failure transitions. It does not install bundles, perform mounts, or execute processes.
+`luna-app-runtime` now has an in-memory lifecycle prototype that validates bundle structure and mappings, requires an active `UserSession`, creates an `ApplicationInstance`, supports stop/failure transitions, and exposes an explicit namespace-preparation boundary backed by `luna-namespace`.
 
-## 6. Open RFC decisions
+Namespace preparation validates an existing application instance and asks the Linux backend to materialize the logical root. It deliberately does not perform the final process `exec` or move application lifecycle ownership into `luna-namespace`.
 
-Before RFC-0002 can become Accepted, the project still needs explicit decisions for at least:
+## 6. Candidate RFC decisions
 
-1. final outer `.lbp` container layout;
-2. section table encoding and reserved flags;
-3. compression algorithm/version;
-4. hash algorithm (RFC currently lists BLAKE3/SHA-256 as candidates);
-5. exact manifest schema and required fields;
-6. bundle type vocabulary;
-7. versioning rules;
-8. dependency constraint syntax;
-9. capability vocabulary and relationship to `luna-security`;
-10. signature algorithm and trust metadata;
-11. signature coverage/canonicalization rules;
-12. compatibility and forward-version behavior;
-13. exact BundleID/content binding derivation;
-14. storage/import rules for removable bundles;
-15. migration rules between future format versions.
+The companion decision set records one coherent v1 candidate for:
 
-No implementation in this pass should be interpreted as silently resolving these decisions.
+1. `LBP1` fixed-size header and fixed-size section table;
+2. little-endian integer encoding;
+3. reserved v1 flags must be zero;
+4. exactly one manifest and one payload section;
+5. optional resources and signature sections;
+6. BLAKE3-256 content identity;
+7. TOML manifest with explicit required application fields;
+8. v1 bundle types limited to `application` and `component`;
+9. semantic `MAJOR.MINOR.PATCH` bundle versioning;
+10. small semver-compatible dependency constraints;
+11. opaque request-only capability strings;
+12. logical mappings only, never physical DATA paths;
+13. optional Ed25519 signatures with content-oriented coverage;
+14. deterministic tar semantics with zstd compression for the payload section;
+15. fail-closed handling of unknown versions, malformed section ranges, unsafe paths, duplicates and integrity failures.
+
+These decisions intentionally remain candidate-level until the writer/reader and test gate are complete.
 
 ## 7. Validation rule
 
 Unknown future bundle formats must be rejected rather than guessed. A production installer must validate the container, manifest, integrity and trust state before making an installed bundle available to runtime.
+
+## 8. Acceptance gate
+
+Before RFC-0002 can become Accepted, the repository should contain:
+
+- the final normative RFC text with candidate decisions promoted to accepted requirements;
+- a tested writer/reader for the outer container;
+- manifest parse/validation tests;
+- deterministic payload construction and traversal-safety tests;
+- integrity-failure tests;
+- signature coverage tests once the crypto dependency is introduced;
+- an update to `docs/decisions/ARCHITECTURE-DECISION-HISTORY.md`.
