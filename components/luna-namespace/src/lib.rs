@@ -38,9 +38,6 @@ impl From<io::Error> for NamespaceError {
 }
 
 /// A process-local Linux mount namespace.
-///
-/// This object represents an already-created namespace. It deliberately does
-/// not own application policy, process lifecycle, or logical path resolution.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LinuxMountNamespace;
 
@@ -53,17 +50,12 @@ const STANDARD_ROOT_DIRS: &[&str] = &[
 
 impl LinuxMountNamespace {
     /// Create a private mount namespace for the calling process.
-    ///
-    /// Call this in the dedicated child that will become the application's
-    /// process tree. The mount namespace is intentionally not restored.
     pub fn enter_private() -> Result<Self, NamespaceError> {
         // SAFETY: unshare(2) affects only the calling process.
         if unsafe { libc::unshare(libc::CLONE_NEWNS) } == -1 {
             return Err(io::Error::last_os_error().into());
         }
 
-        // Make the copied root mount tree private so later mount changes do
-        // not propagate back into the parent namespace.
         if mount(None, Path::new("/"), None, libc::MS_REC | libc::MS_PRIVATE)? == -1 {
             return Err(io::Error::last_os_error().into());
         }
@@ -74,9 +66,8 @@ impl LinuxMountNamespace {
     /// Prepare a complete Linux-compatible logical root below `root`.
     ///
     /// `base_root` is normally the mounted Luna System Image. It is mounted as
-    /// the base filesystem and then the validated mapping table overlays the
-    /// selected DATA-backed resources. The caller must perform security
-    /// authorization before invoking this method.
+    /// the base filesystem and then validated DATA-backed mappings are layered
+    /// on top. Authorization must happen before this method is called.
     pub fn materialize_logical_root(
         &self,
         root: &Path,
@@ -88,37 +79,32 @@ impl LinuxMountNamespace {
         }
 
         fs::create_dir_all(root)?;
+        bind_mount(base_root, root, true)?;
+
         for directory in STANDARD_ROOT_DIRS {
             fs::create_dir_all(root.join(directory))?;
         }
 
-        // The System Image becomes the conventional Linux-compatible base /
-        // while DATA resources are layered on top through explicit mappings.
-        bind_mount(base_root, root, true)?;
-
-        // The base image may not contain all mount targets expected by the
-        // mapping table, so create their parents before applying the mounts.
         for rule in mappings.iter() {
             prepare_mount_target(root, rule)?;
         }
-        self.apply_read_only_mappings(mappings)?;
+        self.apply_read_only_mappings_at_root(root, mappings)?;
 
-        // proc/sys are standard kernel views rather than DATA mappings. They
-        // are mounted inside the private namespace and therefore do not alter
-        // the host namespace.
+        // proc/sys are standard kernel views rather than DATA mappings.
         mount_proc(&root.join("proc"))?;
         mount_sysfs(&root.join("sys"))?;
 
-        // /dev is intentionally an empty private tmpfs. Device-manager policy
-        // can later bind only explicitly authorized device nodes into it.
+        // /dev is intentionally a private empty tmpfs. The device manager can
+        // later bind only explicitly authorized nodes into this view.
         mount_tmpfs(&root.join("dev"), "mode=0755")?;
 
         Ok(LogicalRoot { path: root.to_path_buf() })
     }
 
-    /// Materialize the supplied validated mapping table as read-only bind
-    /// mounts. This is the conservative primitive used when the caller has
-    /// not authorized write access to the backing resource.
+    /// Apply the supplied mapping table as read-only mounts at the host root.
+    /// Use `materialize_logical_root` when building an isolated application /
+    /// tree; this method is retained as a low-level primitive for callers that
+    /// already prepared their own mount targets.
     pub fn apply_read_only_mappings(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
         for rule in mappings.iter() {
             self.apply_mapping(rule, true)?;
@@ -126,11 +112,35 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
+    fn apply_read_only_mappings_at_root(
+        &self,
+        root: &Path,
+        mappings: &MappingTable,
+    ) -> Result<(), NamespaceError> {
+        for rule in mappings.iter() {
+            let mut adjusted = rule.clone();
+            let logical = root.join(rule.logical().as_str().trim_start_matches('/'));
+            let physical = rule.physical().clone();
+            adjusted = match rule.kind() {
+                luna_root_mapping::MappingKind::File => MappingRule::file(
+                    luna_root_mapping::LogicalPath::new(logical).map_err(|_| NamespaceError::InvalidPath)?,
+                    physical,
+                ),
+                luna_root_mapping::MappingKind::Subtree => MappingRule::subtree(
+                    luna_root_mapping::LogicalPath::new(logical).map_err(|_| NamespaceError::InvalidPath)?,
+                    physical,
+                ),
+            };
+            self.apply_mapping(&adjusted, true)?;
+        }
+        Ok(())
+    }
+
     /// Apply one already-authorized mapping.
     ///
-    /// `read_only=false` is intentionally an explicit low-level choice: the
-    /// security layer must make the corresponding authorization decision before
-    /// the runtime asks this backend to create a writable mapping.
+    /// `read_only=false` is an explicit low-level choice. The security layer
+    /// must make the corresponding authorization decision before the runtime
+    /// requests a writable mapping.
     pub fn apply_mapping(&self, rule: &MappingRule, read_only: bool) -> Result<(), NamespaceError> {
         let target = rule.logical().as_path();
         let source = rule.physical().as_path();
@@ -159,9 +169,6 @@ impl LinuxMountNamespace {
     }
 
     /// Switch the calling process into the prepared logical root.
-    ///
-    /// The caller should invoke this after all namespace mounts have been
-    /// materialized and immediately before launching the application process.
     pub fn enter_logical_root(&self, root: &LogicalRoot) -> Result<(), NamespaceError> {
         if !root.path.is_dir() {
             return Err(NamespaceError::MissingBaseRoot);
@@ -176,12 +183,18 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
-    /// Bind one authorized device node into the private /dev view.
-    pub fn expose_device(&self, source: &Path, logical_name: &Path, read_only: bool) -> Result<(), NamespaceError> {
+    /// Bind one authorized device node into a prepared logical root's /dev.
+    pub fn expose_device(
+        &self,
+        root: &LogicalRoot,
+        source: &Path,
+        logical_name: &Path,
+        read_only: bool,
+    ) -> Result<(), NamespaceError> {
         if !source.exists() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "device source does not exist").into());
         }
-        let target = Path::new("/dev").join(logical_name);
+        let target = root.path.join("dev").join(logical_name);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -240,20 +253,44 @@ fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), Names
 }
 
 fn mount_proc(target: &Path) -> Result<(), NamespaceError> {
-    mount(Some(Path::new("proc")), target, Some(Path::new("proc")), libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC)
-        .map(|status| if status == -1 { Err(io::Error::last_os_error()) } else { Ok(()) })??;
+    let status = mount_with_data(
+        Some(Path::new("proc")),
+        target,
+        Some(Path::new("proc")),
+        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        None,
+    )?;
+    if status == -1 {
+        return Err(io::Error::last_os_error().into());
+    }
     Ok(())
 }
 
 fn mount_sysfs(target: &Path) -> Result<(), NamespaceError> {
-    mount(Some(Path::new("sysfs")), target, Some(Path::new("sysfs")), libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_RDONLY)
-        .map(|status| if status == -1 { Err(io::Error::last_os_error()) } else { Ok(()) })??;
+    let status = mount_with_data(
+        Some(Path::new("sysfs")),
+        target,
+        Some(Path::new("sysfs")),
+        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_RDONLY,
+        None,
+    )?;
+    if status == -1 {
+        return Err(io::Error::last_os_error().into());
+    }
     Ok(())
 }
 
 fn mount_tmpfs(target: &Path, options: &str) -> Result<(), NamespaceError> {
-    mount(Some(Path::new("tmpfs")), target, Some(Path::new("tmpfs")), libc::MS_NOSUID | libc::MS_NODEV, Some(options))
-        .map(|status| if status == -1 { Err(io::Error::last_os_error()) } else { Ok(()) })??;
+    let status = mount_with_data(
+        Some(Path::new("tmpfs")),
+        target,
+        Some(Path::new("tmpfs")),
+        libc::MS_NOSUID | libc::MS_NODEV,
+        Some(options),
+    )?;
+    if status == -1 {
+        return Err(io::Error::last_os_error().into());
+    }
     Ok(())
 }
 
@@ -280,10 +317,11 @@ fn mount_with_data(
     let source = source.map(cstring).transpose()?;
     let target = cstring(target)?;
     let filesystem = filesystem.map(cstring).transpose()?;
-    let data = data.map(|value| CString::new(value).map_err(|_| NamespaceError::InvalidPath)).transpose()?;
+    let data = data
+        .map(|value| CString::new(value).map_err(|_| NamespaceError::InvalidPath))
+        .transpose()?;
 
-    // SAFETY: all C strings remain alive until the syscall returns; null
-    // pointers are valid for bind/remount operations.
+    // SAFETY: all C strings remain alive until the syscall returns.
     Ok(unsafe {
         libc::mount(
             source.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
