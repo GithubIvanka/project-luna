@@ -347,9 +347,9 @@ impl LbpManifest {
         if !matches!(self.bundle.kind.as_str(), "application" | "component") {
             return Err(LbpError::ManifestFormat("unsupported bundle.type".into()));
         }
-        if self.platform.arch.trim().is_empty() {
+        if self.platform.arch != "x86_64" {
             return Err(LbpError::ManifestFormat(
-                "platform.arch must not be empty".into(),
+                "unsupported platform.arch for LBP1".into(),
             ));
         }
         if let Some(version) = &self.platform.min_system {
@@ -376,6 +376,10 @@ impl LbpManifest {
             validate_logical_path(&mapping.logical)?;
             if !mapping.source.starts_with("@dep:") {
                 validate_bundle_relative_path(Path::new(&mapping.source))?;
+            } else if mapping.source.len() == "@dep:".len() {
+                return Err(LbpError::ManifestFormat(
+                    "dependency mapping source must name a dependency".into(),
+                ));
             }
             if !logicals.insert(mapping.logical.clone()) {
                 return Err(LbpError::ManifestFormat(format!(
@@ -528,8 +532,10 @@ pub fn build_from_directory(
         output[start..start + 4].copy_from_slice(&info.kind.code().to_le_bytes());
         output[start + 4..start + 8].copy_from_slice(&info.compression.to_le_bytes());
         output[start + 8..start + 16].copy_from_slice(&info.offset.to_le_bytes());
-        output[start + 16..start + 24].copy_from_slice(&info.compressed_length.to_le_bytes());
-        output[start + 24..start + 32].copy_from_slice(&info.uncompressed_length.to_le_bytes());
+        output[start + 16..start + 24]
+            .copy_from_slice(&info.compressed_length.to_le_bytes());
+        output[start + 24..start + 32]
+            .copy_from_slice(&info.uncompressed_length.to_le_bytes());
         output[start + 32..start + 64].copy_from_slice(&info.content_hash);
     }
 
@@ -645,7 +651,9 @@ fn validate_manifest_payload(
         }
         let source = Path::new(&mapping.source);
         if !paths.contains(source) && !paths.iter().any(|path| path.starts_with(source)) {
-            return Err(LbpError::MissingPayloadFile(PathBuf::from(&mapping.source)));
+            return Err(LbpError::MissingPayloadFile(PathBuf::from(
+                &mapping.source,
+            )));
         }
     }
     Ok(())
