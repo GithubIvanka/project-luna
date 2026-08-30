@@ -1,7 +1,10 @@
-//! RFC-0002 Bundle Format v1 (`.lbp`) transport codec candidate.
+//! RFC-0002 Bundle Format v1 (`.lbp`) transport codec.
 //!
 //! The transport representation is separate from the Bundle domain model and
-//! from application lifecycle management.
+//! application lifecycle. This module implements the accepted LBP1 container
+//! layout, deterministic payload encoding, integrity validation, and safe
+//! extraction. Signature bytes are represented as an optional container section;
+//! policy and cryptographic trust remain outside the format parser.
 
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -14,15 +17,17 @@ use tar::{Archive, Builder, EntryType, Header};
 
 pub const MAGIC: [u8; 4] = *b"LBP1";
 pub const FORMAT_VERSION: u16 = 1;
-pub const HEADER_SIZE: usize = 52;
+pub const HEADER_SIZE: usize = 64;
 pub const SECTION_ENTRY_SIZE: usize = 64;
 
+const HEADER_HASH_OFFSET: usize = 32;
 const SECTION_MANIFEST: u32 = 1;
 const SECTION_PAYLOAD: u32 = 2;
 const SECTION_RESOURCES: u32 = 3;
 const SECTION_SIGNATURE: u32 = 4;
 const COMPRESSION_NONE: u32 = 0;
 const COMPRESSION_ZSTD: u32 = 1;
+const MAX_DECODED_SECTION_SIZE: u64 = 1 << 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SectionKind {
@@ -76,57 +81,53 @@ impl LbpArchive {
             return Err(LbpError::InvalidHeader);
         }
 
-        let version = u16::from_le_bytes(
-            bytes[4..6]
-                .try_into()
-                .map_err(|_| LbpError::InvalidHeader)?,
-        );
+        let version = read_u16(&bytes, 4)?;
         if version != FORMAT_VERSION {
             return Err(LbpError::UnsupportedVersion(version));
         }
 
-        let flags = u16::from_le_bytes(
-            bytes[6..8]
-                .try_into()
-                .map_err(|_| LbpError::InvalidHeader)?,
-        );
+        let flags = read_u16(&bytes, 6)?;
         if flags != 0 {
             return Err(LbpError::UnsupportedFlags(flags));
         }
 
-        let count = u32::from_le_bytes(
-            bytes[8..12]
-                .try_into()
-                .map_err(|_| LbpError::InvalidHeader)?,
-        ) as usize;
-        let table_offset = usize::try_from(u64::from_le_bytes(
-            bytes[12..20]
-                .try_into()
-                .map_err(|_| LbpError::InvalidHeader)?,
-        ))
-        .map_err(|_| LbpError::NumericOverflow)?;
+        let count = usize::try_from(read_u32(&bytes, 8)?)
+            .map_err(|_| LbpError::NumericOverflow)?;
+        let table_offset = usize::try_from(read_u64(&bytes, 12)?)
+            .map_err(|_| LbpError::NumericOverflow)?;
+        let table_length = usize::try_from(read_u64(&bytes, 20)?)
+            .map_err(|_| LbpError::NumericOverflow)?;
+        let header_length = usize::try_from(read_u32(&bytes, 28)?)
+            .map_err(|_| LbpError::NumericOverflow)?;
 
-        let mut normalized_header = [0u8; HEADER_SIZE];
-        normalized_header.copy_from_slice(&bytes[..HEADER_SIZE]);
-        let expected_hash = normalized_header[20..52].to_owned();
-        normalized_header[20..52].fill(0);
-        if hash32(&normalized_header) != expected_hash.as_slice() {
+        if header_length != HEADER_SIZE
+            || table_length != count.saturating_mul(SECTION_ENTRY_SIZE)
+            || table_offset < HEADER_SIZE
+        {
+            return Err(LbpError::InvalidSectionTable);
+        }
+
+        let mut expected_hash = [0u8; 32];
+        expected_hash.copy_from_slice(&bytes[HEADER_HASH_OFFSET..HEADER_SIZE]);
+        let mut normalized = [0u8; HEADER_SIZE];
+        normalized.copy_from_slice(&bytes[..HEADER_SIZE]);
+        normalized[HEADER_HASH_OFFSET..HEADER_SIZE].fill(0);
+        if hash32(&normalized) != expected_hash {
             return Err(LbpError::HashMismatch);
         }
 
-        let table_len = count
-            .checked_mul(SECTION_ENTRY_SIZE)
-            .ok_or(LbpError::NumericOverflow)?;
         let table_end = table_offset
-            .checked_add(table_len)
+            .checked_add(table_length)
             .ok_or(LbpError::NumericOverflow)?;
-        if table_offset < HEADER_SIZE || table_end > bytes.len() {
+        if table_end > bytes.len() {
             return Err(LbpError::InvalidSectionTable);
         }
 
         let mut sections = Vec::with_capacity(count);
         for index in 0..count {
-            let start = table_offset + index * SECTION_ENTRY_SIZE;
+            let start = table_offset
+                .checked_add(index.checked_mul(SECTION_ENTRY_SIZE).ok_or(LbpError::NumericOverflow)?)
+                .ok_or(LbpError::NumericOverflow)?;
             let kind = SectionKind::from_code(read_u32(&bytes, start)?)?;
             let compression = read_u32(&bytes, start + 4)?;
             let offset = read_u64(&bytes, start + 8)?;
@@ -163,11 +164,13 @@ impl LbpArchive {
             .ok_or(LbpError::InvalidSectionTable)?;
         let payload_section = find_section(&sections, SectionKind::Payload)
             .ok_or(LbpError::InvalidSectionTable)?;
+
         let manifest_bytes = decode_section(&bytes, manifest_section)?;
         let payload_bytes = decode_section(&bytes, payload_section)?;
         let manifest_text = std::str::from_utf8(&manifest_bytes)
             .map_err(|_| LbpError::ManifestFormat("manifest is not UTF-8".into()))?;
         let manifest = LbpManifest::from_toml(manifest_text)?;
+
         validate_payload(&payload_bytes)?;
         validate_manifest_payload(&manifest, &payload_bytes)?;
 
@@ -192,6 +195,28 @@ impl LbpArchive {
         let section = find_section(&self.sections, SectionKind::Payload)
             .ok_or(LbpError::InvalidSectionTable)?;
         decode_section(&self.bytes, section)
+    }
+
+    pub fn signature_bytes(&self) -> Result<Option<Vec<u8>>, LbpError> {
+        match find_section(&self.sections, SectionKind::Signature) {
+            Some(section) => decode_section(&self.bytes, section).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn content_identity(&self) -> Result<[u8; 32], LbpError> {
+        let manifest = self.manifest.to_toml()?.into_bytes();
+        let payload = self.payload_bytes()?;
+        let resources = match find_section(&self.sections, SectionKind::Resources) {
+            Some(section) => decode_section(&self.bytes, section)?,
+            None => Vec::new(),
+        };
+
+        let mut hasher = Hasher::new();
+        hasher.update(&manifest);
+        hasher.update(&payload);
+        hasher.update(&resources);
+        Ok(*hasher.finalize().as_bytes())
     }
 
     pub fn extract_payload(&self, destination: impl AsRef<Path>) -> Result<(), LbpError> {
@@ -344,7 +369,9 @@ impl LbpManifest {
         let mut logicals = BTreeSet::new();
         for mapping in &self.mappings {
             validate_logical_path(&mapping.logical)?;
-            validate_bundle_relative_path(Path::new(&mapping.source))?;
+            if !mapping.source.starts_with("@dep:") {
+                validate_bundle_relative_path(Path::new(&mapping.source))?;
+            }
             if !logicals.insert(mapping.logical.clone()) {
                 return Err(LbpError::ManifestFormat(format!(
                     "duplicate mapping: {}",
@@ -359,6 +386,7 @@ impl LbpManifest {
                     "dependency id/version must not be empty".into(),
                 ));
             }
+            validate_dependency_constraint(&dependency.version)?;
         }
 
         if self
@@ -393,6 +421,7 @@ pub enum LbpError {
     UnsupportedEntry(String),
     MissingPayloadFile(PathBuf),
     NumericOverflow,
+    ResourceLimit,
 }
 
 impl std::fmt::Display for LbpError {
@@ -405,21 +434,16 @@ impl std::fmt::Display for LbpError {
             Self::InvalidSectionTable => f.write_str("invalid LBP section table"),
             Self::InvalidSection => f.write_str("invalid LBP section"),
             Self::UnknownSectionType(v) => write!(f, "unknown LBP section type: {v}"),
-            Self::UnsupportedCompression(v) => {
-                write!(f, "unsupported LBP compression: {v}")
-            }
+            Self::UnsupportedCompression(v) => write!(f, "unsupported LBP compression: {v}"),
             Self::HashMismatch => f.write_str("LBP content hash mismatch"),
             Self::ManifestFormat(e) => write!(f, "invalid manifest: {e}"),
             Self::PayloadFormat(e) => write!(f, "invalid payload archive: {e}"),
             Self::PayloadPath(p) => write!(f, "unsafe payload path: {}", p.display()),
-            Self::DuplicatePayloadPath(p) => {
-                write!(f, "duplicate payload path: {}", p.display())
-            }
+            Self::DuplicatePayloadPath(p) => write!(f, "duplicate payload path: {}", p.display()),
             Self::UnsupportedEntry(e) => write!(f, "unsupported payload entry: {e}"),
-            Self::MissingPayloadFile(p) => {
-                write!(f, "manifest references missing payload file: {}", p.display())
-            }
+            Self::MissingPayloadFile(p) => write!(f, "manifest references missing payload file: {}", p.display()),
             Self::NumericOverflow => f.write_str("numeric overflow"),
+            Self::ResourceLimit => f.write_str("resource limit exceeded"),
         }
     }
 }
@@ -450,6 +474,7 @@ pub fn build_from_directory(
     let payload = build_deterministic_tar(manifest, source_root.as_ref())?;
     let compressed = zstd::stream::encode_all(Cursor::new(&payload), 3)
         .map_err(|e| LbpError::PayloadFormat(e.to_string()))?;
+
     let sections = [
         (SectionKind::Manifest, COMPRESSION_NONE, manifest_bytes, None),
         (
@@ -459,20 +484,23 @@ pub fn build_from_directory(
             Some(payload.len() as u64),
         ),
     ];
+
     let count = sections.len();
+    let table_length = count
+        .checked_mul(SECTION_ENTRY_SIZE)
+        .ok_or(LbpError::NumericOverflow)?;
     let table_end = HEADER_SIZE
-        .checked_add(
-            count
-                .checked_mul(SECTION_ENTRY_SIZE)
-                .ok_or(LbpError::NumericOverflow)?,
-        )
+        .checked_add(table_length)
         .ok_or(LbpError::NumericOverflow)?;
     let mut output = vec![0u8; table_end];
+
     output[..4].copy_from_slice(&MAGIC);
     output[4..6].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
     output[6..8].copy_from_slice(&0u16.to_le_bytes());
     output[8..12].copy_from_slice(&(count as u32).to_le_bytes());
     output[12..20].copy_from_slice(&(HEADER_SIZE as u64).to_le_bytes());
+    output[20..28].copy_from_slice(&(table_length as u64).to_le_bytes());
+    output[28..32].copy_from_slice(&(HEADER_SIZE as u32).to_le_bytes());
 
     let mut infos = Vec::with_capacity(count);
     let mut offset = table_end as u64;
@@ -498,16 +526,16 @@ pub fn build_from_directory(
         output[start + 4..start + 8].copy_from_slice(&info.compression.to_le_bytes());
         output[start + 8..start + 16].copy_from_slice(&info.offset.to_le_bytes());
         output[start + 16..start + 24].copy_from_slice(&info.compressed_length.to_le_bytes());
-        output[start + 24..start + 32]
-            .copy_from_slice(&info.uncompressed_length.to_le_bytes());
+        output[start + 24..start + 32].copy_from_slice(&info.uncompressed_length.to_le_bytes());
         output[start + 32..start + 64].copy_from_slice(&info.content_hash);
     }
 
     let mut normalized = [0u8; HEADER_SIZE];
     normalized.copy_from_slice(&output[..HEADER_SIZE]);
-    normalized[20..52].fill(0);
+    normalized[HEADER_HASH_OFFSET..HEADER_SIZE].fill(0);
     let header_hash = hash32(&normalized);
-    output[20..52].copy_from_slice(&header_hash);
+    output[HEADER_HASH_OFFSET..HEADER_SIZE].copy_from_slice(&header_hash);
+
     Ok(output)
 }
 
@@ -520,6 +548,9 @@ fn build_deterministic_tar(
         sources.insert(PathBuf::from(&entry.exec));
     }
     for mapping in &manifest.mappings {
+        if mapping.source.starts_with("@dep:") {
+            continue;
+        }
         collect_source_files(
             source_root,
             Path::new(&mapping.source),
@@ -529,6 +560,7 @@ fn build_deterministic_tar(
 
     let mut builder = Builder::new(Vec::new());
     builder.follow_symlinks(false);
+
     for relative in sources {
         validate_bundle_relative_path(&relative)?;
         let full = source_root.join(&relative);
@@ -539,10 +571,9 @@ fn build_deterministic_tar(
 
         let mut data = Vec::new();
         File::open(&full)?.read_to_end(&mut data)?;
+
         let mut header = Header::new_gnu();
-        header
-            .set_path(&relative)
-            .map_err(payload_error)?;
+        header.set_path(&relative).map_err(payload_error)?;
         header.set_size(data.len() as u64);
         header.set_uid(0);
         header.set_gid(0);
@@ -562,6 +593,7 @@ fn build_deterministic_tar(
             .append(&header, Cursor::new(data))
             .map_err(payload_error)?;
     }
+
     builder.finish().map_err(payload_error)?;
     builder.into_inner().map_err(payload_error)
 }
@@ -582,7 +614,7 @@ fn collect_source_files(
         return Ok(());
     }
     if metadata.is_dir() {
-        for entry in fs::read_dir(full)? {
+        for entry in fs::read_dir(&full)? {
             let entry = entry?;
             collect_source_files(root, &relative.join(entry.file_name()), output)?;
         }
@@ -609,14 +641,12 @@ fn validate_manifest_payload(
     }
 
     for mapping in &manifest.mappings {
-        if !paths.contains(Path::new(&mapping.source))
-            && !paths
-                .iter()
-                .any(|path| path.starts_with(Path::new(&mapping.source)))
-        {
-            return Err(LbpError::MissingPayloadFile(PathBuf::from(
-                &mapping.source,
-            )));
+        if mapping.source.starts_with("@dep:") {
+            continue;
+        }
+        let source = Path::new(&mapping.source);
+        if !paths.contains(source) && !paths.iter().any(|path| path.starts_with(source)) {
+            return Err(LbpError::MissingPayloadFile(PathBuf::from(&mapping.source)));
         }
     }
     Ok(())
@@ -635,9 +665,7 @@ fn validate_payload(bytes: &[u8]) -> Result<(), LbpError> {
         match entry.header().entry_type() {
             EntryType::Regular | EntryType::Directory => {}
             _ => {
-                return Err(LbpError::UnsupportedEntry(
-                    path.display().to_string(),
-                ));
+                return Err(LbpError::UnsupportedEntry(path.display().to_string()));
             }
         }
     }
@@ -685,9 +713,9 @@ fn validate_logical_path(value: &str) -> Result<(), LbpError> {
 }
 
 fn validate_bundle_relative_path(path: &Path) -> Result<(), LbpError> {
-    if path.is_absolute() {
+    if path.as_os_str().is_empty() || path.is_absolute() {
         return Err(LbpError::ManifestFormat(format!(
-            "bundle-relative path is absolute: {}",
+            "invalid bundle-relative path: {}",
             path.display()
         )));
     }
@@ -704,6 +732,24 @@ fn validate_bundle_relative_path(path: &Path) -> Result<(), LbpError> {
                 path.display()
             )));
         }
+    }
+    Ok(())
+}
+
+fn validate_dependency_constraint(value: &str) -> Result<(), LbpError> {
+    let value = value.trim();
+    let stripped = value
+        .strip_prefix('^')
+        .or_else(|| value.strip_prefix('~'))
+        .or_else(|| value.strip_prefix(">="))
+        .or_else(|| value.strip_prefix("<="))
+        .or_else(|| value.strip_prefix('>'))
+        .or_else(|| value.strip_prefix('<'))
+        .unwrap_or(value);
+    if parse_version(stripped).is_none() {
+        return Err(LbpError::ManifestFormat(
+            "unsupported dependency version constraint".into(),
+        ));
     }
     Ok(())
 }
@@ -746,6 +792,8 @@ fn validate_range(offset: u64, length: u64, total: usize) -> Result<(), LbpError
         .ok_or(LbpError::NumericOverflow)?;
     if end > total as u64 {
         Err(LbpError::InvalidSection)
+    } else if length > MAX_DECODED_SECTION_SIZE {
+        Err(LbpError::ResourceLimit)
     } else {
         Ok(())
     }
@@ -777,20 +825,34 @@ fn decode_section(bytes: &[u8], section: &SectionInfo) -> Result<Vec<u8>, LbpErr
     if end > bytes.len() {
         return Err(LbpError::InvalidSection);
     }
+
     let stored = &bytes[start..end];
     if hash32(stored) != section.content_hash {
         return Err(LbpError::HashMismatch);
     }
+
     let decoded = match section.compression {
         COMPRESSION_NONE => stored.to_vec(),
         COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(stored))
             .map_err(payload_error)?,
         other => return Err(LbpError::UnsupportedCompression(other)),
     };
+
     if decoded.len() as u64 != section.uncompressed_length {
         return Err(LbpError::InvalidSection);
     }
+    if section.uncompressed_length > MAX_DECODED_SECTION_SIZE {
+        return Err(LbpError::ResourceLimit);
+    }
     Ok(decoded)
+}
+
+fn read_u16(bytes: &[u8], start: usize) -> Result<u16, LbpError> {
+    let end = start.checked_add(2).ok_or(LbpError::NumericOverflow)?;
+    if end > bytes.len() {
+        return Err(LbpError::InvalidHeader);
+    }
+    Ok(u16::from_le_bytes(bytes[start..end].try_into().unwrap()))
 }
 
 fn read_u32(bytes: &[u8], start: usize) -> Result<u32, LbpError> {
@@ -829,10 +891,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "luna-lbp-{stamp}-{}",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("luna-lbp-{stamp}-{}", std::process::id()));
         fs::create_dir_all(&path).unwrap();
         path
     }
@@ -890,6 +949,8 @@ mod tests {
         assert_eq!(first, second);
         let archive = LbpArchive::from_bytes(first).unwrap();
         assert_eq!(archive.manifest, m);
+        assert_eq!(archive.sections.len(), 2);
+        assert_eq!(archive.content_identity().unwrap().len(), 32);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -910,11 +971,7 @@ mod tests {
         let dir = fixture();
         let mut bytes = build_from_directory(&manifest(), &dir).unwrap();
         let entry = HEADER_SIZE + SECTION_ENTRY_SIZE;
-        let offset = u64::from_le_bytes(
-            bytes[entry + 8..entry + 16]
-                .try_into()
-                .unwrap(),
-        ) as usize;
+        let offset = u64::from_le_bytes(bytes[entry + 8..entry + 16].try_into().unwrap()) as usize;
         bytes[offset] ^= 0xff;
         assert!(matches!(
             LbpArchive::from_bytes(bytes),
@@ -937,9 +994,6 @@ mod tests {
     fn rejects_unknown_version() {
         let mut m = manifest();
         m.format = 2;
-        assert!(matches!(
-            m.validate(),
-            Err(LbpError::UnsupportedVersion(2))
-        ));
+        assert!(matches!(m.validate(), Err(LbpError::UnsupportedVersion(2))));
     }
 }
