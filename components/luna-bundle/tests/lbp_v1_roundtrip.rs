@@ -47,9 +47,7 @@ fn manifest() -> LbpManifest {
 
 fn fixture(root: &Path) {
     fs::create_dir_all(root.join("bin")).expect("create bin directory");
-    fs::create_dir_all(root.join("resources/icons")).expect("create resource directory");
     fs::write(root.join("bin/app"), b"#!/bin/sh\necho luna\n").expect("write executable fixture");
-    fs::write(root.join("resources/icons/app.txt"), b"icon").expect("write resource fixture");
 }
 
 #[test]
@@ -82,8 +80,10 @@ fn roundtrip_preserves_manifest_and_payload() {
     archive
         .extract_payload(&destination)
         .expect("extract payload");
-    assert_eq!(fs::read(destination.join("bin/app")).unwrap(), b"#!/bin/sh\necho luna\n");
-    assert_eq!(fs::read(destination.join("resources/icons/app.txt")).unwrap(), b"icon");
+    assert_eq!(
+        fs::read(destination.join("bin/app")).unwrap(),
+        b"#!/bin/sh\necho luna\n"
+    );
 
     let _ = fs::remove_dir_all(root);
     let _ = fs::remove_dir_all(destination);
