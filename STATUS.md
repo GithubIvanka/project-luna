@@ -1,31 +1,27 @@
 # Project Luna — Status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 > `docs/ARCHITECTURE.md` is the architectural Source of Truth. This file is a status snapshot only.
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ**. The project is now in architecture-driven backend implementation and high-risk integration work.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and is now in architecture-driven backend implementation and high-risk integration work.
 
 ### Phase status
 
-| Phase | Status |
+| Area | Status |
 |---|---|
-| 1.1 | Accepted and consolidated |
-| 1.2 | Accepted and consolidated |
-| 1.3 | Accepted and consolidated |
-| 1.4 | Accepted and consolidated |
-| 1.5 | Accepted and consolidated |
-| 1.6 | Accepted through 1.6-HZ and consolidated |
+| Architecture 1.1–1.6-HZ | Accepted and consolidated |
 | Repository/Cargo audit | Completed |
 | Crate map | Synchronized with repository |
-| Foundation/domain API pass | Completed |
-| Manager/runtime API baseline | Completed |
-| Integration-contract hardening | Prototype completed |
-| Linux namespace/materialization | First real Linux mount-namespace backend implemented; full logical-root materializer next |
-| Persistence/update transaction | In-memory atomic prototype completed; durable backend next |
-| Bundle Format v1 | RFC-0002 still Draft / Proposal |
+| Foundation/domain APIs | Completed baseline |
+| Manager/runtime APIs | Completed baseline |
+| Integration contracts | Prototype completed |
+| Linux namespace/materialization | **Logical-root backend implemented on top of Linux mount namespaces; security/device integration remains** |
+| Persistent state | **Durable redb backend implemented under DATA/system/state; crash/reopen contract tested** |
+| Update/checkpoint/rollback | **Checkpointed orchestration engine implemented; domain-manager backends remain to be connected** |
+| Bundle Format v1 | RFC-0002 Draft / Proposal; not yet accepted |
 | `luna-boot.efi` | Working prototype reaches kernel + test init + `sh`; production hardening remains |
 
 ## Current workspace
@@ -73,77 +69,86 @@ There is no separate `lunad` architecture component and no separate Session Mana
 EFI
 SYSTEM
 DATA
-└── system/{apps,drivers,libs,volumes,config,state}
-    users/<user>/{home,data,config}
-    cache
+├── system/{apps,drivers,libs,volumes,config,state}
+│   └── state/luna-state.redb
+├── users/<user>/{home,data,config}
+└── cache
 SWAP / ZRAM
 ```
 
 The logical application root remains a conventional Linux-compatible `/`, while the physical DATA layout stays Luna-native. Application namespace composition is controlled by mapping plus security policy.
 
-## Completed implementation-contract work
+## Implemented backend work
 
-- `luna-root-mapping`: deterministic mapping/materialization contract with file mappings by default and explicit subtree mappings for suitable semantic classes.
-- `luna-security`: central policy boundary with explicit authorization decisions and structured restrictions.
-- `luna-bundle`: internal Bundle model and manifest/resource validation.
-- `luna-config`: layered user/application/system configuration model.
-- `luna-user-session` + `luna-app-runtime`: lifecycle contract for UserSession and ApplicationInstance.
-- `luna-event`: event domain and bounded-delivery contract.
-- `luna-state`: synchronous state abstraction, global revision and atomic transaction contract.
-- `luna-update-manager`: update-plan/executor contract and in-memory atomic prototype.
+### Linux namespace + logical root
 
-## Current implementation direction
+`luna-namespace` now provides:
 
-### Linux namespace/materialization backend
+- private Linux mount namespace creation;
+- private mount propagation;
+- System Image base-root bind mounting;
+- creation of conventional Linux root directories;
+- controlled read-only mapping application;
+- explicit writable mapping primitive for already-authorized callers;
+- private `/proc` and read-only `/sys` views;
+- private empty `/dev` tmpfs, ready for authorized device-manager binds;
+- `chroot` into the prepared logical root.
 
-The first real OS-specific backend is now isolated in `luna-namespace`. It uses Linux mount namespaces, private mount propagation, and controlled read-only bind mounts. `luna-root-mapping` remains a domain/mapping layer and contains no Linux namespace syscalls. Linux mount namespaces provide isolated mount views, and bind mounts can expose selected resources at controlled logical destinations. citeturn415334search2turn415334search6
+The crate remains a low-level OS backend. It does not decide policy, own application lifecycle, or replace `luna-root-mapping`.
 
-The backend is intentionally a low-level primitive. It does not yet build the complete logical Linux `/` tree, create `/proc`/`/sys`/`/dev` views, enforce policy, or own application lifecycle. ID-mapped mounts remain an optional implementation mechanism for later user/resource ownership work. citeturn415334search1turn415334search4
+### Persistent state
 
-### Persistent state backend
+`luna-state` now has a durable `RedbStateStore` using `redb` as the accepted first embedded backend. The database defaults to:
 
-The state abstraction remains backend-agnostic. The first durable implementation direction is a small embedded transactional key/value backend; the backend choice is an implementation decision, not a new Luna architectural boundary. State ownership remains above the raw storage mechanism.
+```text
+DATA/system/state/luna-state.redb
+```
 
-### Update/rollback engine
+State mutations and the global revision are committed together in one ACID transaction. The implementation deliberately does not add a second Luna-specific WAL on top of redb. Reopen/persistence and revision semantics are covered by tests.
 
-`luna-update-manager` remains the execution side. `luna-system-manager` and other managers own domain state/query models. Update execution must be checkpoint-aware, interruption-safe and explicitly reversible where rollback is supported.
+### Update/checkpoint/rollback
 
-### Bundle Format v1
+`luna-update-manager` now contains `UpdateEngine` with:
 
-`luna-bundle` owns Bundle domain/format concerns. `luna-app-manager` owns install/update/remove/import lifecycle. `.lbp` is transport/archive representation only. RFC-0002 is not accepted yet.
+```text
+prepare
+  ↓
+checkpoint
+  ↓
+apply
+  ↓
+verify
+  ↓
+commit
+```
 
-### Security / signatures
+Failures trigger reverse-order rollback through the domain `UpdateBackend`. A non-terminal durable phase can be reconciled after interruption. The engine remains independent of concrete filesystem/domain mutation; domain managers provide the backend.
 
-The architecture requires separation of signature verification, trust decision and runtime permission. Production publisher/repository signature verification and trust storage are still implementation work.
+## Remaining work in the current sequence
 
-## `luna-boot.efi`
-
-Bootloader work is maintained separately under `boot/luna-boot/`. The current prototype has progressed to real kernel loading and a test init handoff that reaches `sh` in the other boot-focused development track. This work is not represented as a userspace crate.
+1. Connect the logical-root backend to `luna-security` authorization and `luna-app-runtime` process creation.
+2. Connect update backends to `luna-system-manager`, `luna-kernel-manager` and `luna-app-manager` without moving lifecycle ownership into `luna-update-manager`.
+3. Resolve and accept RFC-0002, then implement the final `.lbp` codec in `luna-bundle`.
+4. Continue production signature/trust integration.
+5. Formalize System Image/kernel compatibility and persistent boot-state metadata.
+6. Select final IPC/event transport.
+7. Tune resource enforcement and device/volume integration.
+8. Add end-to-end integration tests.
 
 ## CI / supply chain
 
-GitHub Actions is configured for Rust workspace verification and the separate UEFI boot target. SLSA provenance generation is also enabled.
+GitHub Actions now checks formatting, workspace build/test/clippy/release build, and the separate UEFI boot target. The SLSA provenance workflow has explicit least-privilege build permissions and generates provenance for release subjects.
 
 ## Explicitly still deferred
 
-- full logical-root materialization above the low-level namespace backend;
-- durable on-disk state backend;
-- production update/checkpoint/rollback protocol;
-- final IPC transport;
-- final async event transport/broker;
+- final security policy/runtime enforcement integration;
+- final filtered `/dev` device population;
+- final IPC transport and async event transport;
 - System Image manifest specification and compatibility implementation;
-- persistent boot-state metadata;
+- persistent boot-state metadata and userspace boot-success confirmation;
 - final `.lbp` wire/archive implementation and RFC-0002 acceptance;
 - production signature/trust chain;
 - final CLI grammar/alias persistence;
 - GUI implementation;
 - device automount backend;
 - final resource policy tuning.
-
-## Next work
-
-1. Build the higher-level logical-root materializer on top of `luna-root-mapping` + `luna-namespace`.
-2. Implement durable `luna-state` persistence and crash-safe recovery.
-3. Implement the real update/checkpoint/rollback engine.
-4. Resolve and accept RFC-0002, then implement `.lbp`.
-5. Continue production security/signature integration.
