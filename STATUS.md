@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-31
 
-> `docs/ARCHITECTURE.md` is the architectural Source of Truth. Post-1.6 accepted decisions are additionally recorded in `docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md` pending safe consolidation into the large Source of Truth document.
+> `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and the subsequent accepted decisions are consolidated there.
 
 ## Overall state
 
@@ -13,7 +13,7 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Area | Status |
 |---|---|
 | Architecture 1.1–1.6-HZ | Accepted and consolidated |
-| Post-1.6 accepted clarifications | Recorded in architecture amendment; pending merge into SoT body |
+| Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth |
 | Repository/Cargo audit | Completed baseline; repeated during implementation passes |
 | Crate map | Synchronized with repository |
 | Foundation/domain APIs | Implemented baseline |
@@ -47,8 +47,6 @@ luna-app-runtime
 luna-cli
 ```
 
-There is no separate `lunad` architecture component. `UserSession` is the combined user/session entity and `luna-system-runtime` is the single system-wide runtime/supervisor.
-
 ## Current storage model
 
 ```text
@@ -74,7 +72,7 @@ The backend remains an OS-specific primitive layer. It does not own Security pol
 
 ### Security
 
-`luna-security` now models `Visibility` independently from `Read`/`Write`/`Execute`/`Use`/`Manage` and represents constrained decisions with typed `Constraint` values rather than an opaque scope string.
+`luna-security` models `Visibility` independently from `Read`/`Write`/`Execute`/`Use`/`Manage` and represents constrained decisions with typed `Constraint` values.
 
 ### Application runtime
 
@@ -92,7 +90,7 @@ Mutations and global revision are committed atomically in one redb transaction. 
 
 ### Update/checkpoint/rollback
 
-`luna-update-manager` now records durable intent before backend preparation and persists operation progress in:
+`luna-update-manager` records durable intent before backend preparation and persists operation progress in:
 
 ```text
 updates/<id>/phase
@@ -101,7 +99,7 @@ updates/<id>/applied
 updates/<id>/inflight
 ```
 
-An in-flight operation is conservatively treated as possibly applied during interruption reconciliation, and domain backends are required to provide idempotent rollback semantics.
+Interrupted operations are reconciled from durable operation state, while rollback remains an explicit recovery/transaction action.
 
 ## RFC-0002
 
