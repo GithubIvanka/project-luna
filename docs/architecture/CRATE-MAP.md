@@ -1,81 +1,62 @@
-# Project Luna — Phase 1.6 Crate Map
+# Project Luna — Current Crate Map
 
-**Status:** architecture-driven implementation map
+**Status:** current implementation map  
 **Source of Truth:** `docs/ARCHITECTURE.md`
 
-This document translates the accepted architecture into concrete Rust package boundaries. It is not a replacement for the architecture and must not introduce new architectural responsibilities.
+This document describes the current Rust package boundaries. It does not define architecture independently.
 
 ## Foundation
 
 | Crate | Responsibility | Form |
 |---|---|---|
-| `luna-common` | Small cross-cutting value types only | lib |
-| `luna-fs` | Low-level filesystem abstraction and primitives | lib |
-| `luna-root-mapping` | Logical filesystem/path mapping | lib |
-| `luna-namespace` | Linux namespace/materialization mechanisms | lib |
+| `luna-common` | Small shared value types and identifiers | lib |
+| `luna-fs` | Low-level filesystem primitives and metadata | lib |
+| `luna-root-mapping` | Logical path and mapping semantics | lib |
+| `luna-namespace` | Linux namespace/materialization primitives | lib |
 | `luna-config` | Configuration model and scoped configuration | lib |
 
-`luna-root-mapping` describes and resolves logical resources. It must not contain Linux namespace syscalls. `luna-namespace` contains the OS-specific enforcement/materialization primitives that consume validated mapping plans.
-
-## Policy and management
+## Policy and state
 
 | Crate | Responsibility | Form |
 |---|---|---|
-| `luna-security` | Central security/policy authority | lib/backend |
-| `luna-app-manager` | Install, update, removal, verification, migrations and package import | lib + bin where required |
+| `luna-security` | Policy, authorization, grants and trust | lib |
+| `luna-state` | Persistent state domain, storage abstraction and transactions | lib |
+| `luna-event` | Event domain, subscriptions and delivery contracts | lib |
+
+## Bundle and management
+
+| Crate | Responsibility | Form |
+|---|---|---|
+| `luna-bundle` | Bundle domain, manifest, validation and accepted RFC-0002/LBP1 codec | lib |
+| `luna-app-manager` | Application install/import/update/removal/verification/migration | lib + bin where required |
 | `luna-system-manager` | System state model and queries | lib + bin where required |
-| `luna-update-manager` | Executes system/application changes | lib + bin where required |
+| `luna-update-manager` | State-changing update execution, checkpoints and rollback coordination | lib + bin where required |
 | `luna-kernel-manager` | Kernel inventory, metadata and compatibility queries | lib + bin where required |
-| `luna-device-manager` | Device discovery, volumes and device lifecycle | lib + bin where required |
+| `luna-device-manager` | Device and volume discovery/lifecycle | lib + bin where required |
 
 ## Runtime
 
 | Crate | Responsibility | Form |
 |---|---|---|
-| `luna-system-runtime` | Single system-wide supervision and `UserSession` orchestration | lib + bin where required |
-| `luna-user-session` | `UserSession` domain model and lifecycle contract | lib |
-| `luna-app-runtime` | `ApplicationInstance` execution/lifecycle boundary | lib + bin where required |
+| `luna-system-runtime` | Single system-wide runtime/supervision and UserSession orchestration | lib + bin where required |
+| `luna-user-session` | Combined UserSession domain and lifecycle contract | lib |
+| `luna-app-runtime` | ApplicationInstance execution/lifecycle and execution-environment preparation | lib + bin where required |
 
-There is no separate `lunad` architecture component and no separate Session Manager. `luna-system-runtime` is the single system-wide runtime/supervisor. `UserSession` is the combined user/session entity.
+There is no separate `lunad` or Session Manager architecture component. `luna-system-runtime` is the system-wide runtime/supervisor.
 
-Runtime ownership is intentionally separate from management ownership. `luna-app-manager` does not own normal application execution.
-
-## Bundle
+## CLI
 
 | Crate | Responsibility | Form |
 |---|---|---|
-| `luna-bundle` | Internal Bundle domain model, manifest/resource representation and eventual format codec | lib |
+| `luna-cli` | Thin user-facing CLI client over backend operations | lib + bin |
 
-The crate exists in the current workspace. `.lbp` remains the transport/archive representation of a Bundle, and RFC-0002 has not yet been accepted as the final wire/archive specification.
-
-## State and events
-
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-state` | Persistent state abstraction, revision and atomic transaction contracts | lib |
-| `luna-event` | Event domain, subscriptions and delivery contracts | lib |
-
-The current prototypes are in-memory/contract-level where the durable or OS-backed backend has not yet been implemented.
-
-## User interface
-
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-cli` | Thin CLI client over backend APIs | lib + bin (`luna`) |
-
-A future GUI client is separate and uses the same backend contracts.
+GUI is a separate thin client using the same backend contracts.
 
 ## Boot
 
-`luna-boot.efi` is a separate boot-specific project under `boot/luna-boot/`. It is intentionally outside the ordinary userspace workspace because it targets UEFI and operates before the userspace architecture exists.
+`luna-boot.efi` is a separate UEFI project under `boot/luna-boot/` and is intentionally outside the ordinary userspace workspace.
 
-The current boot implementation has progressed beyond the original scaffold: kernel loading and the test init handoff have been demonstrated through the shell (`sh`). Production trust/signature integration and final boot-compatibility work remain separate tasks.
-
-`luna-boot-state` remains a conceptual architecture boundary and is not yet a separate workspace crate.
-
-## Logging
-
-`luna-log` is not created merely because the name existed historically. A dedicated logging boundary will be introduced when ownership/API requirements justify it.
+The current boot project includes UEFI/Linux boot protocol handling and test infrastructure. Its dedicated development path has demonstrated kernel loading through the test init to `sh`.
 
 ## Dependency direction
 
@@ -88,32 +69,27 @@ luna-root-mapping
     ↑
 luna-namespace
 
-luna-config ───────┐
+luna-config   ─────┐
 luna-security ─────┤
-luna-state ────────┤
-luna-event ────────┤
-luna-bundle ───────┤
+luna-state    ─────┤
+luna-event    ─────┤
+luna-bundle   ─────┤
                    │
 management crates ─┤
-runtime crates ────┤
-luna-cli ──────────┘
+runtime crates   ──┤
+luna-cli        ──┘
 ```
 
-Higher-level crates consume lower-level contracts. No higher-level crate is allowed to pull application lifecycle, security policy, runtime state, bundle lifecycle or service APIs into `luna-common` or `luna-fs` merely for convenience.
+Higher-level components consume lower-level contracts. Domain ownership remains explicit.
 
-## Current implementation rule
+## Current status
 
-The repository may contain a scaffolded crate before its full backend implementation exists, but the scaffold must represent a responsibility boundary already defined by the architecture.
+The current workspace contains all crates above because each corresponds to an architecture-defined boundary that is already under active implementation or contract/integration hardening. A crate must not absorb unrelated responsibilities merely for convenience.
 
-Before expanding a crate into a real backend, define:
+RFC-0002 Bundle Format v1 is accepted. `luna-bundle` contains the current LBP1 implementation.
 
-1. responsibility;
-2. public API;
-3. state ownership;
-4. persistence;
-5. error model;
-6. dependencies;
-7. IPC/client boundary where applicable;
-8. security boundary.
+The first durable `luna-state` backend is `redb`.
 
-Existing implementation code is reusable source material, not an authority over the architecture.
+`luna-namespace` contains the first Linux namespace/materialization backend.
+
+`luna-boot.efi` remains a separate boot boundary.
