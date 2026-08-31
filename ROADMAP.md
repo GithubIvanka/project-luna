@@ -4,7 +4,9 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 ## Current position
 
-Phases **1.1–1.6** are accepted/consolidated through **1.6-HZ**. The project has moved from contract-only work into real Linux backend implementation.
+Phases **1.1–1.6** are accepted/consolidated through **1.6-HZ**. RFC-0002 Bundle Format v1 was accepted on **2026-08-30**. The project is now in backend integration and hardening.
+
+Post-1.6 accepted clarifications are recorded in `docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md` until they are safely consolidated into the large Source of Truth document.
 
 ## Completed foundation
 
@@ -14,13 +16,15 @@ Repository / Cargo audit         ← COMPLETED
 Crate map                        ← COMPLETED / SYNCHRONIZED
 Foundation/domain APIs           ← COMPLETED BASELINE
 Manager/runtime APIs             ← COMPLETED BASELINE
-Integration contract prototypes  ← COMPLETED
+Integration contracts            ← COMPLETED
 Namespace primitive              ← COMPLETED
-Logical-root materialization     ← IMPLEMENTED BACKEND
+Logical-root backend             ← IMPLEMENTED
 Persistent state abstraction     ← COMPLETED
 Durable redb state backend       ← IMPLEMENTED
 Update plan abstraction          ← COMPLETED
 Checkpoint/apply/verify/rollback ← IMPLEMENTED ENGINE
+RFC-0002                         ← ACCEPTED
+LBP1 codec                       ← IMPLEMENTED / HARDENING
 luna-boot                        ← WORKING PARALLEL PROTOTYPE → kernel + test init + sh
 ```
 
@@ -28,50 +32,53 @@ luna-boot                        ← WORKING PARALLEL PROTOTYPE → kernel + tes
 
 ### 1. Security-authorized runtime integration
 
-Connect the real Linux namespace/logical-root backend to the existing Luna policy and runtime boundaries.
+Connect the Linux namespace/logical-root backend to the existing Luna security and runtime boundaries.
 
 Goals:
 
-- `luna-security` authorization before writable/device mappings;
-- `luna-app-runtime` child-process creation;
+- authorization before writable/device mappings;
+- real child-process creation and supervision;
 - conventional logical `/` without exposing the host filesystem;
 - filtered `/dev` population from authorized resources;
-- secure path/symlink boundary validation;
-- resource-control integration.
+- secure physical-path/symlink boundary validation;
+- resource-control setup before execution.
 
 ### 2. Durable state integration
 
-The first durable backend is now `redb` under `DATA/system/state/luna-state.redb`.
+`luna-state` uses `redb` under `DATA/system/state/luna-state.redb` as the first durable backend.
 
 Goals:
 
-- connect state ownership to system/runtime managers;
+- connect state ownership to `luna-system-runtime` / `luna-system-manager`;
 - persist boot/update/runtime state;
 - retain revision-checked atomic transactions;
-- add recovery/integrity integration where needed.
+- add integrity/recovery coverage.
 
 ### 3. Domain-backed update / checkpoint / rollback engine
 
-`luna-update-manager` is the mutation coordinator, not the owner of application/system/kernel lifecycle.
+`luna-update-manager` is the mutation coordinator; domain managers remain owners of their respective models.
 
 Goals:
 
-- connect `UpdateBackend` to domain managers;
-- prepare;
-- checkpoint;
-- apply;
-- verify;
-- commit;
+- connect real `UpdateBackend` implementations;
+- persist exact operation/checkpoint/applied-step state;
 - interruption reconciliation;
 - explicit rollback;
 - System Image/kernel independence;
 - application update/migration transactions.
 
-### 4. Bundle Format v1
+### 4. RFC-0002 implementation conformance
 
-Design and formally accept RFC-0002, then implement `.lbp` in `luna-bundle`.
+RFC-0002 is now accepted. The remaining work is to make `luna-bundle` a complete, tested reference implementation of the accepted specification.
 
-`luna-app-manager` owns lifecycle operations and package import; `luna-bundle` owns Bundle representation and format codec concerns.
+Goals:
+
+- close the complete parser/writer conformance matrix;
+- deterministic canonical payload verification;
+- malformed-container fuzz/property tests where useful;
+- complete signature-section encoding/verification boundary;
+- compatibility tests for future/unknown fields according to the accepted rules;
+- installation-stage integration through `luna-app-manager`.
 
 ### 5. Production security / signature chain
 
@@ -79,10 +86,11 @@ Implement:
 
 - artifact verification;
 - publisher/repository signatures;
-- content identity binding;
+- content-identity binding;
 - trust records;
-- signature failure handling;
-- runtime permission enforcement.
+- key rotation/revocation;
+- runtime permission enforcement;
+- `fs-verity` integration where supported.
 
 Signature, trust and permission remain separate concepts.
 
@@ -95,23 +103,34 @@ Formalize:
 - kernel metadata;
 - compatibility resolution;
 - boot success confirmation;
-- persistent boot-state metadata.
+- persistent boot-state metadata;
+- retention policy.
+
+System Images remain direct SquashFS files named `luna-X.Y.Z.squashfs`.
 
 ### 7. IPC and event transport
 
-Select the final local IPC transport and production event delivery mechanism only after backend contracts are exercised. Keep GUI/CLI thin over shared backend APIs.
+Select the final local IPC/event implementation from the accepted contract: Unix-domain socket control plane with versioned typed protocol, plus the lightweight Luna event model. Keep GUI/CLI thin over the backend.
 
 ### 8. Resource enforcement
 
-Integrate Linux resource-control mechanisms for CPU, memory, process count, file descriptors and useful storage/I/O limits, while reserving protected system-critical resources.
+Integrate Linux resource-control mechanisms for CPU, memory, process count, descriptors and useful storage/I/O limits, while reserving protected system-critical resources.
 
 ### 9. Device / volume integration
 
-Implement discovery → policy → authorized access for external devices. External volumes should appear in `DATA/system/volumes/<friendly-name>` and the file manager's Volumes view without manual mount commands.
+Implement discovery → security policy → authorized access for external devices.
+
+External volumes should appear as friendly entries under:
+
+```text
+DATA/system/volumes/<friendly-name>
+```
+
+and in the file manager's Volumes view without manual mount commands.
 
 ### 10. End-to-end validation
 
-Add reproducible CI/integration paths covering:
+Add reproducible Linux/QEMU integration paths covering:
 
 ```text
 UEFI
@@ -135,17 +154,17 @@ ApplicationInstance
 
 ## Bootloader status
 
-`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current boot track already reaches the kernel plus a test init path ending at `sh`. Production signature/trust, boot-success confirmation, persistent boot-state metadata and remaining compatibility/hardening work remain on the roadmap.
+`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current boot track reaches the kernel plus a test init path ending at `sh`. Bootloader redesign is not part of the current Bundle implementation sequence.
 
 ## Non-negotiable constraints
 
 - System Image = direct SquashFS, not `.lbp`.
+- System Images live in `SYSTEM`, never in DATA.
 - `.lbp` = Bundle transport/archive format, not System Image.
-- SYSTEM and DATA remain separate.
 - `luna-app-manager` does not own normal application execution.
 - `luna-security` remains the central policy authority.
 - `luna-root-mapping` remains a narrow mapping layer.
-- `luna-fs` remains a low-level filesystem abstraction.
+- `luna-namespace` contains Linux-specific namespace/materialization primitives.
 - One `luna-system-runtime` coordinates multiple `UserSession`s.
 - `UserSession` is the combined user/session entity.
 - There is no separate `lunad` architecture component.
