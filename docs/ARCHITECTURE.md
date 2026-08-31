@@ -4232,474 +4232,107 @@ Diagnostics / Health
 
 The next phase is repository/crate architecture and the translation of these contracts into concrete Rust workspace boundaries and APIs.
 
-# 110. Phase 1.6 — Repository, Crate Architecture and Implementation Boundary
+---
+# 110. Phase 1.6 — Архитектурная консолидация и принятые решения HZ
 
-Phase 1.6 is **ACCEPTED** through `1.6-HZ` based on the decisions accepted in the architecture discussion.
+Phase 1.6 является текущей архитектурной базой после завершения большого цикла решений. Все решения Phase 1.6 до HZ считаются ПРИНЯТЫМИ. Они закрепляются именно в этом Source of Truth вместе с пояснениями и правилами разработки.
 
-This section is the authoritative consolidation of Phase 1.6. The chronological answers remain traceability material; they are not a competing Source of Truth.
+Хронологические phase-документы сохраняют ход обсуждения и нужны для traceability. Они не являются вторым текущим архитектурным источником.
 
-## 110.1 Phase 1.6 purpose
+### 110.1 Зачем была нужна Phase 1.6
 
-Phase 1.6 closes the architecture-first repository boundary and establishes the rules for moving from the accepted system contracts to a clean Rust workspace.
+Phase 1.6 переводит ранее принятые системные идеи в конкретные границы Rust-компонентов, доменных типов, менеджеров, runtime и API.
 
-The order is mandatory:
+Порядок разработки сохраняется:
 
 ```text
-Phase 1.6 decisions
-        ↓
-ARCHITECTURE.md consolidation
-        ↓
-repository / Cargo audit
-        ↓
-luna-common audit and redesign
-        ↓
-new crate map from the current architecture
-        ↓
-crate/API contracts
-        ↓
+Архитектура
+    ↓
+аудит репозитория
+    ↓
+границы crates
+    ↓
+доменные контракты
+    ↓
+manager/runtime contracts
+    ↓
+integration
+    ↓
 implementation
-```
-
-Old empty crates are not architectural commitments. A crate may be removed when it no longer represents the current responsibility model. Existing code may be retained only when it is useful to the current contract.
-
-## 110.2 Workspace and repository principle
-
-The Rust workspace must represent the **current** architecture, not historical component names or abandoned placeholders.
-
-The repository is intentionally kept minimal while the architecture is being translated into implementation boundaries. Empty placeholder crates are not required merely to reserve names.
-
-The workspace resolver is Rust-current (`resolver = "3"`). The existing repository may temporarily contain only the components that have useful current code. New components are introduced after their responsibility and API boundary are established.
-
-## 110.3 `luna-common` boundary
-
-`luna-common` remains a deliberately small foundational crate and must not become a dumping ground for unrelated system concepts.
-
-Existing code in the old `luna-common` is treated as reusable source material, not as the final API. Existing identifiers such as IDs, versions and generic results/errors must be re-evaluated against the Phase 1.6 architecture before being retained.
-
-`luna-common` may contain genuinely cross-cutting primitives shared by multiple crates. Subsystem-specific errors, policy objects, runtime state, filesystem operations, bundle semantics and service APIs belong to their owning crates.
-
-A client-specific crate may be introduced separately when a client needs an API boundary distinct from the backend/library implementation.
-
-## 110.4 Crate design principles
-
-The crate map must follow architectural ownership rather than historical directory names.
-
-A component that has both a reusable backend and a process/service boundary may use the accepted **small daemon/service + library** model. Thin CLI and GUI clients use the same backend rather than duplicating business logic.
-
-Management and execution remain separate:
-
-```text
-manager  → state-changing management operations
-runtime  → execution and lifecycle of running instances
-security → policy authority
-filesystem / kernel primitives → low-level enforcement
-```
-
-The crate boundary must not silently merge these responsibilities merely because they are convenient to implement together.
-
-## 110.5 Accepted component direction
-
-The architecture continues to use the following conceptual component names where their responsibilities require independent boundaries:
-
-```text
-luna-cli
-luna-system-manager
-luna-app-manager
-luna-device-manager
-luna-update-manager
-luna-kernel-manager
-luna-root-mapping
-luna-security
-luna-system-runtime
-luna-app-runtime
-luna-fs
-luna-bundle
-luna-config
-luna-log
-luna-common
-```
-
-This list is a **responsibility map**, not a command to create every crate immediately. The final Rust workspace is derived from the contracts and may split a component into library/service/client crates where the architecture requires it.
-
-## 110.6 Runtime boundary retained
-
-The accepted runtime hierarchy remains:
-
-```text
-luna-system-runtime
-├── UserSession A
-│   ├── app-runtime
-│   └── GUI/Desktop session
-└── UserSession B
-    ├── app-runtime
-    └── GUI/Desktop session
-```
-
-There is one system runtime supervising multiple UserSessions. Application execution belongs to `luna-app-runtime` and is represented by `ApplicationInstance` objects. `luna-app-manager` is not part of the normal launch chain.
-
-Applications must receive a normal Linux-compatible logical environment rather than an intentionally visible container/VM identity. Linux namespaces may be used as implementation mechanisms without exposing a container model to the application.
-
-## 110.7 Security boundary retained
-
-`luna-security` remains the central policy authority. Security is a separate layer and must not be absorbed into runtime, mapping or filesystem crates merely for convenience.
-
-Administrative authority does not require a permanent root user or a mandatory `sudo`/`su` model. Administrative credentials and per-operation authorization remain the architectural direction.
-
-## 110.8 Mapping and filesystem boundary retained
-
-`luna-root-mapping` remains a narrow logical-root and mapping component. `luna-fs` remains a low-level filesystem abstraction.
-
-Linux mechanisms such as namespaces, mounts, bind mounts and related filesystem primitives are implementation mechanisms. They do not replace the Luna mapping model.
-
-Mapping remains file-oriented, policy-controlled and namespace-specific. Shared information may be deduplicated where it is semantically global, while actual namespace state remains isolated.
-
-## 110.9 Async and resource model
-
-Asynchronous, multicore and multithreaded execution remains an explicit system goal. Tokio is accepted as the initial asynchronous runtime direction where an async runtime is required.
-
-System resource protection remains a first-class architectural requirement. Linux mechanisms may be used initially to reserve CPU/memory/GPU capacity for system operation and responsiveness.
-
-The system owns global resource reclamation rather than permanently assigning reclaimable runtime memory to whichever user is currently active.
-
-## 110.10 Configuration and state
-
-System-wide mutable configuration belongs under:
-
-```text
-DATA/system/config/
-```
-
-User-specific configuration belongs under:
-
-```text
-DATA/users/<user>/config/
-```
-
-Where a configuration value is resolved through layers, the accepted semantic precedence is:
-
-```text
-user override
     ↓
-application/default content
-    ↓
-DATA/system/config
-    ↓
-System Image default
+hardening
 ```
 
-The exact precedence may be defined per semantic resource class; it is not a universal textual overlay rule.
+Существующий код не считается архитектурным авторитетом сам по себе. Код должен соответствовать Source of Truth, а не наоборот.
 
-Persistent state is preferred where it is the source of truth. State changes are event-driven rather than rewritten unnecessarily on every invocation.
+### 110.2 Границы путей и mapping
 
-## 110.11 Repository-to-architecture rule
+Принято:
 
-Before implementing a crate, the repository must be audited against this document:
+1. Linux-style logical paths проходят lexical normalization, после которой выполняется secure physical resolution.
+2. `..` не может покинуть разрешённый physical root.
+3. Symlink traversal за пределы разрешённой области требует boundary validation.
+4. Mapping fallback является semantic-class-specific; универсальной цепочки поиска для всей файловой системы нет.
+5. Application security identity основывается на `BundleId`; версия является дополнительным контекстом.
+6. Разные версии приложения являются независимыми immutable runtime resources.
+7. Logical paths являются Linux-style absolute paths.
+8. Physical paths остаются внутренней реализационной деталью и не являются пользовательским API.
+9. File mappings — значение по умолчанию.
+10. Explicit directory/subtree mappings допускаются для подходящих semantic classes, например shared libraries.
+11. Каждая application namespace имеет собственную RAM-resident mapping table.
+12. Идентичные immutable mapping definitions могут безопасно переиспользоваться.
+13. Конфликтующие mappings внутри одной namespace являются ошибкой.
+14. System является нижним fallback precedence там, где fallback применим.
+15. Application resources могут shadow-ить lower defaults, когда это разрешено semantic class.
+16. User overrides могут shadow-ить lower defaults, когда это разрешено semantic class.
+17. Общая последовательность `user → application → system` является semantic-class-specific, а не универсальным правилом overlay.
+18. Security проверяется до окончательного принятия MappingPlan.
+19. ApplicationInstance не изменяет принятую MappingTable на месте; изменение создаёт новую validated state/version.
+20. `luna-root-mapping` не владеет application lifecycle.
 
-1. inspect root `Cargo.toml`;
-2. inspect the actual workspace members;
-3. inspect each surviving crate's source and manifest;
-4. identify obsolete code and reusable code;
-5. compare responsibilities against this Source of Truth;
-6. remove or redesign stale boundaries before adding implementation;
-7. only then define the new crate/API contract.
+### 110.3 Filesystem и domain types
 
-The repository must not be allowed to become a second, implicit architecture document.
+Принято:
 
-## 110.12 Phase 1.6 accepted-answer ledger
+1. `luna-fs` владеет low-level filesystem paths и primitive operations.
+2. `PhysicalPath` не выносится в `luna-common` только ради удобства.
+3. `luna-fs` может работать с files, directories, metadata, symlinks и mode metadata, не принимая за `Security` решение о разрешении.
+4. Filesystem errors остаются локальными `luna-fs`; единого глобального `LunaError` для всего проекта нет.
+5. `luna-root-mapping` предоставляет типизированные logical/physical domain concepts.
+6. `MappingTable` поддерживает insert/remove/lookup/conflict detection/validation.
+7. Validated MappingTable неизменяем после runtime handoff; изменение означает новую table/version.
+8. Immutable tables допускают atomic replacement.
+9. Validated MappingPlan является immutable.
+10. Security-policy changes могут потребовать повторную validation MappingPlan.
+11. Bundle logical paths используют dedicated validated domain type.
+12. Bundle-relative source paths используют dedicated domain type.
+13. Bundle resources являются typed domain objects.
+14. Raw host `PathBuf` не является универсальным BundleResource domain representation.
 
-The following ledger preserves the accepted Phase 1.6 answers so that the chronological answers cannot be lost even when phase working files are later archived. `ACCEPTED` means the user's answer accepted the proposal presented for that item. Where the user explicitly selected a variant or supplied a concrete implementation constraint, that selection is recorded verbatim in meaning.
+### 110.4 Namespace, materialization и execution
 
-### A–Z
+Принято:
 
-```text
-A  ACCEPTED
-B  ACCEPTED
-C  ACCEPTED
-D  ACCEPTED
-E  ACCEPTED
-F  ACCEPTED
-G  ACCEPTED
-H  ACCEPTED
-I  ACCEPTED
-J  ACCEPTED
-K  ACCEPTED — option B
-L  ACCEPTED
-M  ACCEPTED
-N  ACCEPTED
-O  ACCEPTED
-P  ACCEPTED
-Q  ACCEPTED
-R  ACCEPTED
-S  ACCEPTED
-T  ACCEPTED
-U  ACCEPTED
-V  ACCEPTED
-W  ACCEPTED
-X  ACCEPTED
-Y  ACCEPTED
-Z  ACCEPTED
-```
+1. Первая реализационная основа isolation — Linux mount namespaces + controlled bind mounts + Root Mapping.
+2. OverlayFS может использоваться там, где он упрощает composition.
+3. Собственный VFS откладывается за пределы текущей архитектурной версии.
+4. `luna-namespace` владеет Linux-specific namespace/materialization primitives.
+5. `luna-root-mapping` владеет mapping semantics и MappingPlan.
+6. `luna-app-runtime` потребляет validated MappingPlan и не придумывает mappings.
+7. Runtime environment должен выглядеть как обычный Linux-compatible logical root, а не как явно видимый контейнер.
+8. Per-ApplicationInstance filesystem/mount namespace является обязательной основой application isolation.
+9. Дополнительные namespaces являются policy-driven implementation mechanisms.
+10. `ApplicationInstance` владеет своим execution/lifecycle state после создания.
+11. Recovery не создаёт обычную persistent UserSession.
+12. Recovery использует temporary identity.
+13. Recovery State является RAM-only.
+14. `luna-system-runtime` может перезапустить неисправный app-runtime без автоматического уничтожения UserSession.
+15. Recovery runtime metadata не означает восстановление process memory.
+16. Runtime restart предпочтительнее полного reboot, если восстановление действительно возможно.
 
-### AA–AZ
+### 110.5 Runtime hierarchy и UserSession
 
-```text
-AA ACCEPTED — option B
-AB ACCEPTED
-AC ACCEPTED
-AD ACCEPTED
-AE ACCEPTED
-AF ACCEPTED
-AG ACCEPTED
-AH ACCEPTED
-AI ACCEPTED
-AJ ACCEPTED
-AK ACCEPTED
-AL ACCEPTED
-AM ACCEPTED
-AN ACCEPTED
-AO ACCEPTED
-AP ACCEPTED
-AQ ACCEPTED
-AR ACCEPTED
-AS ACCEPTED
-AT ACCEPTED
-AU ACCEPTED
-AV ACCEPTED
-AW ACCEPTED
-AX ACCEPTED
-AY ACCEPTED
-AZ ACCEPTED
-```
-
-### BA–BZ
-
-```text
-BA ACCEPTED
-BB ACCEPTED
-BC ACCEPTED
-BD ACCEPTED
-BE ACCEPTED
-BF ACCEPTED
-BG ACCEPTED
-BH ACCEPTED
-BI ACCEPTED
-BJ ACCEPTED
-BK ACCEPTED
-BL ACCEPTED
-BM ACCEPTED
-BN ACCEPTED
-BO ACCEPTED
-BP ACCEPTED
-BQ ACCEPTED
-BR ACCEPTED
-BS ACCEPTED
-BT ACCEPTED
-BU ACCEPTED
-BV ACCEPTED
-BW ACCEPTED
-BX ACCEPTED
-BY ACCEPTED
-BZ ACCEPTED
-```
-
-### Ca–Cz
-
-```text
-Ca ACCEPTED
-Cb ACCEPTED
-Cc ACCEPTED
-Cd ACCEPTED
-Ce ACCEPTED — a separate client crate may be created when required
-Cf ACCEPTED
-Cg ACCEPTED
-Ch ACCEPTED
-Ci ACCEPTED
-Cj ACCEPTED
-Ck ACCEPTED
-Cl ACCEPTED
-Cm ACCEPTED
-Cn ACCEPTED
-Co ACCEPTED
-Cp ACCEPTED
-Cq ACCEPTED
-Cr ACCEPTED
-Cs ACCEPTED
-Ct ACCEPTED
-Cu ACCEPTED
-Cv ACCEPTED
-Cw ACCEPTED
-Cx ACCEPTED
-Cy ACCEPTED
-Cz ACCEPTED
-```
-
-### Da–Dz
-
-```text
-Da ACCEPTED
-Db ACCEPTED — Bin + lib
-Dc ACCEPTED
-Dd ACCEPTED
-De ACCEPTED
-Df ACCEPTED
-Dg ACCEPTED
-Dh ACCEPTED
-Di ACCEPTED — Tokio accepted as the async runtime direction
-Dj ACCEPTED
-Dk ACCEPTED
-Dl ACCEPTED
-Dm ACCEPTED
-Dn ACCEPTED
-Do ACCEPTED
-Dp ACCEPTED
-Dq ACCEPTED
-Dr ACCEPTED
-Ds ACCEPTED
-Dt ACCEPTED
-Du ACCEPTED
-Dv ACCEPTED
-Dw ACCEPTED
-Dx ACCEPTED
-Dy ACCEPTED
-Dz ACCEPTED
-```
-
-### Ea–Ez
-
-```text
-Ea ACCEPTED — option C
-Eb ACCEPTED
-Ec ACCEPTED
-Ed ACCEPTED
-Ee ACCEPTED
-Ef ACCEPTED
-Eg ACCEPTED
-Eh ACCEPTED
-Ei ACCEPTED
-Ej ACCEPTED
-Ek ACCEPTED
-El ACCEPTED
-Em ACCEPTED
-En ACCEPTED
-Eo ACCEPTED
-Ep ACCEPTED
-Eq ACCEPTED
-Er ACCEPTED
-Es ACCEPTED
-Et ACCEPTED
-Eu ACCEPTED
-Ev ACCEPTED
-Ew ACCEPTED
-Ex ACCEPTED
-Ey ACCEPTED
-Ez ACCEPTED
-```
-
-### Fa–Fz
-
-```text
-Fa ACCEPTED
-Fb ACCEPTED
-Fc ACCEPTED
-Fd ACCEPTED
-Fe ACCEPTED
-Ff ACCEPTED
-Fg ACCEPTED
-Fh ACCEPTED
-Fi ACCEPTED
-Fj ACCEPTED
-Fk ACCEPTED
-Fl ACCEPTED
-Fm ACCEPTED
-Fn ACCEPTED
-Fo ACCEPTED
-Fp ACCEPTED
-Fq ACCEPTED
-Fr ACCEPTED
-Fs ACCEPTED
-Ft ACCEPTED
-Fu ACCEPTED
-Fv ACCEPTED
-Fw ACCEPTED
-Fx ACCEPTED
-Fy ACCEPTED
-Fz ACCEPTED
-```
-
-### Ga–Gz
-
-```text
-Ga ACCEPTED
-Gb ACCEPTED
-Gc ACCEPTED
-Gd ACCEPTED
-Ge ACCEPTED
-Gf ACCEPTED
-Gg ACCEPTED
-Gh ACCEPTED
-Gi ACCEPTED
-Gj ACCEPTED
-Gk ACCEPTED
-Gl ACCEPTED
-Gm ACCEPTED
-Gn ACCEPTED
-Go ACCEPTED
-Gp ACCEPTED
-Gq ACCEPTED
-Gr ACCEPTED
-Gs ACCEPTED
-Gt ACCEPTED
-Gu ACCEPTED
-Gv ACCEPTED
-Gw ACCEPTED
-Gx ACCEPTED
-Gy ACCEPTED
-Gz ACCEPTED
-```
-
-### Ha–Hz
-
-```text
-Ha ACCEPTED
-Hb ACCEPTED
-Hc ACCEPTED
-Hd ACCEPTED
-He ACCEPTED
-Hf ACCEPTED
-Hg ACCEPTED
-Hh ACCEPTED
-Hi ACCEPTED
-Hj ACCEPTED
-Hk ACCEPTED
-Hl ACCEPTED
-Hm ACCEPTED
-Hn ACCEPTED
-Ho ACCEPTED
-Hp ACCEPTED
-Hq ACCEPTED
-Hr ACCEPTED
-Hs ACCEPTED
-Ht ACCEPTED
-Hu ACCEPTED
-Hv ACCEPTED
-Hw ACCEPTED
-Hx ACCEPTED
-Hy ACCEPTED
-Hz ACCEPTED
-```
-
-# Project Luna — Post-HZ Architecture Clarifications
-
-**Date:** 2026-08-29
-**Status:** ACCEPTED
-**Authority:** These decisions are accepted architectural clarifications derived from the Project Luna Source of Truth and the 2026-08-29 repository/history audit. They must be consolidated into `docs/ARCHITECTURE.md` at the next architecture-document maintenance pass.
-
-## 1. Runtime ownership
-
-- `luna-system-runtime` is the single system-wide runtime/supervisor.
-- There is no separate Session Manager.
-- `UserSession` is the combined user/session domain entity.
-- The runtime hierarchy is:
+Принято:
 
 ```text
 luna-system-runtime
@@ -4711,255 +4344,884 @@ luna-app-runtime
 ApplicationInstance
 ```
 
-- `luna-app-manager` is not part of normal application execution.
-- `luna-app-runtime` owns normal application execution and ApplicationInstance lifecycle.
+`luna-system-runtime` является единственным system-wide runtime/supervisor.
 
-## 2. Logical root and application isolation
+User и session являются одной доменной сущностью `UserSession`.
 
-- Applications receive a conventional Linux-compatible logical `/` rather than an artificial reduced container filesystem.
-- Luna's physical `DATA` layout remains Luna-native and is composed into the logical root through controlled mappings/materialization.
-- The application must not be expected to know that its filesystem view is assembled by Luna.
-- Linux namespaces, bind mounts and related kernel mechanisms are implementation primitives, not substitutes for Luna's mapping architecture.
-- File mappings are the default.
-- Explicit subtree/directory mappings are allowed for semantic resource classes such as shared library trees.
-- Mapping tables are namespace-specific and RAM-resident at runtime.
-- User/application/system precedence remains semantic-class-specific.
-- User namespace usage must not be treated as a mechanism for granting ordinary applications root semantics.
-- PID/user namespaces may be used for isolation, but exposing an artificial container identity to applications is not a Luna goal.
-- `idmapped` mounts are allowed as an implementation primitive when they simplify secure ownership handling; they are not a mandatory Luna abstraction.
+System-wide уникальность `ApplicationInstanceId` принадлежит system-runtime. Она не должна генерироваться независимо внутри per-user app-runtimes.
 
-## 3. Canonical DATA state layout
+`UserSession` содержит user identity, session state и relevant policy/resource context.
 
-The user-visible mutable DATA structure is:
+Состояния сохраняются:
 
 ```text
-DATA/
-├── system/
-│   ├── apps/
-│   ├── drivers/
-│   ├── libs/
-│   ├── volumes/
-│   ├── config/
-│   └── state/
-├── users/
-│   └── <user>/
-│       ├── home/
-│       ├── data/
-│       └── config/
-└── cache/
+ACTIVE
+RESTRICTED
+TERMINATED
 ```
 
-- `DATA/system/config/` contains system-wide mutable configuration.
-- `DATA/system/state/` contains persistent system state that is not ordinary configuration.
-- `DATA/users/<user>/config/` contains user-specific configuration.
-- `DATA/users/<user>/data/` contains user/application mutable data.
-- `DATA/cache/` remains the common cache area, with semantic separation for system/user/application cleanup where required.
+По умолчанию уход из активной пользовательской сессии переводит её в `RESTRICTED`.
 
-No alternate `DATA/data`, `DATA/apps`, `DATA/portable` or parallel duplicate tree is introduced.
+System services и update operations могут продолжать работу независимо от переключения пользователей.
 
-## 4. Security and IPC/device visibility
+### 110.6 State model
 
-- `luna-security` remains the central policy authority.
-- Security decisions may be `Allow`, `Deny`, `Ask`, or structured constrained access according to the accepted policy model.
-- An `Ask` decision is a request for explicit confirmation; Security itself remains UI-agnostic.
-- D-Bus access should use a filtered/limited interface rather than expose the unrestricted host system bus to applications.
-- `/dev` should be presented as a filtered device view exposing only resources authorized for the application/session.
-- USB and external device access follows discovery → policy → authorized access; removable media does not implicitly execute arbitrary software.
+Принято:
 
-## 5. Resource control
+1. `luna-state` представляет logical persistent state.
+2. Checkpoint/rollback отделены от runtime state.
+3. `luna-state` может содержать state domain + storage traits/backend implementations, сохраняя backend-agnostic domain semantics.
+4. Storage для `luna-state` синхронное.
+5. Поддерживаются minimal atomic transactions.
+6. Revision-based optimistic concurrency является частью контракта.
+7. EventId и OperationId независимы.
+8. Persistent state не требует второго Luna-specific WAL поверх выбранного durable backend.
+9. Текущий durable backend реализации — `redb`.
+10. Persistent system state хранится под `DATA/system/state`.
+11. В текущей реализации используется `DATA/system/state/luna-state.redb`.
 
-- Linux cgroups v2 and related kernel mechanisms are the initial enforcement primitives for CPU, memory and process/resource limits.
-- A protected system-critical resource budget is reserved so applications cannot consume all resources and make the OS unresponsive.
-- Memory reclamation remains globally controlled by the system rather than by the currently active user.
-- Process-count limits and file-descriptor limits are accepted as ordinary resource safeguards.
-- Disk/storage usage limits may be enforced where required through filesystem/resource facilities.
+### 110.7 Events и Operations
 
-## 6. Persistent state implementation direction
-
-- `luna-state` remains a synchronous storage abstraction with revision-checked atomic transactions.
-- The first durable backend direction is a small embedded transactional key/value database.
-- `redb` is the current implementation choice for this first backend/prototype.
-- This backend choice is implementation-level and is not a new architectural boundary.
-- A separate custom Luna WAL is not required when the selected backend already provides the durability guarantees required by the state contract.
-
-## 7. Operations, boot success and recovery
-
-- Boot success is not defined solely by kernel handoff. A userspace health/boot-success confirmation is required before a new boot target is considered confirmed.
-- A watchdog/timeout can mark an unsuccessful boot attempt when the system fails to reach the required healthy state.
-- Repeated application/runtime crashes eventually produce a user-visible recovery/diagnostic decision point according to policy; possible choices include restart, diagnostics, rollback and close.
-- Recovery remains a dedicated Recovery System Image with temporary RAM-backed recovery state and a temporary recovery identity.
-- Recovery is not Factory and is not a normal persistent user session.
-
-## 8. Bundle and `.lbp`
-
-- `luna-bundle` owns Bundle domain representation and format codec concerns.
-- `luna-app-manager` owns install/update/remove/verify/migration/package-import lifecycle.
-- No separate `.lbp` parser crate is introduced merely to parse the archive.
-- `.lbp` is only the transport/archive representation of a Bundle.
-- The installed Bundle is the immutable runtime unit.
-- Bundle identity remains BundleId + Version + ContentIdentity.
-- Bundle path/location does not define identity.
-
-## 9. Reproducibility and provenance
-
-- Reproducible-build metadata and artifact provenance are accepted as desirable implementation properties of the eventual signature/trust chain.
-- Build metadata must not introduce nondeterministic content into ContentIdentity merely through timestamps or local filesystem paths.
-- Publisher identity, repository/distribution metadata, content identity and local trust remain separate concepts.
-
-## 10. Documentation and repository rules
-
-- `docs/ARCHITECTURE.md` remains the single Source of Truth.
-- Historical phase files preserve traceability and do not compete with the Source of Truth.
-- `README.md`, `STATUS.md`, `ROADMAP.md`, `docs/architecture/CRATE-MAP.md` and implementation records must describe actual repository state.
-- A stale document must be corrected rather than used as evidence for a new architectural decision.
-- Repository implementation must not silently redefine accepted architectural responsibilities.
-
-## 11. Current implementation sequence
+Принята полная модель:
 
 ```text
-1. real Linux namespace + logical-root materialization
-2. durable luna-state backend
-3. real update/checkpoint/rollback engine
-4. final Bundle Format v1 + RFC-0002 acceptance
-5. production signature/trust chain
-6. System Image/kernel compatibility + boot-state integration
-7. final IPC/event transport
-8. resource enforcement tuning
-9. device/volume integration
-10. end-to-end integration testing
+Event
+  ↓
+Bus
+  ↓
+history where appropriate
+  ↓
+subscribers / replay
 ```
 
-# Project Luna — Phase 1.6 Crate Map
+Kafka используется только как концептуальная аналогия; Kafka не является обязательной системной технологией Luna.
 
-**Status:** architecture-driven implementation map
-**Source of Truth:** `docs/ARCHITECTURE.md`
+Принято:
 
-This document translates the accepted architecture into concrete Rust package boundaries. It is not a replacement for the architecture and must not introduce new architectural responsibilities.
+1. Event ordering является monotonic per operation там, где operation существует.
+2. Для независимых операций нет обязательного глобального total order.
+3. Timestamp — metadata, а не ordering authority.
+4. Event classes: `Ephemeral`, `Persistent`, `Audit`.
+5. Persistent history поддерживает replay/query.
+6. Live subscriptions отделены от persistent history.
+7. Subscriptions имеют explicit lifecycle.
+8. Delivery использует bounded queues и backpressure.
+9. Audit events нельзя silently drop.
+10. Interrupted operations проходят reconciliation после runtime/service recovery.
+11. Operations относятся к System или UserSession context, а не к GUI/CLI process lifetime.
+12. Authorization различает `view`, `cancel`, `resume`, `rollback`.
+13. Cooperative Cancel и Force Stop — различные действия.
+14. Force Stop требует более сильной/emergency authorization и audit.
+15. Operations при необходимости явно различаются как resumable, non-resumable или требующие reconciliation.
+16. GUI/CLI disconnect не отменяет backend operation.
 
-## Foundation
+### 110.8 Manager boundaries и Plans
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-common` | Small cross-cutting value types only | lib |
-| `luna-fs` | Low-level filesystem abstraction and primitives | lib |
-| `luna-root-mapping` | Logical filesystem/path mapping | lib |
-| `luna-namespace` | Linux namespace/materialization mechanisms | lib |
-| `luna-config` | Configuration model and scoped configuration | lib |
+Принято:
 
-`luna-root-mapping` describes and resolves logical resources. It must not contain Linux namespace syscalls. `luna-namespace` contains the OS-specific enforcement/materialization primitives that consume validated mapping plans.
+```text
+luna-app-manager
+    ↓ ApplicationPlan
 
-## Policy and management
+luna-update-manager
+    ↓ UpdatePlan
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-security` | Central security/policy authority | lib/backend |
-| `luna-app-manager` | Install, update, removal, verification, migrations and package import | lib + bin where required |
-| `luna-system-manager` | System state model and queries | lib + bin where required |
-| `luna-update-manager` | Executes system/application changes | lib + bin where required |
-| `luna-kernel-manager` | Kernel inventory, metadata and compatibility queries | lib + bin where required |
-| `luna-device-manager` | Device discovery, volumes and device lifecycle | lib + bin where required |
+luna-system-manager
+    ↓ System State
 
-## Runtime
+luna-kernel-manager
+    ↓ kernel inventory / compatibility
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-system-runtime` | Single system-wide supervision and `UserSession` orchestration | lib + bin where required |
-| `luna-user-session` | `UserSession` domain model and lifecycle contract | lib |
-| `luna-app-runtime` | `ApplicationInstance` execution/lifecycle boundary | lib + bin where required |
+luna-device-manager
+    ↓ device / volume lifecycle
 
-`luna-system-runtime` is the single system-wide runtime/supervisor. `UserSession` is the combined user/session entity.
+luna-system-runtime
+    ↓ runtime supervision / UserSession / instance identity
+```
 
-Runtime ownership is intentionally separate from management ownership. `luna-app-manager` does not own normal application execution.
+Правила:
 
-## Bundle
+1. `ApplicationPlan` принадлежит `luna-app-manager`.
+2. `UpdatePlan` принадлежит `luna-update-manager`.
+3. Plans не содержат low-level mount/syscall details.
+4. App-manager строит и валидирует ApplicationPlan, но не запускает приложение.
+5. ApplicationPlan проверяет dependencies, compatibility, security, resources и migrations до mutation.
+6. Invalid plan не может перейти в mutation.
+7. Update-manager исполняет mutation transaction, но не становится владельцем доменных semantics других managers.
+8. Managers остаются владельцами state своих доменов.
+9. High-level operation может включать несколько targets и per-target status, когда transactional semantics это допускают.
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-bundle` | Internal Bundle domain model, manifest/resource representation and eventual format codec | lib |
+### 110.9 Update и rollback
 
-The crate exists in the current workspace. `.lbp` remains the transport/archive representation of a Bundle, and RFC-0002 has not yet been accepted as the final wire/archive specification.
+Принята последовательность:
 
-## State and events
+```text
+prepare
+   ↓
+checkpoint
+   ↓
+apply
+   ↓
+verify
+   ↓
+commit
+```
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-state` | Persistent state abstraction, revision and atomic transaction contracts | lib |
-| `luna-event` | Event domain, subscriptions and delivery contracts | lib |
+Принято:
 
-The current prototypes are in-memory/contract-level where the durable or OS-backed backend has not yet been implemented.
+1. Old authoritative state остаётся authoritative до commit, где это возможно.
+2. После interruption выполняется reconciliation.
+3. Reconciliation определяет committed / partially committed / not committed state.
+4. Rollback является explicit operation, а не автоматической реакцией на каждый crash.
+5. `luna-state` может ссылаться на checkpoint, но не владеет snapshot internals.
+6. Btrfs является accepted implementation direction для persistent checkpoint/rollback.
+7. System Image и kernel обновляются независимо.
+8. Current/previous usable state не должен исчезнуть до подтверждённого commit.
 
-## User interface
+### 110.10 Application identity и Bundle contracts
 
-| Crate | Responsibility | Form |
-|---|---|---|
-| `luna-cli` | Thin CLI client over backend APIs | lib + bin (`luna`) |
+Принято:
 
-A future GUI client is separate and uses the same backend contracts.
+1. ApplicationInstanceId отделён от Bundle identity.
+2. UserSessionId не является manifest data.
+3. ApplicationInstanceId не является manifest data.
+4. Immutable Bundles reusable across UserSessions.
+5. Разные версии приложения независимы и могут сосуществовать.
+6. Application restrictions распространяются на все instances соответствующей application identity.
+7. Instance-level policy может только усиливать restriction, но не ослаблять enforced deny.
+8. Exact duplicate resource entries могут быть deduplicated; distinct targets остаются конфликтом.
+9. Bundle не владеет physical installation paths.
+10. Bundle parser и domain model не должны проникать в application lifecycle management.
 
-## Boot
+### 110.11 Security model
 
-`luna-boot.efi` is a separate boot-specific project under `boot/luna-boot/`. It is intentionally outside the ordinary userspace workspace because it targets UEFI and operates before the userspace architecture exists.
+`luna-security` является центральной policy authority.
 
-The current boot implementation has progressed beyond the original scaffold: kernel loading and the test init handoff have been demonstrated through the shell (`sh`). Production trust/signature integration and final boot-compatibility work remain separate tasks.
+Модель решения:
 
-`luna-boot-state` remains a conceptual architecture boundary and is not yet a separate workspace crate.
+```text
+Subject + Resource + Action + Context
+                  ↓
+           PolicyDecision
+```
 
-## Logging
+Принято:
 
-`luna-log` is not created merely because the name existed historically. A dedicated logging boundary will be introduced when ownership/API requirements justify it.
+1. Security policy revisioned.
+2. Grants могут быть one-time, operation-scoped, while-running или persistent.
+3. Trust связывает как минимум BundleId, ContentIdentity/hash и scope.
+4. Trust является content-specific.
+5. Integrity, signature validity, trust и authorization разделены.
+6. `Ask` означает explicit confirmation; Security не знает, GUI это делает или CLI/recovery UI.
+7. `Constrained` содержит structured typed restrictions.
+8. Manifest mapping/capability declarations являются запросами, а не grants.
+9. Security проверяется до final MappingPlan acceptance.
+10. Policy changes могут требовать revalidation уже существующих mappings/plans.
+11. Application-level restrictions применяются к соответствующим instances.
+12. Instance не может ослабить policy.
+13. Administrative authority основана на roles/capabilities, а не на permanent root user.
+14. Постоянный архитектурный слой `sudo`/`su` не требуется.
+15. Доступ Recovery к protected DATA также является отдельной authorization transaction.
+16. User DATA может оставаться unencrypted по умолчанию; допускается whole-DATA и per-user encryption extension.
+17. Administrator credential не должен быть пустым.
+18. Возможность recovery административных credentials является частью принятого направления; точный cryptographic/authentication protocol остаётся открытым.
 
-## Dependency direction
+### 110.12 Resource protection
+
+Принято:
+
+```text
+System
+  ↓
+User
+  ↓
+Application
+  ↓
+ApplicationInstance
+```
+
+Система резервирует protected resource budget для system-runtime, diagnostics и critical services.
+
+Резерв адаптивный, а не универсальный фиксированный процент.
+
+Для первоначального enforcement используются Linux resource-control mechanisms; `cgroups v2` — принятый baseline.
+
+Memory pressure обрабатывается от disposable/reclaimable resources к application pressure и затем к controlled termination как последнему шагу.
+
+Application instances не должны занимать защищённый system budget так, чтобы ломать управление системой.
+
+### 110.13 Configuration
+
+Принято:
+
+```text
+user override
+    ↓
+application/default
+    ↓
+DATA/system/config
+    ↓
+System Image default
+```
+
+Это не универсальный textual overlay: точная precedence является semantic-class-specific.
+
+Machine-wide mutable configuration находится в `DATA/system/config`.
+
+User-scoped configuration находится в `DATA/users/<user>/config`.
+
+Изменение конфигурации не мутирует immutable System Image.
+
+Удаление override возвращает соответствующий immutable default.
+
+### 110.14 Device и external volume model
+
+`luna-device-manager` владеет discovery, volume lifecycle и automount orchestration.
+
+Принято пользовательское поведение:
+
+```text
+device connected
+      ↓
+detected
+      ↓
+filesystem detected
+      ↓
+automount
+      ↓
+friendly volume visible in file manager
+```
+
+Managed volume state находится в `DATA/system/volumes`.
+
+Device Use является отдельным security dimension.
+
+USB autorun не должен означать silent arbitrary execution.
+
+Точный backend automount остаётся открытой технической задачей.
+
+### 110.15 IPC и API versioning
+
+Принято направление:
+
+```text
+Unix-domain sockets
+        ↓
+Luna-defined typed binary protocol
+        ↓
+explicit compatibility versions
+```
+
+Kernel peer identity комбинируется с Luna identity/security policy при IPC authorization.
+
+GUI и CLI являются thin clients поверх backend contracts.
+
+D-Bus допускается как desktop compatibility mechanism, но не является главным internal control-plane contract.
+
+Публичные внутренние component contracts имеют explicit compatibility versions. Breaking changes требуют major compatibility change и явного отказа несовместимому клиенту.
+
+### 110.16 Diagnostics и health
+
+Diagnostics является отдельной capability/subsystem.
+
+Она наблюдает structured events, создаёт structured `DiagnosticReport` и может координировать bounded repair, но не получает unlimited mutation authority только потому, что выполняет диагностику.
+
+Health model:
+
+```text
+Healthy
+Degraded
+Recovering
+Failed
+Emergency
+```
+
+`Emergency` — health/diagnostic state, а не отдельный Boot Menu mode.
+
+Failure одного application runtime не должен автоматически делать другие UserSessions неисправными.
+
+### 110.17 Bundle Format v1 — RFC-0002
+
+RFC-0002 — Bundle Format v1 — **ПРИНЯТ 2026-08-30**.
+
+`.lbp` остаётся отдельным Bundle transport/archive format. System Image остаётся отдельным SquashFS artifact.
+
+Приняты v1 инварианты:
+
+```text
+LBP1
+64-byte little-endian header
+64-byte section entries
+TOML manifest
+deterministic TAR payload
+BLAKE3-256 integrity/content identity
+zstd canonical compression
+logical mapping declarations
+request-only capabilities
+optional Ed25519 signature
+immutable installed Bundle
+```
+
+Принято:
+
+1. `BundleId + Version + ContentIdentity` образуют identity Bundle.
+2. ContentIdentity независим от filename и physical location.
+3. Different Bundle versions may coexist.
+4. Discovery не означает execution.
+5. External Bundle flow: inspect → verify → trust → authorization → launch/install.
+6. Bundle identity не зависит от физического носителя.
+7. Parser обязан защищаться от overflow, out-of-bounds, overlapping sections, truncation, corrupt compression, traversal, absolute payload paths, duplicate paths, unsupported TAR entries, malformed TOML и invalid signature encoding.
+8. Mappings — declarations, not permissions.
+9. Requested capabilities — requests, not grants.
+10. Signature validity, trust и permission policy остаются отдельными decision steps.
+
+### 110.18 Bundle/runtime и security integration
+
+`luna-app-manager` владеет installation/import/update/remove/verification/migration.
+
+`luna-app-runtime` владеет normal execution lifecycle.
+
+`luna-root-mapping` строит mapping plan.
+
+`luna-namespace` материализует Linux-specific execution environment.
+
+`luna-security` авторизует policy decisions.
+
+Это даёт цепочку:
+
+```text
+Bundle declaration
+      ↓
+ApplicationPlan
+      ↓
+MappingPlan
+      ↓
+Security
+      ↓
+Namespace materialization
+      ↓
+ApplicationInstance
+```
+
+### 110.19 System Image loading
+
+System Image по-прежнему является непосредственно SquashFS.
+
+Hybrid loading означает:
+
+```text
+System Image
+      ↓
+critical initial materialization
+      ↓
+RAM logical root
+      ↓
+manifest-informed prefetch
+      ↓
+demand-driven loading
+```
+
+Цель — не копировать весь System Image в RAM без необходимости.
+
+Точный kernel-level materialization mechanism остаётся implementation/specification work.
+
+Если активный Image отсоединяется или удаляется, required system content должен быть materialized и verified независимо до потери source. Уже resident content нельзя reclaim-ить только потому, что source Image больше недоступен.
+
+### 110.20 Recovery
+
+Recovery является отдельной working environment.
+
+```text
+Recovery System Image
+        ↓
+Recovery kernel / compatible boot path
+        ↓
+RAM logical root
+        ↓
+temporary recovery identity
+        ↓
+RAM-backed writable state
+```
+
+Принято:
+
+1. Recovery может работать без normal persistent DATA.
+2. User DATA не открывается автоматически.
+3. Protected user DATA требует explicit authorization.
+4. Recovery не равен Factory.
+5. Recovery не является permanent root-user mode.
+6. Factory сохраняет оригинальные known-good System Image и factory kernel.
+
+### 110.21 Персонализация и application overrides
+
+Установленный Bundle immutable.
+
+Compatibility/metadata customization реализуется как controlled user override, а не изменение исходного immutable payload.
+
+Если пользователь намеренно изменяет overrideable fields, это должно быть явно видно пользователю. Modified/overridden Bundle переходит в отдельное local/non-original trust state и требует explicit decision; local trust привязывается к конкретной ContentIdentity, а не молча ко всем будущим версиям.
+
+### 110.22 Sources, channels и offline installation
+
+System/application updates могут быть связаны с channels, например stable/beta/nightly/local, но точная taxonomy остаётся policy/configuration detail.
+
+Источники могут быть official repository, third-party repository, local file, removable media и будущие network/share sources.
+
+Verification/trust применяются до installation.
+
+Offline installation поддерживается.
+
+### 110.23 Что из прежних формулировок считать устаревшим
+
+Исторический текст этого документа сохраняется, чтобы не терять объяснения и историю решений. Однако при конфликте с Phase 1.6 действуют следующие актуальные правила:
+
+```text
+System Image → direct SquashFS
+Bundle       → .lbp
+SYSTEM       → immutable/versioned images + kernels
+DATA         → mutable state
+UserSession  → combined user + session entity
+system-runtime → единственный system-wide runtime/supervisor
+app-runtime  → ApplicationInstance execution/lifecycle
+security     → central policy authority
+root-mapping → logical mapping
+namespace    → Linux-specific materialization/enforcement
+```
+
+Старые placeholder-модели, которые уже были заменены этими решениями, остаются только как history и не должны использоваться для нового кода.
+
+### 110.24 Полный реестр принятых решений Phase 1.6 — 1…115
+
+```text
+1   logical paths: lexical normalization + secure physical resolution
+2   semantic-class-specific mapping fallback
+3   BundleId-based application security identity
+4   independent immutable application versions
+5   Event → Bus → history where appropriate → subscribers/replay
+6   luna-state = logical persistent state; checkpoint/rollback separate
+7   app-manager builds/validates ApplicationPlan; update-manager executes changes
+8   system-runtime creates/supervises UserSessions
+9   system-runtime owns ApplicationInstanceId uniqueness
+10  Linux resource-control mechanisms are the first resource-protection implementation
+11  mount namespaces + controlled bind mounts + Root Mapping; OverlayFS where useful
+12  System State, Boot State and Recovery State remain separate; Recovery State is RAM-only
+13  logical paths are Linux-style absolute paths
+14  physical paths remain internal implementation details
+15  file mappings are default; directory/subtree mappings allowed where semantic
+16  each application namespace has its own RAM-resident mapping table
+17  identical immutable mapping definitions may be shared safely
+18  the same logical dependency path may map to different physical versions per application
+19  mapping conflicts inside one namespace are errors
+20  System is lowest fallback precedence where fallback applies
+21  application resources may shadow lower defaults where permitted
+22  user overrides may shadow lower defaults where permitted
+23  user → application → system precedence is semantic-class-specific
+24  Security is checked before final MappingPlan acceptance
+25  active ApplicationInstance cannot mutate its accepted MappingTable in place
+26  app-runtime consumes validated MappingPlan and does not invent mappings
+27  root-mapping does not own application lifecycle
+28  ApplicationPlan belongs to app-manager
+29  UpdatePlan belongs to update-manager
+30  Plans do not contain low-level mount/syscall details
+31  high-level operation may include multiple targets and per-target status where transactional semantics permit
+32  managers remain owners of their domain state
+33  system-runtime is ApplicationInstanceId authority
+34  per-user app-runtimes do not generate global uniqueness
+35  app-runtime owns ApplicationInstance lifecycle after creation
+36  hierarchy = system-runtime → UserSession → app-runtime
+37  UserSession contains user identity, state and resource/policy context
+38  app-runtime does not create UserSessions
+39  Recovery uses temporary identity, not normal persistent UserSession
+40  Recovery uses RAM-backed state + explicit authorization before protected user data is opened
+41  luna-fs owns low-level filesystem paths
+42  PhysicalPath belongs to mapping/storage, not common
+43  luna-fs supports files, directories, metadata, symlinks and mode metadata
+44  filesystem errors are local to luna-fs; no global LunaError
+45  root-mapping exposes typed logical/physical domain concepts
+46  MappingTable supports insert/remove/lookup/conflict detection/validation
+47  validated MappingTable is immutable after runtime handoff
+48  immutable mapping tables permit atomic replacement
+49  validated MappingPlan is immutable
+50  security-policy changes can require MappingPlan revalidation
+51  Security policy is revisioned
+52  grants may be one-time/operation-scoped/while-running/persistent
+53  Security owns policy/grants/trust, not runtime process state
+54  trust binds BundleId + content identity/hash + scope
+55  trust is content-specific
+56  Bundle resources are typed domain objects
+57  manifest separates identity/metadata/resources/dependencies/capabilities/entry points
+58  ApplicationInstanceId is not manifest data
+59  UserSessionId is not manifest data
+60  immutable Bundles are reusable across UserSessions
+61  luna-bundle does not own physical installation paths
+62  app-manager constructs/validates ApplicationPlan without launching apps
+63  ApplicationPlan validates dependencies/compatibility/security/resources/migrations
+64  invalid plans cannot enter mutation
+65  UpdatePlan belongs to update-manager
+66  update stages = prepare/checkpoint/apply/verify/commit
+67  old authoritative state remains authoritative before commit where possible
+68  reconciliation determines committed/partially committed/not committed after interruption
+69  rollback is explicit, not automatic for every crash
+70  luna-state may reference checkpoints but does not own snapshot internals
+71  events carry correlation metadata
+72  live subscriptions are separate from persistent event history
+73  subscriptions have explicit lifecycle
+74  GUI/CLI disconnect does not cancel backend operations
+75  Option C: luna-state contains state domain + storage traits/backend implementations
+76  luna-state uses synchronous storage
+77  state storage supports minimal atomic transactions
+78  revision-based optimistic concurrency is supported
+79  EventId and OperationId are independent
+80  event ordering is monotonic per operation; no global total order across independent operations
+81  timestamp is metadata, not ordering
+82  event classes = Ephemeral / Persistent / Audit
+83  persistent event history supports replay/query
+84  event delivery uses bounded queues/backpressure
+85  Audit events cannot be silently dropped
+86  interrupted operations are reconciled after service/runtime recovery
+87  operations distinguish resumable/non-resumable/unknown where necessary
+88  operations belong to System or UserSession context, not GUI/CLI process lifetime
+89  operation authorization distinguishes view/cancel/resume/rollback
+90  Force Stop is distinct from cooperative Cancel and needs stronger/emergency authorization
+91  Bundle logical paths use dedicated validated domain type
+92  Bundle-relative source paths use dedicated domain type
+93  Bundle resources carry explicit resource types/metadata
+94  conflicting same-logical-path mappings within one namespace are errors
+95  exact duplicate resource entries may be deduplicated; distinct targets remain conflicts
+96  Bundle identity = BundleId + Version + ContentIdentity
+97  ContentIdentity is independent of filename and physical storage location
+98  moving a Bundle does not change its identity
+99  external Bundle flow = inspect → verify → trust decision → launch
+100 permissions distinguish Visibility / Read / Write / Execute / DeviceUse / Manage
+101 application-level restrictions propagate to all instances of that application identity
+102 an instance may tighten but may not weaken application policy
+103 security policy revision participates in revalidation
+104 Ask = explicit confirmation; Security remains UI-agnostic
+105 Constrained = structured typed restrictions
+106 ApplicationInstance lifecycle = Created / Starting / Running / Stopping / Stopped / Crashed / Failed
+107 system-runtime may restart failed app-runtime
+108 runtime metadata recovery does not restore application process memory
+109 system-runtime restart is preferred over unnecessary full-machine reboot
+110 protected system-critical resource budget is reserved
+111 resource reservation is adaptive, not a universal fixed percentage
+112 memory-pressure reclamation proceeds from disposable/reclaimable resources toward application pressure and controlled termination
+113 GUI and CLI use shared backend contracts and do not directly operate on filesystem/runtime internals
+114 luna supports machine-readable output in addition to human-readable output
+115 public internal component contracts have explicit compatibility versions; breaking changes require explicit major compatibility change
+```
+
+### 110.25 Выбранные решения вариантов Phase 1.6
+
+Особенно важные явные выборы:
+
+```text
+1.6-K   = B
+1.6-AA  = B
+1.6-Db  = Bin + lib
+1.6-Di  = Tokio
+1.6-Ea  = C
+```
+
+Эти выборы являются частью принятой Phase 1.6 baseline.
+
+### 110.26 Явно отвергнутые технические предложения
+
+Чтобы не повторять ошибки при дальнейшем развитии:
+
+* `SystemState.previous` не является полной fallback-моделью; fallback использует inventory и compatibility queries и не ограничен одним previous image.
+* Raw host `PathBuf` не является универсальным BundleResource representation.
+* Обязательный `into_string()` для каждого wrapper не является архитектурным правилом.
+* Обязательный `const fn` везде, где он технически возможен, не является стилевым/архитектурным правилом.
+
+---
+# 111. Post-HZ уточнения, принятые в последующих обсуждениях
+
+После закрытия основной Phase 1.6 появились дополнительные уточнения, которые теперь считаются частью текущего SoT.
+
+### 111.1 Durable state
+
+`luna-state` использует durable `redb` backend. Persistent system state находится под `DATA/system/state/`, а текущая реализация использует `luna-state.redb`.
+
+Это не меняет domain semantics `luna-state`: state model остаётся отделённой от checkpoint/snapshot internals.
+
+### 111.2 Update journal
+
+`luna-update-manager` должен писать durable intent до destructive/state-changing mutation и сохранять прогресс операции достаточно подробно для interruption reconciliation.
+
+Текущая реализация использует durable operation state для intent и applied/inflight progress. Точный backend-domain wiring ещё продолжается.
+
+### 111.3 Namespace/runtime integration
+
+`luna-app-runtime` имеет security-aware namespace preparation boundary.
+
+Не-`Allow` security decisions должны fail closed до namespace materialization.
+
+Process creation/supervision остаются runtime responsibility; `luna-namespace` не превращается в process manager.
+
+### 111.4 Bundle implementation
+
+`luna-bundle` уже содержит LBP1 reader/writer baseline для принятого RFC-0002.
+
+Оставшаяся работа — conformance/security hardening, signature verification/trust binding и application-manager integration.
+
+### 111.5 Bootloader
+
+`luna-boot.efi` развивается отдельной веткой работы и уже достигает Linux kernel + test init + `sh`.
+
+Это implementation status, а не изменение фундаментальной архитектуры.
+
+### 111.6 Rust workspace
+
+Текущий userspace workspace архитектурно определён следующими crates:
 
 ```text
 luna-common
-    ↑
 luna-fs
-    ↑
 luna-root-mapping
-    ↑
 luna-namespace
-
-luna-config ───────┐
-luna-security ─────┤
-luna-state ────────┤
-luna-event ────────┤
-luna-bundle ───────┤
-                   │
-management crates ─┤
-runtime crates ────┤
-luna-cli ──────────┘
+luna-config
+luna-security
+luna-state
+luna-event
+luna-bundle
+luna-app-manager
+luna-system-manager
+luna-update-manager
+luna-device-manager
+luna-kernel-manager
+luna-system-runtime
+luna-user-session
+luna-app-runtime
+luna-cli
 ```
 
-Higher-level crates consume lower-level contracts. No higher-level crate is allowed to pull application lifecycle, security policy, runtime state, bundle lifecycle or service APIs into `luna-common` or `luna-fs` merely for convenience.
+`luna-boot.efi` находится вне обычного userspace workspace.
 
-## Current implementation rule
+Отдельный `luna-log` crate не является обязательной текущей архитектурной границей только из-за исторического имени.
 
-The repository may contain a scaffolded crate before its full backend implementation exists, but the scaffold must represent a responsibility boundary already defined by the architecture.
-
-Before expanding a crate into a real backend, define:
-
-1. responsibility;
-2. public API;
-3. state ownership;
-4. persistence;
-5. error model;
-6. dependencies;
-7. IPC/client boundary where applicable;
-8. security boundary.
-
-Existing implementation code is reusable source material, not an authority over the architecture.
-
-## 110.13 Phase 1.6 status
+### 111.7 Текущие архитектурные invariants
 
 ```text
-Phase 1.1 — accepted and consolidated
-Phase 1.2 — accepted and consolidated
-Phase 1.3 — accepted and consolidated
-Phase 1.4 — accepted and consolidated
-Phase 1.5 — accepted and consolidated
-Phase 1.6 — accepted through HZ and consolidated
+Project Luna
+    ↓
+small stable immutable foundation
+    ↓
+EFI / SYSTEM / DATA / SWAP
+    ↓
+custom luna-boot.efi
+    ↓
+versioned System Images = direct SquashFS
+    ↓
+per-image manifests
+    ↓
+independent versioned kernels
+    ↓
+current + factory
+    ↓
+compatibility-aware fallback
+    ↓
+.lbp Bundle Format v1
+    ↓
+central Security policy
+    ↓
+logical Root Mapping
+    ↓
+Linux namespace materialization
+    ↓
+luna-system-runtime
+    ↓
+UserSession
+    ↓
+luna-app-runtime
+    ↓
+ApplicationInstance
 ```
 
-The project now moves from architectural decision closure to repository/crate audit. No implementation crate should be treated as final until it has been checked against this Source of Truth.
+### 111.8 Текущие открытые вопросы
+
+После Phase 1.6 открытыми остаются только детали, которые действительно не были закрыты:
+
+* точная финальная схема System Image manifest;
+* точная финальная схема kernel metadata;
+* точный persistent boot-state format;
+* exact boot-success confirmation mechanics;
+* exact technical soft-fallback implementation;
+* exact hybrid materialization mechanism;
+* exact automount backend;
+* окончательная CLI syntax;
+* точная OpenRC-like service integration;
+* точный recovery-key/authentication protocol;
+* production signature/trust integration details;
+* точные domain UpdateBackend implementations;
+* окончательная transport-level реализация IPC/event слоя.
+
+Нельзя выдавать эти пункты за уже принятые архитектурные решения.
+
+---
+# 112. Rust Learning Rules — обязательная часть разработки Project Luna
+
+Rust является не только языком реализации Project Luna, но и языком обучения пользователя в процессе разработки. Поэтому существенный Rust-код должен быть понятным и объяснимым.
+
+### 112.1 Главное правило
+
+> При существенном изменении Rust-кода нужно объяснять не только что сделано, но и почему выбран именно такой вариант.
+
+### 112.2 Что объяснять по месту
+
+При существенных изменениях объясняются:
+
+* `struct` и причины выбранной структуры данных;
+* `enum` и модель состояний;
+* `Option<T>`;
+* `Result<T, E>`;
+* ownership;
+* borrowing (`&T`, `&mut T` и передача ownership);
+* lifetimes, если они действительно влияют на дизайн;
+* traits и границы абстракций;
+* modules и crates;
+* `Arc`, `Mutex`, channels и другие concurrency tools;
+* `async/await` и Tokio там, где asynchronous execution реально нужен.
+
+### 112.3 Сравнение с Python
+
+У пользователя есть Python background, поэтому сравнение с Python можно использовать для объяснения модели Rust:
+
+```text
+Python
+object + dynamic references
+
+Rust
+value + explicit ownership + static types
+```
+
+Сравнение должно помогать понять Rust, а не превращаться в механический перевод каждой строки.
+
+### 112.4 Стиль Rust-кода
+
+Предпочтение отдаётся коду, который:
+
+* явно показывает ответственность типов;
+* использует понятные имена;
+* избегает ненужных macro/abstraction layers;
+* не скрывает существенную логику за "магией";
+* имеет небольшие функции с ясной задачей;
+* явно обрабатывает ошибки;
+* закрепляет важные контракты тестами.
+
+Сложные конструкции Rust допустимы, когда их необходимость можно объяснить.
+
+### 112.5 Формат объяснения существенного Rust patch
+
+```text
+1. Что делает изменение.
+2. Какие типы появились/изменились.
+3. Кто владеет данными.
+4. Где используется borrowing.
+5. Что возвращает Result/Option и почему.
+6. Где проходит crate/module boundary.
+7. Какие тесты проверяют контракт.
+```
+
+### 112.6 Rust и архитектурные границы
+
+```text
+architecture boundary
+        ↓
+crate boundary
+        ↓
+module boundary
+        ↓
+typed API
+        ↓
+implementation
+```
+
+Если код начинает обходить эти границы через global state, скрытые side effects, неясные host paths или общий dumping-ground type, это сигнал к архитектурному пересмотру.
+
+---
+# 113. Текущее состояние проекта после Phase 1.6-HZ
+
+Проект находится уже не на стадии чистого проектирования: архитектурный цикл принят, фундаментальные contracts существуют, а реализация продолжается.
+
+### Уже существует в значимой степени
+
+```text
+luna-namespace
+    Linux namespace/materialization primitives
+
+luna-security
+    policy/permission/trust baseline
+
+luna-app-runtime
+    security-aware namespace preparation boundary
+
+luna-state
+    durable redb state backend
+
+luna-update-manager
+    durable operation intent/progress + update/checkpoint orchestration
+
+luna-bundle
+    LBP1 codec baseline
+
+luna-boot.efi
+    kernel load + test init + sh prototype
+```
+
+### Следующая рабочая последовательность
+
+```text
+1. security-authorized child-process creation + supervision
+2. durable state integration with runtime and domain managers
+3. domain-backed UpdateBackends
+4. LBP1 conformance/security hardening + Ed25519 trust binding
+5. System Image/kernel manifests + boot-success/boot-state mechanics
+6. IPC/event transport
+7. cgroups/resource enforcement
+8. filtered device population + volume integration
+9. end-to-end Linux/QEMU validation
+```
+
+---
+# 114. Правило поддержания этого Source of Truth
+
+Этот файл остаётся **подробным архитектурным документом**, а не кратким README.
+
+Он должен сохранять:
+
+```text
+архитектуру
++
+объяснения
++
+правила разработки
++
+принятые решения
++
+необходимую историю уточнений
+```
+
+При закрытии новой архитектурной фазы:
+
+```text
+phase decisions
+      ↓
+проверка конфликтов
+      ↓
+обновление этого файла
+      ↓
+phase document → history / traceability
+```
+
+Не нужно вычищать отсюда полезные объяснения только ради краткости. Удаляется или переписывается только информация, которая действительно стала ложной, устаревшей или заменена последующим явным решением.
+
+При изменении принятого решения новая версия должна явно фиксировать:
+
+```text
+старое решение
+→ superseded
+→ новое решение
+→ причина
+→ затронутые компоненты
+```
 
 # END OF SOURCE OF TRUTH
