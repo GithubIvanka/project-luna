@@ -16,15 +16,28 @@ use luna_user_session::{SessionId, SessionState, UserSession};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct ApplicationInstanceId(u128);
-impl ApplicationInstanceId { pub const fn new(value: u128) -> Self { Self(value) } pub const fn get(self) -> u128 { self.0 } }
+
+impl ApplicationInstanceId {
+    pub const fn new(value: u128) -> Self { Self(value) }
+    pub const fn get(self) -> u128 { self.0 }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InstanceState { Starting, Running, Stopping, Stopped, Failed }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ApplicationInstance { id: ApplicationInstanceId, application: BundleId, version: Version, session: SessionId, state: InstanceState }
+pub struct ApplicationInstance {
+    id: ApplicationInstanceId,
+    application: BundleId,
+    version: Version,
+    session: SessionId,
+    state: InstanceState,
+}
+
 impl ApplicationInstance {
-    pub fn new(id: ApplicationInstanceId, application: BundleId, version: Version, session: SessionId) -> Self { Self { id, application, version, session, state: InstanceState::Starting } }
+    pub fn new(id: ApplicationInstanceId, application: BundleId, version: Version, session: SessionId) -> Self {
+        Self { id, application, version, session, state: InstanceState::Starting }
+    }
     pub const fn id(&self) -> ApplicationInstanceId { self.id }
     pub fn application(&self) -> &BundleId { &self.application }
     pub const fn version(&self) -> Version { self.version }
@@ -44,7 +57,16 @@ impl ApplicationInstance {
 }
 
 #[derive(Debug)]
-pub enum RuntimeError { InvalidTransition, InvalidBundle(String), Mapping(MappingError), Namespace(NamespaceError), Security(String), SessionNotActive, InstanceNotFound }
+pub enum RuntimeError {
+    InvalidTransition,
+    InvalidBundle(String),
+    Mapping(MappingError),
+    Namespace(NamespaceError),
+    Security(String),
+    SessionNotActive,
+    InstanceNotFound,
+}
+
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -66,6 +88,15 @@ pub trait ApplicationRuntime {
     fn authorize(&self, policy: &dyn PolicyAuthority, request: &AuthorizationRequest) -> Result<Decision, Self::Error>;
 }
 
+pub struct NamespacePreparation<'a> {
+    pub namespace: &'a LinuxMountNamespace,
+    pub root: &'a Path,
+    pub base_root: &'a Path,
+    pub mapping: &'a MappingTable,
+    pub policy: &'a dyn PolicyAuthority,
+    pub requests: &'a [AuthorizationRequest],
+}
+
 #[derive(Debug)]
 pub struct PreparedApplicationNamespace { instance: ApplicationInstanceId, root: LogicalRoot }
 impl PreparedApplicationNamespace {
@@ -77,7 +108,6 @@ impl PreparedApplicationNamespace {
 pub struct InMemoryApplicationRuntime { next_id: u128, instances: BTreeMap<ApplicationInstanceId, ApplicationInstance> }
 impl InMemoryApplicationRuntime {
     pub fn new() -> Self { Self { next_id: 1, instances: BTreeMap::new() } }
-
     fn validate_resources(manifest: &BundleManifest, mapping: &MappingTable) -> Result<(), RuntimeError> {
         validate_manifest(manifest).map_err(|e| RuntimeError::InvalidBundle(e.to_string()))?;
         for resource in manifest.resources() {
@@ -87,7 +117,6 @@ impl InMemoryApplicationRuntime {
         mapping.materialize().map_err(RuntimeError::Mapping)?;
         Ok(())
     }
-
     pub fn launch_for_session(&mut self, manifest: &BundleManifest, mapping: &MappingTable, session: &UserSession) -> Result<ApplicationInstanceId, RuntimeError> {
         if session.state() != SessionState::Active { return Err(RuntimeError::SessionNotActive); }
         Self::validate_resources(manifest, mapping)?;
@@ -98,55 +127,38 @@ impl InMemoryApplicationRuntime {
         self.instances.insert(id, instance);
         Ok(id)
     }
-
-    pub fn prepare_authorized_namespace_for_session(
-        &self,
-        instance: ApplicationInstanceId,
-        namespace: &LinuxMountNamespace,
-        root: &Path,
-        base_root: &Path,
-        mapping: &MappingTable,
-        policy: &dyn PolicyAuthority,
-        requests: &[AuthorizationRequest],
-    ) -> Result<PreparedApplicationNamespace, RuntimeError> {
+    pub fn prepare_authorized_namespace_for_session(&self, instance: ApplicationInstanceId, preparation: NamespacePreparation<'_>) -> Result<PreparedApplicationNamespace, RuntimeError> {
         self.instances.get(&instance).ok_or(RuntimeError::InstanceNotFound)?;
-        Self::validate_mapping_only(mapping)?;
-        for request in requests {
-            match policy.authorize(request).map_err(|error| RuntimeError::Security(error.to_string()))? {
-                Decision::Allow => {}
+        Self::validate_mapping_only(preparation.mapping)?;
+        for request in preparation.requests {
+            match preparation.policy.authorize(request).map_err(|error| RuntimeError::Security(error.to_string()))? {
+                Decision::Allow => {},
                 Decision::Deny => return Err(RuntimeError::Security(format!("denied: {:?}", request))),
                 Decision::Ask => return Err(RuntimeError::Security("authorization requires user confirmation".to_owned())),
                 Decision::Constrained { constraints } => return Err(RuntimeError::Security(format!("constrained authorization requires constraint enforcement: {constraints:?}"))),
             }
         }
-        let logical_root = namespace.materialize_logical_root(root, base_root, mapping).map_err(RuntimeError::Namespace)?;
+        let logical_root = preparation.namespace.materialize_logical_root(preparation.root, preparation.base_root, preparation.mapping).map_err(RuntimeError::Namespace)?;
         Ok(PreparedApplicationNamespace { instance, root: logical_root })
     }
-
+    /// Compatibility-only preparation. Production launch paths must use the
+    /// security-aware method above; this method remains for contract tests and
+    /// staged migration of the prototype.
     pub fn prepare_namespace_for_session(&self, instance: ApplicationInstanceId, namespace: &LinuxMountNamespace, root: &Path, base_root: &Path, mapping: &MappingTable) -> Result<PreparedApplicationNamespace, RuntimeError> {
         self.instances.get(&instance).ok_or(RuntimeError::InstanceNotFound)?;
         Self::validate_mapping_only(mapping)?;
         let logical_root = namespace.materialize_logical_root(root, base_root, mapping).map_err(RuntimeError::Namespace)?;
         Ok(PreparedApplicationNamespace { instance, root: logical_root })
     }
-
-    fn validate_mapping_only(mapping: &MappingTable) -> Result<(), RuntimeError> { mapping.materialize().map_err(RuntimeError::Mapping)?; Ok(()) }
-    pub fn instance(&self, id: ApplicationInstanceId) -> Result<&ApplicationInstance, RuntimeError> { self.instances.get(&id).ok_or(RuntimeError::InstanceNotFound) }
-    pub fn stop(&mut self, id: ApplicationInstanceId) -> Result<(), RuntimeError> { let instance=self.instances.get_mut(&id).ok_or(RuntimeError::InstanceNotFound)?; instance.transition(InstanceState::Stopping)?; instance.transition(InstanceState::Stopped) }
-    pub fn fail(&mut self, id: ApplicationInstanceId) -> Result<(), RuntimeError> { self.instances.get_mut(&id).ok_or(RuntimeError::InstanceNotFound)?.transition(InstanceState::Failed) }
+    fn validate_mapping_only(mapping:&MappingTable)->Result<(),RuntimeError>{mapping.materialize().map_err(RuntimeError::Mapping)?;Ok(())}
+    pub fn instance(&self,id:ApplicationInstanceId)->Result<&ApplicationInstance,RuntimeError>{self.instances.get(&id).ok_or(RuntimeError::InstanceNotFound)}
+    pub fn stop(&mut self,id:ApplicationInstanceId)->Result<(),RuntimeError>{let instance=self.instances.get_mut(&id).ok_or(RuntimeError::InstanceNotFound)?;instance.transition(InstanceState::Stopping)?;instance.transition(InstanceState::Stopped)}
+    pub fn fail(&mut self,id:ApplicationInstanceId)->Result<(),RuntimeError>{self.instances.get_mut(&id).ok_or(RuntimeError::InstanceNotFound)?.transition(InstanceState::Failed)}
 }
-
 impl ApplicationRuntime for InMemoryApplicationRuntime {
-    type Error = RuntimeError;
-    fn launch(&mut self, manifest: &BundleManifest, mapping: &MappingTable) -> Result<ApplicationInstance, Self::Error> {
-        Self::validate_resources(manifest, mapping)?;
-        let id=ApplicationInstanceId::new(self.next_id); self.next_id=self.next_id.saturating_add(1);
-        let mut instance=ApplicationInstance::new(id, manifest.metadata().id().clone(), manifest.metadata().version(), SessionId::new(0));
-        instance.transition(InstanceState::Running)?; self.instances.insert(id, instance.clone()); Ok(instance)
-    }
-    fn authorize(&self, policy: &dyn PolicyAuthority, request: &AuthorizationRequest) -> Result<Decision, Self::Error> {
-        policy.authorize(request).map_err(|e| RuntimeError::Security(e.to_string()))
-    }
+    type Error=RuntimeError;
+    fn launch(&mut self,manifest:&BundleManifest,mapping:&MappingTable)->Result<ApplicationInstance,Self::Error>{Self::validate_resources(manifest,mapping)?;let id=ApplicationInstanceId::new(self.next_id);self.next_id=self.next_id.saturating_add(1);let mut instance=ApplicationInstance::new(id,manifest.metadata().id().clone(),manifest.metadata().version(),SessionId::new(0));instance.transition(InstanceState::Running)?;self.instances.insert(id,instance.clone());Ok(instance)}
+    fn authorize(&self,policy:&dyn PolicyAuthority,request:&AuthorizationRequest)->Result<Decision,Self::Error>{policy.authorize(request).map_err(|e|RuntimeError::Security(e.to_string()))}
 }
 
 #[cfg(test)]
@@ -156,25 +168,7 @@ mod tests {
     use luna_common::{BundleId, UserId, Version};
     use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
     use luna_user_session::{SessionId, SessionState, UserSession};
-
-    fn setup() -> (BundleManifest, MappingTable, UserSession) {
-        let mut manifest=BundleManifest::new(BundleMetadata::new(BundleId::from("example.app"),Version::new(1,0,0),BundleKind::Application));
-        manifest.add_resource(BundleResource::new("/bin/app","bin/app"));
-        let mut mapping=MappingTable::new();
-        mapping.insert(MappingRule::new(LogicalPath::new("/bin/app").unwrap(),PhysicalPath::new("/data/system/apps/example/bin/app"))).unwrap();
-        let mut session=UserSession::new(SessionId::new(7),UserId::from("alice")); session.transition(SessionState::Active).unwrap();
-        (manifest,mapping,session)
-    }
-
-    #[test]
-    fn instance_has_explicit_lifecycle() {
-        let mut instance=ApplicationInstance::new(ApplicationInstanceId::new(1),BundleId::from("example.app"),Version::new(1,0,0),SessionId::new(7));
-        assert_eq!(instance.state(),InstanceState::Starting); instance.transition(InstanceState::Running).unwrap(); instance.transition(InstanceState::Stopping).unwrap(); instance.transition(InstanceState::Stopped).unwrap();
-    }
-
-    #[test]
-    fn runtime_requires_active_session_and_valid_mapping() {
-        let (manifest,mapping,session)=setup(); let mut runtime=InMemoryApplicationRuntime::new(); let id=runtime.launch_for_session(&manifest,&mapping,&session).unwrap();
-        assert_eq!(runtime.instance(id).unwrap().state(),InstanceState::Running); runtime.stop(id).unwrap(); assert_eq!(runtime.instance(id).unwrap().state(),InstanceState::Stopped);
-    }
+    fn setup()->(BundleManifest,MappingTable,UserSession){let mut manifest=BundleManifest::new(BundleMetadata::new(BundleId::from("example.app"),Version::new(1,0,0),BundleKind::Application));manifest.add_resource(BundleResource::new("/bin/app","bin/app"));let mut mapping=MappingTable::new();mapping.insert(MappingRule::new(LogicalPath::new("/bin/app").unwrap(),PhysicalPath::new("/data/system/apps/example/bin/app"))).unwrap();let mut session=UserSession::new(SessionId::new(7),UserId::from("alice"));session.transition(SessionState::Active).unwrap();(manifest,mapping,session)}
+    #[test] fn instance_has_explicit_lifecycle(){let mut instance=ApplicationInstance::new(ApplicationInstanceId::new(1),BundleId::from("example.app"),Version::new(1,0,0),SessionId::new(7));assert_eq!(instance.state(),InstanceState::Starting);instance.transition(InstanceState::Running).unwrap();instance.transition(InstanceState::Stopping).unwrap();instance.transition(InstanceState::Stopped).unwrap();}
+    #[test] fn runtime_requires_active_session_and_valid_mapping(){let(manifest,mapping,session)=setup();let mut runtime=InMemoryApplicationRuntime::new();let id=runtime.launch_for_session(&manifest,&mapping,&session).unwrap();assert_eq!(runtime.instance(id).unwrap().state(),InstanceState::Running);runtime.stop(id).unwrap();assert_eq!(runtime.instance(id).unwrap().state(),InstanceState::Stopped);}
 }
