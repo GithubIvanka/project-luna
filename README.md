@@ -11,7 +11,7 @@ Project Luna is an open-source operating system project focused on a small immut
 Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has entered architecture-driven backend implementation and hardening.
 
 - Phases **1.1–1.6-HZ** are accepted and consolidated.
-- Post-1.6 accepted clarifications are recorded in [`docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md`](docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md) pending safe consolidation into the large Source of Truth file.
+- The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); accepted post-1.6 decisions are consolidated there as well.
 - The repository/Cargo audit and crate map are established.
 - Linux namespace/materialization primitives are implemented in `luna-namespace`.
 - Durable system state is implemented in `luna-state` with `redb`.
@@ -45,7 +45,7 @@ DATA / mappings / security / Linux namespace primitives
 
 The four physical areas are **EFI / SYSTEM / DATA / SWAP**.
 
-`SYSTEM` contains immutable/versioned Luna System Images and kernels. A System Image is directly a `luna-X.Y.Z.squashfs` SquashFS filesystem image; it is never an `.lbp` Bundle.
+`SYSTEM` contains immutable/versioned Luna System Images and kernels. A System Image is directly a `luna-X.Y.Z.squashfs` SquashFS filesystem image.
 
 `DATA` contains mutable system, user and cache state. The canonical model is:
 
@@ -83,11 +83,11 @@ Different versions of the same application are independent immutable Bundles and
 
 ## Runtime and isolation
 
-`luna-system-runtime` is the single system-wide runtime/supervisor. `UserSession` is the combined user/session entity. There is no separate `lunad` architecture component and no separate normal Session Manager.
+`luna-system-runtime` is the system-wide runtime/supervisor. `UserSession` is the combined user/session entity.
 
 `luna-app-runtime` manages `ApplicationInstance` lifecycle and prepares an isolated execution environment. Every ApplicationInstance receives its own filesystem/mount namespace. The application sees a normal Linux-compatible logical `/`; physical Luna DATA/SYSTEM paths and mapping tables remain implementation details.
 
-`luna-security` is the central policy authority. `luna-root-mapping` defines logical mapping semantics. `luna-namespace` contains Linux-specific namespace/materialization primitives. Linux namespaces, cgroups and related kernel mechanisms are enforcement primitives rather than replacements for the Luna architecture.
+`luna-security` is the central policy authority. `luna-root-mapping` defines logical mapping semantics. `luna-namespace` contains Linux-specific namespace/materialization primitives. Linux namespaces, cgroups and related kernel mechanisms are enforcement primitives for the Luna model.
 
 ## Management boundaries
 
@@ -138,9 +138,7 @@ See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for curre
 
 ## Development rule
 
-The repository must not become a second architecture document.
-
-`docs/ARCHITECTURE.md` is the primary Source of Truth. Historical phase records preserve traceability. The post-1.6 amendment records accepted decisions that have not yet been physically folded into the large Source of Truth document.
+`docs/ARCHITECTURE.md` is the primary and current architectural Source of Truth. Historical phase records, ADRs and RFC documents preserve traceability; accepted current semantics are consolidated in the Source of Truth.
 
 Accepted architecture decisions must not be silently changed by implementation work. When code reveals a real architectural conflict, that conflict must be documented and resolved explicitly.
 
