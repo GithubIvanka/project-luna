@@ -6,7 +6,7 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 Phases **1.1–1.6** are accepted/consolidated through **1.6-HZ**. RFC-0002 Bundle Format v1 was accepted on **2026-08-30**. The project is now in backend integration and hardening.
 
-Post-1.6 accepted clarifications are recorded in `docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md` until they are safely consolidated into the large Source of Truth document.
+All currently accepted architecture decisions are consolidated in `docs/ARCHITECTURE.md`.
 
 ## Completed foundation
 
@@ -110,7 +110,7 @@ System Images remain direct SquashFS files named `luna-X.Y.Z.squashfs`.
 
 ### 7. IPC and event transport
 
-Select the final local IPC/event implementation from the accepted contract: Unix-domain socket control plane with versioned typed protocol, plus the lightweight Luna event model. Keep GUI/CLI thin over the backend.
+Select the final local IPC/event implementation from the accepted contract: Unix-domain socket control plane with versioned typed protocol, plus the Luna event model. Keep GUI/CLI thin over the backend.
 
 ### 8. Resource enforcement
 
@@ -158,15 +158,13 @@ ApplicationInstance
 
 ## Non-negotiable constraints
 
-- System Image = direct SquashFS, not `.lbp`.
-- System Images live in `SYSTEM`, never in DATA.
-- `.lbp` = Bundle transport/archive format, not System Image.
-- `luna-app-manager` does not own normal application execution.
+- System Image = direct SquashFS.
+- `.lbp` = Bundle transport/archive format.
+- `luna-app-manager` does not own normal application process execution.
 - `luna-security` remains the central policy authority.
-- `luna-root-mapping` remains a narrow mapping layer.
+- `luna-root-mapping` remains the mapping layer.
 - `luna-namespace` contains Linux-specific namespace/materialization primitives.
-- One `luna-system-runtime` coordinates multiple `UserSession`s.
+- `luna-system-runtime` coordinates system runtime and multiple `UserSession`s.
 - `UserSession` is the combined user/session entity.
-- There is no separate `lunad` architecture component.
-- Linux namespaces/resource controls are implementation mechanisms, not the architecture itself.
-- Accepted decisions are not silently changed.
+- Linux namespaces/resource controls are implementation mechanisms for the Luna architecture.
+- Accepted decisions are consolidated in `docs/ARCHITECTURE.md` and are not silently changed.
