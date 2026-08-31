@@ -99,13 +99,6 @@ impl InMemoryApplicationRuntime {
         Ok(id)
     }
 
-    /// Prepare a namespace only after the caller has obtained explicit security
-    /// authorization for every operation represented by `requests`.
-    ///
-    /// A decision of `Deny`, `Ask`, or an unconstrained interpretation of a
-    /// `Constrained` policy is never treated as permission to mount. Typed
-    /// constrained policies must be resolved by a future constraint-aware
-    /// materializer before they can reach this low-level preparation boundary.
     pub fn prepare_authorized_namespace_for_session(
         &self,
         instance: ApplicationInstanceId,
@@ -123,15 +116,13 @@ impl InMemoryApplicationRuntime {
                 Decision::Allow => {}
                 Decision::Deny => return Err(RuntimeError::Security(format!("denied: {:?}", request))),
                 Decision::Ask => return Err(RuntimeError::Security("authorization requires user confirmation".to_owned())),
-                Decision::Constrained { scope } => return Err(RuntimeError::Security(format!("constrained authorization requires constraint enforcement: {scope}"))),
+                Decision::Constrained { constraints } => return Err(RuntimeError::Security(format!("constrained authorization requires constraint enforcement: {constraints:?}"))),
             }
         }
         let logical_root = namespace.materialize_logical_root(root, base_root, mapping).map_err(RuntimeError::Namespace)?;
         Ok(PreparedApplicationNamespace { instance, root: logical_root })
     }
 
-    /// Legacy contract-only preparation. Production callers should use
-    /// `prepare_authorized_namespace_for_session` so Security is mandatory.
     pub fn prepare_namespace_for_session(&self, instance: ApplicationInstanceId, namespace: &LinuxMountNamespace, root: &Path, base_root: &Path, mapping: &MappingTable) -> Result<PreparedApplicationNamespace, RuntimeError> {
         self.instances.get(&instance).ok_or(RuntimeError::InstanceNotFound)?;
         Self::validate_mapping_only(mapping)?;
