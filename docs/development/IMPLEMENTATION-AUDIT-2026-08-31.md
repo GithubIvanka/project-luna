@@ -8,110 +8,110 @@ This audit compares the current `main` repository, the accepted Phase 1.6 decisi
 
 `main` contains the current 17 userspace/workspace crates plus the separate `boot/luna-boot` tree. `Cargo.toml` uses resolver 3 and lists the current crates, including `luna-root-mapping`, `luna-namespace`, `luna-state`, `luna-bundle`, the managers, runtimes and CLI.
 
-PR #2 from Copilot is merged. It only changes `components/luna-bundle/src/lbp_v1.rs` and removes repeated parser reads/unsafe test unwraps without changing the LBP1 wire format. The PR is merged and its purpose is now part of `main` history.
+PR #2 from Copilot is merged. It only changed `components/luna-bundle/src/lbp_v1.rs` for clippy/test cleanup without changing the intended LBP1 wire layout.
 
-## Source of Truth drift found
+## Source of Truth
 
-The current `docs/ARCHITECTURE.md` is the architectural authority and contains the consolidated Phase 1.1–1.6 material, but it still does not physically contain the accepted post-1.6 clarification block or the final RFC-0002 details.
+`docs/ARCHITECTURE.md` remains authoritative. The accepted post-1.6 clarifications are additionally preserved in `docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md` until the large Source of Truth file can be consolidated safely without losing historical material.
 
-The accepted post-1.6 decisions are therefore preserved in:
+The current amendment explicitly records the later accepted boundaries for `luna-system-runtime`, `UserSession`, logical root composition, security/mapping, DATA layout, redb, update coordination, Linux namespaces, filtered `/dev`, IPC, Recovery vs Factory, and RFC-0002.
 
-`docs/architecture/ARCHITECTURE-AMENDMENT-2026-08-31.md`
-
-This amendment is the traceability bridge until the same material can be safely folded into the large Source of Truth file without overwriting its historical content.
-
-## Important SoT corrections confirmed
-
-The current Source of Truth already contains the correct major boundaries for the runtime, mapping, UserSession, security, materialization and Phase 1.6. It also explicitly says that older conflicting statements are superseded by the current consolidated section.
-
-The amendment adds the later accepted implementation decisions that were missing from the body of the SoT, especially:
-
-- `luna-system-runtime` is the single system-wide runtime/supervisor; `lunad` is not an architectural component;
-- `UserSession` is the combined user/session entity;
-- applications receive a normal Linux-compatible logical `/`;
-- mappings are primarily file-oriented with explicit subtree mappings allowed;
-- bundle mapping/capability declarations are requests, not grants;
-- canonical DATA includes `system/config` and `system/state`;
-- `redb` is the first durable state backend;
-- update coordination remains in `luna-update-manager` while domain managers retain ownership;
-- `luna-namespace` is the Linux-specific namespace/materialization boundary;
-- `/dev` access remains filtered and policy-controlled;
-- Recovery remains distinct from Factory;
-- RFC-0002 Bundle Format v1 is accepted;
-- System Images remain direct `luna-X.Y.Z.squashfs` files.
-
-## Code review findings
-
-### `luna-state`
-
-The durable store is present and uses a single redb transaction for mutations and global revision. This matches the accepted synchronous storage contract.
-
-Remaining gap: system/runtime managers are not yet wired to persistent state as their authoritative implementation state.
-
-### `luna-update-manager`
-
-The coordinator and rollback prototype exist.
-
-Hardening gap: `prepare()` still calls `backend.prepare(plan)` before persisting the durable prepared journal entry. This must be changed before a real backend with side effects is connected, so that intent/state is durable before mutation wherever the operation requires it.
-
-Recovery gap: the current journal does not persist the exact set of successfully applied operations. Precise interruption reconciliation therefore remains deferred.
-
-### `luna-app-runtime`
-
-The runtime tracks ApplicationInstance lifecycle and validates the bundle/mapping contract. It can prepare a namespace for an existing instance.
-
-Integration gap: final authorization is not yet a mandatory input to the namespace-preparation API. The production path must enforce:
-
-```text
-manifest request
-  ↓
-mapping plan
-  ↓
-luna-security authorization
-  ↓
-namespace materialization
-  ↓
-exec
-```
-
-### `luna-root-mapping`
-
-The component correctly keeps logical/physical paths separate and supports exact file mappings plus explicit subtree mappings.
-
-The domain materialization description remains in-memory; Linux mount mechanics stay in `luna-namespace`.
+## Completed in this pass
 
 ### `luna-namespace`
 
-The original implementation incorrectly mounted the complete base root read-only and then tried to create missing logical mount targets inside that read-only mount.
+Logical-root composition now uses OverlayFS with an immutable lower System Image and writable runtime upper/work state. This replaces the previous unsafe sequence that attempted to create missing mapping targets inside a read-only bind of the lower root.
 
-This was fixed on 2026-08-31 by switching logical-root composition to a writable OverlayFS upper/work layer over the immutable base root. The code still keeps mount mechanics separate from policy and mapping semantics.
+The namespace backend also validates relative `/dev` exposure names and keeps policy ownership outside the crate.
 
-Remaining integration work:
+### `luna-security`
 
-- authenticate/authorize writable mappings before applying them;
-- populate filtered `/dev` from authorized device-manager resources;
-- integrate process creation and cgroup setup;
-- add privileged Linux integration tests rather than only message/path unit tests.
+The policy contract now explicitly contains the separate `Visibility` permission dimension and typed constrained decisions:
 
-### `luna-bundle`
+```text
+Constraint::ReadOnly
+Constraint::PathLimited(...)
+Constraint::DeviceLimited(...)
+```
 
-The LBP1 codec is present and the Copilot cleanup is merged.
+A constrained decision is no longer represented by an untyped scope string.
 
-One manifest naming issue remains to be reconciled: the accepted RFC example currently uses `[[dependency]]`, while the Rust serde field is `dependencies`, which serializes to `[[dependencies]]`. The canonical TOML field name must be made identical in RFC and reference codec before claiming full conformance.
+### `luna-app-runtime`
 
-The codec currently exposes optional signature bytes but does not yet perform the full Ed25519 verification/trust-binding flow.
+A security-aware namespace preparation entry point now requires a `PolicyAuthority` and an explicit set of authorization requests before calling Linux namespace materialization. `Deny` and unresolved `Ask`/`Constrained` decisions fail closed at this boundary.
 
-## CI status
+The older contract-only preparation method remains for compatibility with earlier prototypes, but production integration should use the security-aware boundary.
 
-PR #2 is merged. The repository has CI for workspace check/test/Clippy/release and the separate UEFI target. Each code-changing pass must be validated by a fresh workflow result; stale CI results must not be used as evidence for newer commits.
+### `luna-state`
+
+`RedbStateStore` remains the accepted durable backend under:
+
+```text
+DATA/system/state/luna-state.redb
+```
+
+Mutations and global revision commit atomically in one database transaction. No additional Luna-specific WAL is layered over redb.
+
+### `luna-update-manager`
+
+The journal is now written before the domain `prepare` call. Per-operation progress is durably recorded with:
+
+```text
+updates/<id>/phase
+updates/<id>/plan
+updates/<id>/applied
+updates/<id>/inflight
+```
+
+The engine records an in-flight step before mutation and marks it applied only after success. Interruption reconciliation conservatively rolls back both recorded completed steps and a possibly-applied in-flight step. This gives the domain backend a clear idempotent-rollback contract.
+
+## Remaining high-risk gaps
+
+### Security-to-namespace mapping semantics
+
+The explicit security-aware entry point exists, but mapping declarations are not yet automatically transformed into fine-grained authorization requests. This remains an integration task so that the exact mapping/resource identity is checked by `luna-security` before each writable/device exposure.
+
+### Real process launch/supervision
+
+`luna-app-runtime` still stops at namespace preparation. Real child-process creation, exec, lifecycle monitoring and restart/recovery remain owned by the higher runtime/supervisor layer and are not hidden inside `luna-namespace`.
+
+### Update domain backends
+
+`luna-update-manager` now has a stronger durable journal, but concrete backends are still needed from `luna-system-manager`, `luna-kernel-manager` and `luna-app-manager`. Domain ownership must not move into `luna-update-manager`.
+
+### LBP1 conformance
+
+RFC-0002 is Accepted. The codec remains the reference implementation, but the following still need completion before calling it production-ready:
+
+- canonical manifest spelling must be identical between RFC and code;
+- complete malformed-input matrix;
+- transport-independent ContentIdentity tests;
+- concrete Ed25519 signature record encoding and verification;
+- trust-store integration outside `luna-bundle`.
+
+### System Image / kernel specification
+
+The direct SquashFS System Image model and `system/kernels/` naming are fixed. Detailed image manifest, kernel metadata, compatibility resolution, and persistent boot-success confirmation remain next.
+
+### Device integration
+
+`/dev` remains filtered. `luna-device-manager` still needs to provide the authorized device/volume objects that the namespace backend exposes.
+
+### IPC / events
+
+The architectural choice is Unix-domain sockets with a Luna typed binary protocol. Final framing, API negotiation, event persistence boundaries and production transport remain implementation work.
+
+## Verification note
+
+The available GitHub connector does not expose a fresh workflow run for the latest commits in this pass, so this audit intentionally does not claim that the newest code has passed CI. The repository's existing workflow remains the authoritative build/test gate.
 
 ## Next implementation order
 
-1. Run the fresh CI for the namespace-overlay change and fix any actual compile/test/Clippy issues.
-2. Make Security authorization a mandatory input to writable/device namespace materialization.
-3. Connect `luna-app-runtime` to real child-process creation/supervision without moving lifecycle ownership into `luna-namespace`.
-4. Make update journal state durable-before-mutation and persist per-operation/per-step progress.
-5. Reconcile the canonical RFC-0002 dependency field spelling between accepted RFC text and Rust manifest serde model.
-6. Add complete LBP1 malformed-input, determinism, integrity and signature coverage; implement the Ed25519 verification boundary.
-7. Connect durable state to `luna-system-runtime` / domain-manager ownership.
-8. Continue System Image/kernel specification, boot-success confirmation, device integration and end-to-end Linux/QEMU validation.
+1. Run and inspect fresh CI for the latest commits.
+2. Complete fine-grained security-to-mapping authorization.
+3. Add real process launch and supervision through `luna-system-runtime`.
+4. Connect concrete update backends to domain managers.
+5. Complete LBP1 canonical field/signature verification and malformed-input tests.
+6. Connect durable state to runtime/system-manager ownership.
+7. Formalize System Image/kernel metadata and boot-success state.
+8. Integrate filtered `/dev`, IPC/events, resources and end-to-end QEMU/Linux tests.
