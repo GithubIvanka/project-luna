@@ -166,8 +166,21 @@ attach DATA
   ↓
 luna-system-runtime
   ↓
-UserSession(s)
+graphical login UserSession
+  ↓
+authentication
+  ↓
+Active UserSession
+  ↓
+Wayland session
+  ↓
+niri
+  ↓
+Noctalia Shell
 ```
+
+Штатная загрузка Luna не использует TTY как пользовательскую точку входа.
+TTY/serial console может присутствовать только в development, diagnostic или recovery-сценариях.
 
 ---
 
@@ -5225,3 +5238,37 @@ phase document → history / traceability
 ```
 
 # END OF SOURCE OF TRUTH
+
+# CURRENT DESKTOP SESSION MODEL
+
+Этот раздел фиксирует текущую реализационную модель графической системы Luna.
+
+```text
+luna-system-runtime
+        ↓
+graphical login UserSession
+        ↓
+authentication
+        ↓
+Active UserSession
+        ↓
+Wayland session
+        ↓
+niri
+        ↓
+Noctalia Shell
+```
+
+Экран входа является частью жизненного цикла `UserSession`. После успешной
+authentication эта же `UserSession` переходит в `Active`, после чего запускается
+графическая Wayland-сессия.
+
+TTY не является частью штатного пользовательского интерфейса или штатного способа
+запуска рабочего стола. Serial/TTY доступ допускается только для разработки,
+диагностики и Recovery.
+
+`niri` является compositor/window manager графической сессии, а `Noctalia Shell`
+является пользовательским desktop shell/UI. Они интегрируются в существующую
+модель UserSession и system-runtime и не получают ответственность за системное
+состояние, security policy или application installation.
+
