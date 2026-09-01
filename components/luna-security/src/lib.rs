@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
-use luna_common::{BundleId, UserId};
+use luna_common::{BundleId, RuntimeKind, UserId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum Principal { User(UserId), Application(BundleId), System }
@@ -15,6 +15,7 @@ pub enum Resource {
     UserData(UserId),
     ApplicationData { user: UserId, application: BundleId },
     Application(BundleId),
+    Runtime(RuntimeKind),
     Volume(String),
     Device(String),
     System,
@@ -64,7 +65,7 @@ impl PolicyAuthority for StaticPolicyAuthority {
 #[cfg(test)]
 mod tests {
     use super::{AuthorizationRequest, Constraint, Decision, Permission, PolicyAuthority, Principal, Resource, StaticPolicyAuthority};
-    use luna_common::{BundleId, UserId};
+    use luna_common::{BundleId, RuntimeKind, UserId};
     #[test]
     fn explicit_grant_allows_and_revoke_denies() {
         let principal=Principal::Application(BundleId::from("example.app")); let resource=Resource::UserData(UserId::from("alice"));
@@ -87,6 +88,16 @@ mod tests {
         let other_principal_request=AuthorizationRequest{principal:other_principal,resource:resource.clone(),permission:Permission::Read}; let other_resource_request=AuthorizationRequest{principal,resource:other_resource,permission:Permission::Read};
         let mut policy=StaticPolicyAuthority::new(); policy.grant(read.principal.clone(),read.resource.clone(),Permission::Read);
         assert_eq!(policy.authorize(&read).unwrap(),Decision::Allow); assert_eq!(policy.authorize(&write).unwrap(),Decision::Deny); assert_eq!(policy.authorize(&other_principal_request).unwrap(),Decision::Deny); assert_eq!(policy.authorize(&other_resource_request).unwrap(),Decision::Deny);
+    }
+    #[test]
+    fn runtime_requires_explicit_use_permission() {
+        let principal=Principal::Application(BundleId::from("example.app"));
+        let resource=Resource::Runtime(RuntimeKind::Glibc);
+        let request=AuthorizationRequest{principal:principal.clone(),resource:resource.clone(),permission:Permission::Use};
+        let mut policy=StaticPolicyAuthority::new();
+        assert_eq!(policy.authorize(&request).unwrap(),Decision::Deny);
+        policy.grant(principal,resource,Permission::Use);
+        assert_eq!(policy.authorize(&request).unwrap(),Decision::Allow);
     }
     #[test]
     fn constrained_decision_is_typed() {
