@@ -19,6 +19,7 @@ impl SessionId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionState {
     Starting,
+    Authenticating,
     Active,
     Restricted,
     Ending,
@@ -44,8 +45,9 @@ impl UserSession {
     pub fn transition(&mut self, next: SessionState) -> Result<(), SessionError> {
         let valid = matches!(
             (self.state, next),
-            (SessionState::Starting, SessionState::Active)
-                | (SessionState::Starting, SessionState::Ending)
+            (SessionState::Starting, SessionState::Authenticating)
+                | (SessionState::Authenticating, SessionState::Active)
+                | (SessionState::Authenticating, SessionState::Ending)
                 | (SessionState::Active, SessionState::Restricted)
                 | (SessionState::Active, SessionState::Ending)
                 | (SessionState::Restricted, SessionState::Active)
@@ -83,14 +85,23 @@ mod tests {
     use luna_common::UserId;
 
     #[test]
-    fn session_has_explicit_lifecycle() {
+    fn session_requires_authentication_before_activation() {
         let mut session = UserSession::new(SessionId::new(1), UserId::from("alice"));
         assert_eq!(session.state(), SessionState::Starting);
+        session.transition(SessionState::Authenticating).expect("enter authentication");
         session.transition(SessionState::Active).expect("activate session");
         session.transition(SessionState::Restricted).expect("restrict session");
         session.transition(SessionState::Active).expect("restore session");
         session.transition(SessionState::Ending).expect("end session");
         session.transition(SessionState::Ended).expect("finish session");
         assert_eq!(session.state(), SessionState::Ended);
+    }
+
+    #[test]
+    fn authentication_can_cancel() {
+        let mut session = UserSession::new(SessionId::new(2), UserId::from("alice"));
+        session.transition(SessionState::Authenticating).expect("enter authentication");
+        session.transition(SessionState::Ending).expect("cancel authentication");
+        session.transition(SessionState::Ended).expect("finish session");
     }
 }
