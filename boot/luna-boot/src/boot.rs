@@ -57,7 +57,7 @@ pub fn boot_flow() -> BootResult<()> {
             .filter(|part| *part != "quiet")
             .collect::<alloc::vec::Vec<_>>()
             .join(" ");
-        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
+        target.kernel_cmdline.push_str(" console=tty0 loglevel=7 ignore_loglevel");
     }
 
     let mut filesystem = SystemFilesystem::open()?;
