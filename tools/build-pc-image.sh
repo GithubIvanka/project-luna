@@ -193,7 +193,9 @@ truncate -s 128M "$OUT/luna-efi.img"
 mkfs.fat -F 32 "$OUT/luna-efi.img" >/dev/null
 mmd -i "$OUT/luna-efi.img" ::/EFI
 mmd -i "$OUT/luna-efi.img" ::/EFI/LUNA
+mmd -i "$OUT/luna-efi.img" ::/EFI/BOOT
 mcopy -i "$OUT/luna-efi.img" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI
+mcopy -i "$OUT/luna-efi.img" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
 
 dd if="$OUT/luna-efi.img" of="$OUT/luna-pc.img" bs=512 seek=2048 conv=notrunc status=none
 dd if="$OUT/luna-system.img" of="$OUT/luna-pc.img" bs=512 seek=264192 conv=notrunc status=none
@@ -208,6 +210,7 @@ architecture=x86_64
 system_image=luna-${LUNA_VERSION}.squashfs
 system_libc=musl
 bootloader=luna-boot.efi
+uefi_fallback=EFI/BOOT/BOOTX64.EFI
 partitions=EFI:128MiB,SYSTEM:384MiB,DATA:512MiB
 image_size=1152MiB
 mode=$MODE
@@ -222,6 +225,6 @@ sha256sum \
 echo "Built Project Luna PC image:"
 echo "  disk:        $OUT/luna-pc.img"
 echo "  System:      $OUT/luna-${LUNA_VERSION}.squashfs"
-echo "  initramfs:    $OUT/luna-initramfs.img"
+echo "  initramfs:   $OUT/luna-initramfs.img"
 echo "  bootloader:   $EFI"
 echo "  checksums:    $OUT/SHA256SUMS"
