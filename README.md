@@ -8,7 +8,7 @@ Project Luna is an open-source operating system project focused on a small immut
 
 ## Current status
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has entered architecture-driven backend implementation, integration and hardening.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and is now in **Phase 2 runtime/boot integration and hardening**.
 
 - Phases **1.1–1.6-HZ** are accepted and consolidated.
 - The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); accepted post-1.6 decisions are consolidated there as well.
@@ -17,10 +17,13 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 - Durable system state is implemented in `luna-state` with `redb`.
 - Checkpointed update/rollback orchestration exists in `luna-update-manager`.
 - `luna-bundle` contains the LBP1 reader/writer implementation for the accepted RFC-0002 format.
-- `luna-system-runtime` now supervises real Linux child processes and owns the system-wide UserSession/process lifecycle.
-- `luna-app-runtime` now has a real process-launch boundary that can prepare a Linux mount namespace before executing a Bundle entry point.
-- The QEMU/OVMF bring-up path now builds a real test SquashFS System Image, early initramfs and separate DATA partition, then hands control to `luna-system-runtime` and an interactive shell.
-- `luna-boot.efi` remains a separate bootloader and now selects the kernel/initramfs paths used by the real System Image handoff.
+- `luna-system-runtime` supervises real Linux child processes and owns the system-wide UserSession/process lifecycle.
+- `luna-app-runtime` has a real process-launch boundary and typed runtime selection (`luna`, `glibc`, `bundle`).
+- Runtime selection is bound to mapping and security before namespace materialization.
+- The QEMU/OVMF bring-up path builds a real SquashFS System Image, early initramfs and separate DATA partition.
+- A reproducible x86_64 UEFI/GPT PC development image is now produced by `tools/build-pc-image.sh`.
+- CI builds and uploads the PC development image as `luna-pc-x86_64`.
+- The final production graphical payload is not yet packaged; the development image falls back to a usable shell.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -88,11 +91,33 @@ Different versions of the same application are independent immutable Bundles and
 
 `luna-system-runtime` is the system-wide runtime/supervisor. `UserSession` is the combined user/session entity.
 
+`RuntimeKind` is now a typed shared contract:
+
+```text
+luna   → native Luna userspace / musl
+ glibc → approved compatibility runtime
+a bundle → Bundle-private runtime where permitted
+```
+
 `luna-app-runtime` manages `ApplicationInstance` lifecycle and prepares an isolated execution environment. Every ApplicationInstance receives its own filesystem/mount namespace. The application sees a normal Linux-compatible logical `/`; physical Luna DATA/SYSTEM paths and mapping tables remain implementation details.
 
-The current Linux launcher prepares the namespace in the child immediately before `exec`. This is a bring-up implementation boundary; production hardening will replace the post-fork setup path with a dedicated child-creation primitive before multi-threaded runtime use.
+Runtime-aware launch ordering is:
 
-`luna-security` is the central policy authority. `luna-root-mapping` defines logical mapping semantics. `luna-namespace` contains Linux-specific namespace/materialization primitives. Linux namespaces, cgroups and related kernel mechanisms are enforcement primitives for the Luna model.
+```text
+RuntimeSpec
+   ↓
+mapping/runtime validation
+   ↓
+Security authorization
+   ↓
+namespace materialization
+   ↓
+process execution
+```
+
+`luna-security` is the central policy authority. Runtime use is represented as `Resource::Runtime(kind)` with `Permission::Use`; selecting a runtime therefore never grants access by itself.
+
+The current Linux application launcher still uses the development `pre_exec` child setup path. Production hardening will replace that post-fork mechanism with a dedicated child-creation primitive.
 
 ## Management boundaries
 
@@ -101,7 +126,7 @@ luna-app-manager
     → install / import / verify / update / remove / migrate Bundles
 
 luna-system-manager
-    → system-state model and queries
+    → durable system-state model and queries
 
 luna-kernel-manager
     → kernel inventory / compatibility / queries
@@ -112,11 +137,45 @@ luna-update-manager
 
 Domain managers retain ownership of their own state; `luna-update-manager` does not become the owner of application, kernel or System Image semantics.
 
+## PC development build
+
+The repository now contains a reproducible x86_64 PC image builder:
+
+```bash
+tools/build-pc-image.sh
+```
+
+It creates:
+
+```text
+dist/luna-pc.img
+```
+
+with GPT partitions:
+
+```text
+EFI     128 MiB
+SYSTEM  384 MiB
+DATA    512 MiB
+```
+
+The build uses the native musl target for `luna-system-runtime`, packages the versioned SquashFS System Image and initramfs into SYSTEM, and creates a persistent DATA partition for Luna state.
+
+The build script automatically discovers a host Linux kernel and static BusyBox when available. Explicit paths can be supplied with `LUNA_TEST_KERNEL` and `BUSYBOX`.
+
+The image can be written to a dedicated PC disk with the guarded installer:
+
+```bash
+sudo tools/install-pc-image.sh dist/luna-pc.img /dev/<whole-disk> --yes
+```
+
+See [`docs/development/PC-BUILD.md`](docs/development/PC-BUILD.md) for the complete procedure and limitations.
+
 ## QEMU bring-up
 
-The reproducible test path is under `boot/luna-boot/tests/ovmf/`.
+The reproducible QEMU/OVMF test path remains under `boot/luna-boot/tests/ovmf/`.
 
-Build and run the real userspace bring-up with:
+Build and run it with:
 
 ```bash
 export OVMF_CODE=/path/to/OVMF_CODE.fd
@@ -127,9 +186,7 @@ export BUSYBOX=/path/to/static/x86_64/busybox
 boot/luna-boot/tests/ovmf/build-and-run.sh
 ```
 
-The harness creates an EFI partition, SYSTEM partition and DATA partition, builds a test SquashFS System Image containing `luna-system-runtime`, builds the early initramfs, boots the Linux kernel through `luna-boot.efi`, constructs the logical root and starts the first UserSession with an interactive shell.
-
-This is the first end-to-end development bring-up path. It is deliberately a test image, not a production installer or release image.
+The harness creates EFI, SYSTEM and DATA areas and exercises the same early-userspace → System Image → DATA → `luna-system-runtime` chain.
 
 ## Current crate map
 
@@ -166,14 +223,16 @@ See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md) for curre
 
 Accepted architecture decisions must not be silently changed by implementation work. When code reveals a real architectural conflict, that conflict must be documented and resolved explicitly.
 
-## Current next targets
+## Current implementation sequence
 
-1. Finish fine-grained security-to-mapping/device authorization and filtered `/dev` population.
-2. Connect durable state ownership to `luna-system-runtime` and domain managers.
-3. Connect concrete update backends to `luna-system-manager`, `luna-kernel-manager` and `luna-app-manager`.
-4. Finish LBP1 conformance and Ed25519 verification/trust binding.
-5. Formalize System Image/kernel manifests, compatibility and persistent boot-success state.
-6. Add IPC/event transport, resource enforcement, device/volume integration and end-to-end application launch tests.
+1. Fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
+2. Real PC/UEFI boot validation and graphical desktop payload integration.
+3. Complete durable boot/update state integration.
+4. Finish LBP1 conformance and Ed25519 trust binding.
+5. Formalize System Image/kernel compatibility and boot-success state.
+6. Implement IPC/event transport, resource enforcement and device/volume integration.
+7. Expand from development shell boot to real `.lbp` installation and ApplicationInstance launch/recovery.
+8. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
 
 ## License
 
