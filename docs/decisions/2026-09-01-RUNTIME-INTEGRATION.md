@@ -71,3 +71,9 @@ Staging namespace resources удаляются после завершения �
 ## 10. Scope
 
 Эти решения уточняют implementation/integration boundaries и не изменяют принятые фундаментальные архитектурные решения, RFC-0002 или модель `EFI / SYSTEM / DATA / SWAP`.
+
+## 11. Durable System State ownership
+
+`luna-system-manager` является владельцем логического состояния текущей/заводской System Image и current/factory kernel. Это состояние хранится через `luna-state` в `DATA/system/state`.
+
+`luna-system-runtime` может владеть подключённым `PersistentSystemManager`, чтобы runtime работал с актуальным System State, но update execution по-прежнему остаётся ответственностью `luna-update-manager`.
