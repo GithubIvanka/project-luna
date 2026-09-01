@@ -9,8 +9,9 @@ use crate::error::{BootError, BootResult};
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::KernelHandoff;
 use crate::kernel::KernelLoader;
-use crate::menu::BootMenu;
+use crate::menu::{BootMenu, BootSelection};
 use crate::paging::prepare_identity_map;
+use crate::splash;
 use crate::target::BootTarget;
 
 pub fn boot_flow() -> BootResult<()> {
@@ -21,35 +22,60 @@ pub fn boot_flow() -> BootResult<()> {
     let menu_requested = boot_menu_requested(&mut input);
     drop(input);
 
-    let target = if menu_requested {
+    let selection = if menu_requested {
         let stdout_handle = boot::get_handle_for_protocol::<Output>()?;
         let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
         let stdout = open_protocol_exclusive::<Output>(stdout_handle)?;
         let stdin = open_protocol_exclusive::<Input>(stdin_handle)?;
         let mut menu = BootMenu::new(stdout, stdin);
-        match menu.show(config.targets()) {
-            Some(index) => config.targets().get(index).ok_or(BootError::TargetNotFound)?,
-            None => config.default_target()?,
-        }
+        menu.show(config.targets())
+            .unwrap_or(BootSelection {
+                target_index: config.default_target,
+                verbose: false,
+            })
     } else {
-        config.default_target()?
+        // The splash belongs exclusively to the normal path. Verbose mode is
+        // reachable only through Boot Menu and intentionally leaves the text
+        // console visible for diagnostics.
+        splash::show();
+        BootSelection {
+            target_index: config.default_target,
+            verbose: false,
+        }
     };
 
+    let mut target = config
+        .targets()
+        .get(selection.target_index)
+        .ok_or(BootError::TargetNotFound)?
+        .clone();
+
+    if selection.verbose {
+        target.kernel_cmdline = target
+            .kernel_cmdline
+            .split_whitespace()
+            .filter(|part| *part != "quiet")
+            .collect::<alloc::vec::Vec<_>>()
+            .join(" ");
+        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
+    }
+
     let mut filesystem = SystemFilesystem::open()?;
-    let prepared = match KernelLoader::new(&mut filesystem).prepare(target) {
+    let prepared = match KernelLoader::new(&mut filesystem).prepare(&target) {
         Ok(kernel) => kernel,
         Err(primary) => {
-            let factory = config.targets().iter().find(|t| t.is_factory && !t.is_recovery)
+            let factory = config
+                .targets()
+                .iter()
+                .find(|candidate| candidate.is_factory && !candidate.is_recovery)
                 .ok_or(primary)?;
-            if core::ptr::eq(target, factory) {
+            if core::ptr::eq(&target, factory) {
                 return Err(primary);
             }
             KernelLoader::new(&mut filesystem).prepare(factory)?
         }
     };
 
-    // All allocations that can affect the final memory map happen before this
-    // point. The page tables are also allocated before ExitBootServices.
     let page_table = prepare_identity_map()?;
     let mut handoff = KernelHandoff {
         kernel_load_address: prepared.kernel_address,
@@ -67,13 +93,7 @@ pub fn boot_flow() -> BootResult<()> {
         return Err(BootError::InvalidKernel);
     }
 
-    // This is the only UEFI call after the final allocation. The returned map
-    // is the map whose key was actually accepted by ExitBootServices.
     let final_map = unsafe { boot::exit_boot_services(None) };
-
-    // From here on there are no UEFI calls, allocations, protocol drops or
-    // logging. We only touch loader-owned memory and the final map returned by
-    // uefi-rs.
     handoff.boot_params.set_e820_from_map(&final_map)?;
     unsafe {
         core::ptr::copy_nonoverlapping(

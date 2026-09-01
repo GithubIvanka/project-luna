@@ -1,8 +1,7 @@
 //! Boot target policy.
 //!
-//! The default target is intended for real PC boot. The serial target remains
-//! available as an explicit development/recovery path and is reachable from
-//! the existing B-key boot menu.
+//! The normal target is graphical and intentionally quiet. Diagnostics are a
+//! boot-mode concern, not a second OS/serial target.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -28,16 +27,6 @@ impl BootConfig {
             .with_initrd("/kernels/default/initramfs.img")
             .with_cmdline(
                 "console=tty0 quiet loglevel=3 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/luna-0.1.0.squashfs luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA",
-            ),
-            BootTarget::new(
-                "Luna Serial Development",
-                "dev-serial",
-                "",
-                "/kernels/default/bzImage",
-            )
-            .with_initrd("/kernels/default/initramfs.img")
-            .with_cmdline(
-                "console=ttyS0 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/luna-0.1.0.squashfs luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA",
             ),
         ];
         Self {

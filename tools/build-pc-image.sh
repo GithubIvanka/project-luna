@@ -34,6 +34,7 @@ fi
 
 : "${KERNEL:?No Linux kernel found. Set LUNA_TEST_KERNEL to an x86_64 bzImage/vmlinuz.}"
 : "${BUSYBOX:?No BusyBox found. Set BUSYBOX to a static x86_64 BusyBox binary.}"
+: "${DESKTOP_ROOT:?Luna PC images require a prepared graphical desktop root. Set LUNA_DESKTOP_ROOT to the final System Image root containing luna-login and niri-session.}"
 
 for tool in cargo rustup sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd mksquashfs cpio gzip file; do
     command -v "$tool" >/dev/null || {
@@ -44,6 +45,9 @@ done
 
 [ -f "$KERNEL" ] || { echo "kernel not found: $KERNEL" >&2; exit 1; }
 [ -x "$BUSYBOX" ] || { echo "BusyBox is not executable: $BUSYBOX" >&2; exit 1; }
+[ -d "$DESKTOP_ROOT" ] || { echo "LUNA_DESKTOP_ROOT is not a directory: $DESKTOP_ROOT" >&2; exit 1; }
+[ -x "$DESKTOP_ROOT/usr/bin/luna-login" ] || { echo "graphical login missing: $DESKTOP_ROOT/usr/bin/luna-login" >&2; exit 1; }
+[ -x "$DESKTOP_ROOT/usr/bin/niri-session" ] || { echo "niri session missing: $DESKTOP_ROOT/usr/bin/niri-session" >&2; exit 1; }
 
 RUNTIME_TARGET="x86_64-unknown-linux-musl"
 if ! rustup target list --installed | grep -qx "$RUNTIME_TARGET"; then
@@ -112,34 +116,19 @@ export HOME=/home/luna
 export TERM=${TERM:-linux}
 EOF
 
-cat > "$SYSTEM_ROOT/etc/luna/runtime" <<'EOF'
-kind = "luna"
-libc = "musl"
+# The desktop root supplies the actual graphical payload. No console-session
+# launcher or /etc/luna/mode fallback is created by the Luna image builder.
+cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
+
+cat > "$SYSTEM_ROOT/etc/luna/graphical-login" <<'EOF'
+/usr/bin/luna-login
 EOF
 
-cat > "$SYSTEM_ROOT/usr/bin/luna-session" <<'EOF'
-#!/bin/busybox sh
-set -eu
-
-if [ -x /usr/bin/niri-session ]; then
-    exec /usr/bin/niri-session
-fi
-
-exec /bin/sh
-EOF
-chmod 0755 "$SYSTEM_ROOT/usr/bin/luna-session"
-
-cat > "$SYSTEM_ROOT/etc/luna/session" <<'EOF'
-/usr/bin/luna-session
+cat > "$SYSTEM_ROOT/etc/luna/graphical-session" <<'EOF'
+/usr/bin/niri-session
 EOF
 
-if [ -n "$DESKTOP_ROOT" ]; then
-    [ -d "$DESKTOP_ROOT" ] || { echo "LUNA_DESKTOP_ROOT is not a directory: $DESKTOP_ROOT" >&2; exit 1; }
-    cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
-    printf 'graphical\n' > "$SYSTEM_ROOT/etc/luna/mode"
-else
-    printf 'console\n' > "$SYSTEM_ROOT/etc/luna/mode"
-fi
+printf 'graphical\n' > "$SYSTEM_ROOT/etc/luna/mode"
 
 mksquashfs "$SYSTEM_ROOT" "$OUT/luna-${LUNA_VERSION}.squashfs" \
     -noappend -comp zstd -all-root -no-xattrs >/dev/null
@@ -179,8 +168,6 @@ compatible = ["default"]
 EOF
 mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" 384M
 
-# The three partitions need just over 1 GiB of usable disk space; leave ample
-# room for GPT metadata and future development growth.
 truncate -s 1152M "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
 sgdisk \
@@ -201,10 +188,8 @@ dd if="$OUT/luna-efi.img" of="$OUT/luna-pc.img" bs=512 seek=2048 conv=notrunc st
 dd if="$OUT/luna-system.img" of="$OUT/luna-pc.img" bs=512 seek=264192 conv=notrunc status=none
 dd if="$OUT/luna-data.img" of="$OUT/luna-pc.img" bs=512 seek=1056768 conv=notrunc status=none
 
-MODE="console-bringup"
-[ -n "$DESKTOP_ROOT" ] && MODE="desktop-root-enabled"
 cat > "$OUT/BUILD-INFO" <<EOF
-Project Luna PC development image
+Project Luna PC graphical development image
 version=$LUNA_VERSION
 architecture=x86_64
 system_image=luna-${LUNA_VERSION}.squashfs
@@ -213,7 +198,10 @@ bootloader=luna-boot.efi
 uefi_fallback=EFI/BOOT/BOOTX64.EFI
 partitions=EFI:128MiB,SYSTEM:384MiB,DATA:512MiB
 image_size=1152MiB
-mode=$MODE
+boot_ui=graphical
+login_ui=/usr/bin/luna-login
+desktop=/usr/bin/niri-session
+verbose_boot=boot-menu-only
 EOF
 
 sha256sum \
@@ -222,9 +210,11 @@ sha256sum \
     "$OUT/luna-initramfs.img" \
     > "$OUT/SHA256SUMS"
 
-echo "Built Project Luna PC image:"
-echo "  disk:        $OUT/luna-pc.img"
-echo "  System:      $OUT/luna-${LUNA_VERSION}.squashfs"
-echo "  initramfs:   $OUT/luna-initramfs.img"
-echo "  bootloader:   $EFI"
-echo "  checksums:    $OUT/SHA256SUMS"
+echo "Built Project Luna graphical PC image:"
+echo "  disk:         $OUT/luna-pc.img"
+echo "  System:       $OUT/luna-${LUNA_VERSION}.squashfs"
+echo "  initramfs:     $OUT/luna-initramfs.img"
+echo "  bootloader:    $EFI"
+echo "  login surface: /usr/bin/luna-login"
+echo "  desktop:       /usr/bin/niri-session"
+echo "  checksums:     $OUT/SHA256SUMS"
