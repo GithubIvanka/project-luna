@@ -20,8 +20,8 @@ impl BootConfig {
         let targets = vec![
             BootTarget::new(
                 "Luna PC System",
-                "pc",
-                "",
+                "0.1.0",
+                "/images/luna-0.1.0.squashfs",
                 "/kernels/default/bzImage",
             )
             .with_initrd("/kernels/default/initramfs.img")

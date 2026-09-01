@@ -9,7 +9,7 @@ use crate::error::{BootError, BootResult};
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::KernelHandoff;
 use crate::kernel::KernelLoader;
-use crate::menu::{BootMenu, BootSelection};
+use crate::menu::{BootMenu, BootMenuAction, BootSelection};
 use crate::paging::prepare_identity_map;
 use crate::splash;
 use crate::target::BootTarget;
@@ -28,21 +28,31 @@ pub fn boot_flow() -> BootResult<()> {
         let stdout = open_protocol_exclusive::<Output>(stdout_handle)?;
         let stdin = open_protocol_exclusive::<Input>(stdin_handle)?;
         let mut menu = BootMenu::new(stdout, stdin);
-        menu.show(config.targets())
+        menu.show(config.targets(), config.default_target)
             .unwrap_or(BootSelection {
+                action: BootMenuAction::Continue,
                 target_index: config.default_target,
-                verbose: false,
             })
     } else {
-        // The splash belongs exclusively to the normal path. Verbose mode is
-        // reachable only through Boot Menu and intentionally leaves the text
-        // console visible for diagnostics.
         splash::show();
         BootSelection {
+            action: BootMenuAction::Continue,
             target_index: config.default_target,
-            verbose: false,
         }
     };
+
+    match selection.action {
+        BootMenuAction::Recovery => {
+            return Err(BootError::RecoveryUnavailable);
+        }
+        BootMenuAction::Factory => {
+            return Err(BootError::Unsupported("factory environment is not installed in this development image"));
+        }
+        BootMenuAction::ExternalBoot => {
+            return Err(BootError::Unsupported("external-device boot is not wired yet"));
+        }
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {}
+    }
 
     let mut target = config
         .targets()
@@ -50,14 +60,14 @@ pub fn boot_flow() -> BootResult<()> {
         .ok_or(BootError::TargetNotFound)?
         .clone();
 
-    if selection.verbose {
+    if selection.action == BootMenuAction::VerboseBoot {
         target.kernel_cmdline = target
             .kernel_cmdline
             .split_whitespace()
-            .filter(|part| *part != "quiet")
+            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
             .collect::<alloc::vec::Vec<_>>()
             .join(" ");
-        target.kernel_cmdline.push_str(" console=tty0 loglevel=7 ignore_loglevel");
+        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
     }
 
     let mut filesystem = SystemFilesystem::open()?;
