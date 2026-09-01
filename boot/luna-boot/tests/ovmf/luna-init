@@ -1,0 +1,30 @@
+#!/bin/busybox sh
+# Luna early userspace bring-up. This script is intentionally tiny and is the
+# current QEMU prototype for the future dedicated luna-init implementation.
+set -eu
+
+BB=/bin/busybox
+SYSTEM_IMAGE=/images/luna-test.squashfs
+
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+$BB mount -t devtmpfs devtmpfs /dev 2>/dev/null || $BB mount -t tmpfs -o mode=0755,nosuid devtmpfs /dev
+$BB mkdir -p /run/system /newroot
+
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        luna.system_image=*) SYSTEM_IMAGE="${arg#luna.system_image=}" ;;
+    esac
+done
+
+$BB mount -t ext4 -o ro /dev/sda2 /run/system
+[ -f "/run/system${SYSTEM_IMAGE}" ] || { echo "Luna init: system image not found: ${SYSTEM_IMAGE}" >&2; exec $BB sh; }
+$BB mount -t squashfs -o ro,loop "/run/system${SYSTEM_IMAGE}" /newroot
+$BB mkdir -p /newroot/data /newroot/dev /newroot/proc /newroot/sys /newroot/run
+$BB mount -t ext4 /dev/sda3 /newroot/data
+$BB mount --move /dev /newroot/dev
+$BB mount --move /proc /newroot/proc
+$BB mount --move /sys /newroot/sys
+$BB mount --move /run/system /newroot/run/system
+
+exec $BB switch_root -c /dev/console /newroot /sbin/init

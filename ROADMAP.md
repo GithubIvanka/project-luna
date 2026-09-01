@@ -4,7 +4,7 @@ The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.
 
 ## Current position
 
-Phases **1.1–1.6** are accepted/consolidated through **1.6-HZ**. RFC-0002 Bundle Format v1 was accepted on **2026-08-30**. The project is now in backend integration and hardening.
+Phases **1.1–1.6** are accepted/consolidated through **1.6-HZ**. RFC-0002 Bundle Format v1 was accepted on **2026-08-30**. The project is now in backend integration, end-to-end bring-up and hardening.
 
 All currently accepted architecture decisions are consolidated in `docs/ARCHITECTURE.md`.
 
@@ -25,23 +25,25 @@ Update plan abstraction          ← COMPLETED
 Checkpoint/apply/verify/rollback ← IMPLEMENTED ENGINE
 RFC-0002                         ← ACCEPTED
 LBP1 codec                       ← IMPLEMENTED / HARDENING
-luna-boot                        ← WORKING PARALLEL PROTOTYPE → kernel + test init + sh
+System runtime process backend   ← IMPLEMENTED
+Application process binding      ← IMPLEMENTED PROTOTYPE
+QEMU boot/userspace bring-up     ← IMPLEMENTED DEVELOPMENT PATH
+luna-boot                        ← WORKING PROTOTYPE → kernel + early userspace + System Image + DATA + shell
 ```
 
 ## Next implementation sequence
 
 ### 1. Security-authorized runtime integration
 
-Connect the Linux namespace/logical-root backend to the existing Luna security and runtime boundaries.
+The first real process/namespace launch path is now connected. Finish the security and resource boundaries around it.
 
 Goals:
 
-- authorization before writable/device mappings;
-- real child-process creation and supervision;
-- conventional logical `/` without exposing the host filesystem;
-- filtered `/dev` population from authorized resources;
+- fine-grained authorization for mappings and devices;
+- filtered `/dev` population;
 - secure physical-path/symlink boundary validation;
-- resource-control setup before execution.
+- resource-control setup before execution;
+- production-safe child creation without relying on post-fork `pre_exec` for complex namespace setup.
 
 ### 2. Durable state integration
 
@@ -130,7 +132,7 @@ and in the file manager's Volumes view without manual mount commands.
 
 ### 10. End-to-end validation
 
-Add reproducible Linux/QEMU integration paths covering:
+The first development boot path is now present. Expand it from shell bring-up to a real Bundle/application launch and recovery test:
 
 ```text
 UEFI
@@ -139,7 +141,9 @@ luna-boot
  ↓
 Linux kernel
  ↓
-System Image
+early userspace
+ ↓
+System Image + DATA
  ↓
 logical root
  ↓
@@ -150,11 +154,13 @@ UserSession
 luna-app-runtime
  ↓
 ApplicationInstance
+ ↓
+LBP1 Bundle
 ```
 
 ## Bootloader status
 
-`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current boot track reaches the kernel plus a test init path ending at `sh`. Bootloader redesign is not part of the current Bundle implementation sequence.
+`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current development track reaches the Linux kernel and the early-userspace/System-Image/DATA handoff. The next boot work is hardening and integration, not redesign.
 
 ## Non-negotiable constraints
 

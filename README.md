@@ -8,7 +8,7 @@ Project Luna is an open-source operating system project focused on a small immut
 
 ## Current status
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has entered architecture-driven backend implementation and hardening.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has entered architecture-driven backend implementation, integration and hardening.
 
 - Phases **1.1–1.6-HZ** are accepted and consolidated.
 - The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); accepted post-1.6 decisions are consolidated there as well.
@@ -17,7 +17,10 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 - Durable system state is implemented in `luna-state` with `redb`.
 - Checkpointed update/rollback orchestration exists in `luna-update-manager`.
 - `luna-bundle` contains the LBP1 reader/writer implementation for the accepted RFC-0002 format.
-- `luna-boot.efi` is developed separately and currently reaches the Linux kernel plus a test init handoff to `sh`.
+- `luna-system-runtime` now supervises real Linux child processes and owns the system-wide UserSession/process lifecycle.
+- `luna-app-runtime` now has a real process-launch boundary that can prepare a Linux mount namespace before executing a Bundle entry point.
+- The QEMU/OVMF bring-up path now builds a real test SquashFS System Image, early initramfs and separate DATA partition, then hands control to `luna-system-runtime` and an interactive shell.
+- `luna-boot.efi` remains a separate bootloader and now selects the kernel/initramfs paths used by the real System Image handoff.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -32,15 +35,15 @@ SYSTEM
   ├── versioned System Images (direct SquashFS)
   └── versioned kernels
   ↓
-logical Linux-compatible root
+early userspace / luna-init
+  ↓
+logical Linux-compatible root + DATA
   ↓
 luna-system-runtime
   ├── UserSession A
   │   └── luna-app-runtime → ApplicationInstance(s)
   └── UserSession B
       └── luna-app-runtime → ApplicationInstance(s)
-  ↓
-DATA / mappings / security / Linux namespace primitives
 ```
 
 The four physical areas are **EFI / SYSTEM / DATA / SWAP**.
@@ -87,6 +90,8 @@ Different versions of the same application are independent immutable Bundles and
 
 `luna-app-runtime` manages `ApplicationInstance` lifecycle and prepares an isolated execution environment. Every ApplicationInstance receives its own filesystem/mount namespace. The application sees a normal Linux-compatible logical `/`; physical Luna DATA/SYSTEM paths and mapping tables remain implementation details.
 
+The current Linux launcher prepares the namespace in the child immediately before `exec`. This is a bring-up implementation boundary; production hardening will replace the post-fork setup path with a dedicated child-creation primitive before multi-threaded runtime use.
+
 `luna-security` is the central policy authority. `luna-root-mapping` defines logical mapping semantics. `luna-namespace` contains Linux-specific namespace/materialization primitives. Linux namespaces, cgroups and related kernel mechanisms are enforcement primitives for the Luna model.
 
 ## Management boundaries
@@ -106,6 +111,25 @@ luna-update-manager
 ```
 
 Domain managers retain ownership of their own state; `luna-update-manager` does not become the owner of application, kernel or System Image semantics.
+
+## QEMU bring-up
+
+The reproducible test path is under `boot/luna-boot/tests/ovmf/`.
+
+Build and run the real userspace bring-up with:
+
+```bash
+export OVMF_CODE=/path/to/OVMF_CODE.fd
+export OVMF_VARS=/path/to/writable/OVMF_VARS.fd
+export LUNA_TEST_KERNEL=/path/to/bzImage
+export BUSYBOX=/path/to/static/x86_64/busybox
+
+boot/luna-boot/tests/ovmf/build-and-run.sh
+```
+
+The harness creates an EFI partition, SYSTEM partition and DATA partition, builds a test SquashFS System Image containing `luna-system-runtime`, builds the early initramfs, boots the Linux kernel through `luna-boot.efi`, constructs the logical root and starts the first UserSession with an interactive shell.
+
+This is the first end-to-end development bring-up path. It is deliberately a test image, not a production installer or release image.
 
 ## Current crate map
 
@@ -144,12 +168,12 @@ Accepted architecture decisions must not be silently changed by implementation w
 
 ## Current next targets
 
-1. Complete Security-authorized namespace/process integration.
-2. Connect durable state to `luna-system-runtime` and domain managers.
-3. Make update journaling durable-before-mutation and record exact progress for interruption reconciliation.
-4. Finish LBP1 conformance/security hardening and signature verification boundary.
-5. Formalize System Image/kernel manifests, compatibility and persistent boot-state confirmation.
-6. Integrate devices/volumes, resource control and end-to-end Linux/QEMU validation.
+1. Finish fine-grained security-to-mapping/device authorization and filtered `/dev` population.
+2. Connect durable state ownership to `luna-system-runtime` and domain managers.
+3. Connect concrete update backends to `luna-system-manager`, `luna-kernel-manager` and `luna-app-manager`.
+4. Finish LBP1 conformance and Ed25519 verification/trust binding.
+5. Formalize System Image/kernel manifests, compatibility and persistent boot-success state.
+6. Add IPC/event transport, resource enforcement, device/volume integration and end-to-end application launch tests.
 
 ## License
 
