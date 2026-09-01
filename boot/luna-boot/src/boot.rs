@@ -25,7 +25,7 @@ pub fn boot_flow() -> BootResult<()> {
     // SYSTEM filesystem is damaged or absent. Normal boot still requires it.
     let mut filesystem = match SystemFilesystem::open() {
         Ok(value) => Some(value),
-        Err(error) if menu_requested => None,
+        Err(_) if menu_requested => None,
         Err(error) => return Err(error),
     };
 
@@ -59,21 +59,9 @@ pub fn boot_flow() -> BootResult<()> {
 
     let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
     let mut target = match selection.action {
-        BootMenuAction::Recovery => catalog
-            .recovery
-            .clone()
-            .ok_or(BootError::RecoveryUnavailable)?,
-        BootMenuAction::Factory => catalog
-            .factory
-            .clone()
-            .ok_or(BootError::Unsupported(
-                "factory environment is unavailable on this installation",
-            ))?,
-        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => catalog
-            .targets
-            .get(selection.target_index)
-            .cloned()
-            .ok_or(BootError::TargetNotFound)?,
+        BootMenuAction::Recovery => catalog.recovery.clone().ok_or(BootError::RecoveryUnavailable)?,
+        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported("factory environment is unavailable on this installation"))?,
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => catalog.targets.get(selection.target_index).cloned().ok_or(BootError::TargetNotFound)?,
         BootMenuAction::ExternalBoot => unreachable!(),
     };
 
@@ -119,7 +107,6 @@ pub fn boot_flow() -> BootResult<()> {
     };
 
     if !handoff.is_ready() { return Err(BootError::InvalidKernel); }
-
     let final_map = unsafe { boot::exit_boot_services(None) };
     handoff.boot_params.set_e820_from_map(&final_map)?;
     unsafe {
