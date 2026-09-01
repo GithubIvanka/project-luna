@@ -21,15 +21,18 @@ System runtime supervisor         ← IMPLEMENTED
 UserSession graphical lifecycle   ← IMPLEMENTED
 Typed runtime contract            ← IMPLEMENTED
 Runtime ↔ mapping ↔ Security      ← IMPLEMENTED CONTRACT
+Runtime resolver                  ← IMPLEMENTED
 QEMU userspace bring-up           ← IMPLEMENTED DEVELOPMENT PATH
 x86_64 PC image builder           ← IMPLEMENTED DEVELOPMENT PATH
 Guarded PC installer              ← IMPLEMENTED DEVELOPMENT PATH
 PC image CI workflow              ← IMPLEMENTED
+Graphical boot splash             ← IMPLEMENTED DEVELOPMENT PATH
+Boot Menu Verbose Boot            ← IMPLEMENTED DEVELOPMENT PATH
 ```
 
 ## Phase 2 sequence
 
-### 1. Make the development PC image boot reliably
+### 1. Make the graphical development PC image boot reliably
 
 Current artifact:
 
@@ -45,9 +48,13 @@ SYSTEM  384 MiB
 DATA    512 MiB
 ```
 
-The image contains a musl-native `luna-system-runtime`, early initramfs,
+The image uses a musl-native `luna-system-runtime`, early initramfs,
 versioned SquashFS System Image, kernel, persistent DATA, and a standard UEFI
 fallback at `EFI/BOOT/BOOTX64.EFI`.
+
+Normal boot is graphical; the image builder requires a prepared graphical root
+containing the login surface and `niri-session` rather than producing a TTY/
+shell fallback.
 
 Next:
 
@@ -55,8 +62,6 @@ Next:
 - validate a real UEFI machine;
 - keep SYSTEM/DATA discovery label based;
 - add persistent boot-success state.
-
-See `docs/development/PC-BUILD.md` and `docs/decisions/2026-09-01-PC-BUILD.md`.
 
 ### 2. Runtime materialization
 
@@ -68,9 +73,14 @@ RuntimeKind::Glibc  → approved compatibility runtime
 RuntimeKind::Bundle → Bundle-private runtime
 ```
 
+The first resolver layer is implemented by `luna-runtime`. It resolves a
+runtime kind to an approved immutable runtime artifact, including loader
+identity where applicable. It does not perform mounts, security authorization,
+or process launch.
+
 Next:
 
-- resolve runtime to an approved artifact;
+- connect `luna-runtime` to `luna-app-runtime`;
 - materialize loader/library mappings inside the application namespace;
 - version and manage glibc compatibility trees through Luna;
 - reject libc mixing within one process;
@@ -88,14 +98,30 @@ Complete the enforcement layer around the existing runtime path:
 
 ### 4. Real graphical System Image
 
-The session contract is already:
+The user-facing boot/session contract is:
 
 ```text
-Starting
+UEFI
   ↓
-Authenticating
+luna-boot.efi
   ↓
-Active
+GUI boot splash
+  ↓
+Linux kernel
+  ↓
+luna-init
+  ↓
+System Image + DATA
+  ↓
+luna-system-runtime
+  ↓
+UserSession
+  ↓
+GUI login
+  ↓
+authentication
+  ↓
+Active UserSession
   ↓
 Wayland
   ↓
@@ -104,7 +130,12 @@ niri
 Noctalia Shell
 ```
 
-Next, package the final desktop runtime tree into the immutable System Image and keep mutable session/config/state data in DATA.
+There is no normal TTY login and no shell fallback. Verbose Boot is selected
+from the B-key Boot Menu and suppresses the splash while exposing diagnostics.
+
+Next, package the final desktop runtime tree into the immutable System Image,
+including the login surface, niri, Noctalia and required device/portal support,
+while keeping mutable session/config/state data in DATA.
 
 ### 5. Bundle installation → execution
 
@@ -119,6 +150,8 @@ install into DATA
  ↓
 resolve RuntimeSpec
  ↓
+resolve RuntimeArtifact
+ ↓
 security + mapping
  ↓
 namespace
@@ -128,11 +161,15 @@ ApplicationInstance
 process supervision
 ```
 
-The final runtime field in RFC-0002 remains a separate Bundle/schema decision; existing Rust callers continue to use `RuntimeKind::Luna` as the compatibility default.
+The final runtime field in RFC-0002 remains a separate Bundle/schema decision;
+existing Rust callers continue to use `RuntimeKind::Luna` as the compatibility
+default.
 
 ### 6. Durable update / boot state
 
-Connect `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` and `luna-update-manager` to concrete mutation backends while preserving independent System Image/kernel updates and revision-checked durable state.
+Connect `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` and
+`luna-update-manager` to concrete mutation backends while preserving independent
+System Image/kernel updates and revision-checked durable state.
 
 ### 7. Production hardening
 
@@ -142,6 +179,13 @@ Connect `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` and `lu
 - production-safe child creation instead of complex `pre_exec` namespace setup;
 - Secure Boot and release-image signing;
 - recovery and interrupted-update validation.
+
+## Git workflow
+
+`main` is the canonical integration branch. Normal implementation work uses
+one short-lived development branch from current `main` and one PR against
+`main`. Stacked `integration/*` PR chains are not the normal workflow. See
+`docs/decisions/2026-09-01-GIT-WORKFLOW.md`.
 
 ## Non-negotiable constraints
 
@@ -153,5 +197,7 @@ Connect `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` and `lu
 - `luna-namespace` remains the Linux namespace/materialization layer.
 - `luna-system-runtime` is the sole owner of process supervision.
 - `UserSession` is the combined user/session entity.
-- TTY/serial is development, diagnostic or recovery-only for the normal desktop path.
+- TTY/serial is development, diagnostic or recovery-only; it is never the normal user path.
+- Normal boot uses a GUI splash, graphical login and the Wayland → niri → Noctalia desktop path.
+- Verbose Boot is an explicit Boot Menu diagnostic mode and suppresses the splash.
 - Accepted decisions are recorded under `docs/decisions/` and consolidated into the SoT.
