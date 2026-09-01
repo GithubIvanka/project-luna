@@ -63,19 +63,13 @@ struct Inode {
 
 impl<D: BlockDevice> Ext4<D> {
     pub fn open(mut device: D) -> BootResult<Self> {
-        if device.block_size() == 0 || !device.block_size().is_power_of_two() {
-            return Err(BootError::InvalidFilesystem);
-        }
+        if device.block_size() == 0 || !device.block_size().is_power_of_two() { return Err(BootError::InvalidFilesystem); }
         let mut sb = [0u8; SUPERBLOCK_SIZE];
         device.read_at(SUPERBLOCK_OFFSET, &mut sb)?;
         if u16_at(&sb, 0x38) != EXT4_SUPER_MAGIC { return Err(BootError::InvalidFilesystem); }
-
         let log_block_size = u32_at(&sb, 0x18);
         let block_size = 1024u32.checked_shl(log_block_size).ok_or(BootError::InvalidFilesystem)?;
-        if !(1024..=65536).contains(&block_size) || !block_size.is_power_of_two() {
-            return Err(BootError::InvalidFilesystem);
-        }
-
+        if !(1024..=65536).contains(&block_size) || !block_size.is_power_of_two() { return Err(BootError::InvalidFilesystem); }
         let inode_count = u32_at(&sb, 0x00);
         let blocks_lo = u32_at(&sb, 0x04);
         let first_data_block = u32_at(&sb, 0x14);
@@ -85,11 +79,9 @@ impl<D: BlockDevice> Ext4<D> {
         let feature_incompat = u32_at(&sb, 0x60);
         let has_64bit = feature_incompat & 0x80 != 0;
         let descriptor_size = if has_64bit { u16_at(&sb, 0xfe) } else { 32 };
-
         if inode_count == 0 || blocks_per_group == 0 || inodes_per_group == 0 { return Err(BootError::InvalidFilesystem); }
         if inode_size < 128 || inode_size as u32 > block_size || !inode_size.is_power_of_two() { return Err(BootError::InvalidFilesystem); }
         if descriptor_size < 32 || descriptor_size as u32 > block_size { return Err(BootError::InvalidFilesystem); }
-
         let blocks = blocks_lo as u64;
         let groups = (blocks.saturating_sub(first_data_block as u64) + blocks_per_group as u64 - 1) / blocks_per_group as u64;
         Ok(Self {
@@ -102,12 +94,7 @@ impl<D: BlockDevice> Ext4<D> {
     pub fn geometry(&self) -> Ext4Geometry { self.geometry }
 
     pub fn read_file(&mut self, path: &str) -> BootResult<Vec<u8>> {
-        if !path.starts_with('/') { return Err(BootError::FilesystemError); }
-        let mut inode = self.read_inode(EXT4_ROOT_INO)?;
-        for component in path.split('/').filter(|p| !p.is_empty()) {
-            if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
-            inode = self.read_inode(self.find_in_directory(&inode, component)?)?;
-        }
+        let inode = self.resolve_path(path)?;
         if inode.mode & 0xf000 != 0x8000 { return Err(BootError::FilesystemError); }
         let size = usize::try_from(inode.size).map_err(|_| BootError::FilesystemError)?;
         let mut out = vec![0u8; size];
@@ -115,19 +102,20 @@ impl<D: BlockDevice> Ext4<D> {
         Ok(out)
     }
 
-    pub fn read_dir(&mut self, path: &str) -> BootResult<Vec<DirEntry>> {
-        if !path.starts_with('/') { return Err(BootError::FilesystemError); }
-        let mut inode = self.read_inode(EXT4_ROOT_INO)?;
-        for component in path.split('/').filter(|p| !p.is_empty()) {
-            if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
-            inode = self.read_inode(self.find_in_directory(&inode, component)?)?;
+    pub fn file_exists(&mut self, path: &str) -> BootResult<bool> {
+        match self.resolve_path(path) {
+            Ok(inode) => Ok(inode.mode & 0xf000 == 0x8000),
+            Err(BootError::TargetNotFound) => Ok(false),
+            Err(error) => Err(error),
         }
-        if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
+    }
 
+    pub fn read_dir(&mut self, path: &str) -> BootResult<Vec<DirEntry>> {
+        let inode = self.resolve_path(path)?;
+        if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
         let size = usize::try_from(inode.size).map_err(|_| BootError::FilesystemError)?;
         let mut data = vec![0u8; size];
         self.read_inode_data(&inode, &mut data)?;
-
         let mut entries = Vec::new();
         let mut off = 0usize;
         while off + 8 <= data.len() {
@@ -139,13 +127,21 @@ impl<D: BlockDevice> Ext4<D> {
             if ino != 0 && name_len != 0 {
                 let name_bytes = &data[off + 8..off + 8 + name_len];
                 let name = String::from_utf8(name_bytes.to_vec()).map_err(|_| BootError::FilesystemError)?;
-                if name != "." && name != ".." {
-                    entries.push(DirEntry { name, inode: ino, file_type });
-                }
+                if name != "." && name != ".." { entries.push(DirEntry { name, inode: ino, file_type }); }
             }
             off += rec_len;
         }
         Ok(entries)
+    }
+
+    fn resolve_path(&mut self, path: &str) -> BootResult<Inode> {
+        if !path.starts_with('/') { return Err(BootError::FilesystemError); }
+        let mut inode = self.read_inode(EXT4_ROOT_INO)?;
+        for component in path.split('/').filter(|p| !p.is_empty()) {
+            if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
+            inode = self.read_inode(self.find_in_directory(&inode, component)?)?;
+        }
+        Ok(inode)
     }
 
     fn group_descriptor(&mut self, group: u32) -> BootResult<Vec<u8>> {
