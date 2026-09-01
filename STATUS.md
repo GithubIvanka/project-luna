@@ -19,8 +19,8 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Foundation/domain APIs | Implemented baseline |
 | Manager/runtime APIs | Implemented baseline |
 | Linux namespace/materialization | OverlayFS logical-root backend implemented; security-aware runtime preparation boundary and real child launch integration implemented; filtered device integration remains |
-| Persistent state | Durable redb backend implemented under `DATA/system/state`; reopen/revision semantics tested; runtime/domain ownership integration remains |
-| Update/checkpoint/rollback | Durable intent + per-operation applied/inflight journal implemented; physical domain-manager backends remain to be connected |
+| Persistent state | Durable redb backend implemented under `DATA/system/state`; System Manager now owns current/factory image+kernel state and runtime can attach it |
+| Update/checkpoint/rollback | Durable intent + per-operation applied/inflight journal implemented; concrete domain mutation backends remain to be connected |
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
 | `luna-system-runtime` process supervision | Real child spawn/poll/terminate/reap implemented; `SystemRuntimeService` is the sole process owner and owns UserSession/process lifecycle |
 | `luna-app-runtime` process launch | Security/mapping validation plus real child launch through `SystemRuntimeService`; ApplicationInstance ↔ ProcessId binding and exit reconciliation implemented |
@@ -69,7 +69,7 @@ The current Linux namespace launch path uses Unix `CommandExt::pre_exec` as a br
 DATA/system/state/luna-state.redb
 ```
 
-Mutations and global revision are committed atomically in one redb transaction. No second Luna-specific WAL is layered over it.
+Mutations and global revision are committed atomically in one redb transaction. `luna-system-manager` now owns durable logical System State including current/factory System Image and current/factory kernel, while `luna-system-runtime` can attach that manager without taking ownership of update execution.
 
 ### Update/checkpoint/rollback
 
@@ -82,7 +82,7 @@ updates/<id>/applied
 updates/<id>/inflight
 ```
 
-Interrupted operations are reconciled from durable operation state, while rollback remains an explicit recovery/transaction action.
+Interrupted operations are reconciled from durable operation state, while rollback remains an explicit recovery/transaction action. Concrete mutation adapters for domain managers are the next implementation step.
 
 ### Bootable development userspace
 
@@ -121,13 +121,13 @@ The remaining RFC-related work is implementation conformance and production sign
 ## Current implementation sequence
 
 1. Fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
-2. Durable state ownership in system runtime/domain managers.
-3. Concrete update backends connected to system/kernel/app managers.
-4. LBP1 conformance and Ed25519 verification/trust binding.
-5. System Image/kernel manifests, compatibility and persistent boot-success state.
-6. IPC/event transport, cgroup/resource enforcement and device/volume integration.
-7. End-to-end QEMU/Linux application launch and recovery tests.
-8. Production-safe namespace child creation and runtime hardening.
+2. Complete durable state integration with runtime/domain-manager ownership and boot/update state.
+3. Connect concrete update backends to system/kernel/app managers.
+4. Finish LBP1 conformance and Ed25519 verification/trust binding.
+5. Formalize System Image/kernel manifests, compatibility and persistent boot-success state.
+6. Implement IPC/event transport, cgroup/resource enforcement and device/volume integration.
+7. Expand the QEMU path from shell bring-up to actual `.lbp` Bundle installation and ApplicationInstance launch/recovery.
+8. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
 
 ## Decision records
 
@@ -137,7 +137,7 @@ The current accepted implementation-boundary decisions are additionally recorded
 docs/decisions/2026-09-01-RUNTIME-INTEGRATION.md
 ```
 
-That record explicitly preserves the rule that `luna-system-runtime` owns process supervision and that `luna-app-runtime` must not create a second supervisor.
+That record explicitly preserves the rule that `luna-system-runtime` owns process supervision, `luna-app-runtime` does not create a second supervisor, and `luna-system-manager` owns persistent system state.
 
 ## CI / supply chain
 
