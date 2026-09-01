@@ -51,8 +51,6 @@ TTY/serial remains a development, diagnostic and recovery facility only.
 
 The normal boot path shows a minimal graphical Luna splash through UEFI GOP. The splash is intentionally tiny and uses only UEFI boot-time facilities; it does not become a desktop or GUI framework.
 
-UEFI GOP is used because the firmware exposes a graphics framebuffer and drawing operations through the Graphics Output Protocol. The implementation therefore stays inside `luna-boot.efi` and does not require Linux to be running first.
-
 ## 4. Verbose Boot
 
 Verbose Boot is a Boot Menu action, not a separate boot target and not a normal operating mode.
@@ -77,18 +75,18 @@ Normal boot keeps the quiet boot parameters and shows the graphical splash.
 
 `B` remains the only normal entry into Boot Menu. The menu is a special pre-OS control surface and is allowed to be text based. It is not the normal user interface.
 
-The accepted action set is:
+The accepted action order is:
 
 ```text
-Continue to Luna
-System Image selection
-Recovery Environment
-Factory Environment
-Boot from USB / External Device
-Verbose Boot
+1. Continue to Luna
+2. Verbose Boot
+3. System Image selection
+4. Recovery Environment
+5. Factory Environment
+6. Boot from USB / External Device
 ```
 
-The current development implementation exposes every accepted action explicitly. Recovery, Factory and External Boot are represented as typed menu actions; their real boot backends remain separate implementation work and must not be replaced with a fake target or a TTY fallback.
+The development implementation discovers normal System Images from SYSTEM metadata and represents Recovery, Factory and External Boot as typed menu actions. Recovery and Factory are executed when their corresponding System Image targets are present; an unavailable mode is reported as unavailable rather than replaced by a fake target or TTY fallback.
 
 ## 6. Graphical login contract
 
