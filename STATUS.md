@@ -2,11 +2,11 @@
 
 Last updated: 2026-09-01
 
-> `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and subsequent accepted decisions are consolidated there.
+> `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and subsequent accepted decisions are consolidated there. The dated runtime integration record under `docs/decisions/` preserves the current implementation-boundary decisions.
 
 ## Overall state
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and is now in architecture-driven backend integration, end-to-end bring-up and hardening.
+Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and has entered architecture-driven backend integration, end-to-end bring-up and hardening.
 
 ### Phase status
 
@@ -22,9 +22,9 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Persistent state | Durable redb backend implemented under `DATA/system/state`; reopen/revision semantics tested; runtime/domain ownership integration remains |
 | Update/checkpoint/rollback | Durable intent + per-operation applied/inflight journal implemented; physical domain-manager backends remain to be connected |
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
-| `luna-system-runtime` process supervision | Real child spawn/poll/terminate/reap implemented; SystemRuntimeService now owns UserSession/process lifecycle |
-| `luna-app-runtime` process launch | Real authorized launch boundary implemented; child namespace preparation and process-exit lifecycle reconciliation implemented as the current Linux prototype |
-| `luna-boot.efi` | Working prototype reaches kernel + early userspace; QEMU harness now builds a real test System Image + DATA partition and hands off to `luna-system-runtime` |
+| `luna-system-runtime` process supervision | Real child spawn/poll/terminate/reap implemented; `SystemRuntimeService` is the sole process owner and owns UserSession/process lifecycle |
+| `luna-app-runtime` process launch | Security/mapping validation plus real child launch through `SystemRuntimeService`; ApplicationInstance ↔ ProcessId binding and exit reconciliation implemented |
+| `luna-boot.efi` | Working prototype reaches kernel + early userspace; development QEMU path now builds SYSTEM + DATA and hands off to `luna-system-runtime` |
 
 ## Current storage model
 
@@ -45,9 +45,7 @@ The logical application root remains a conventional Linux-compatible `/`, while 
 
 ### Linux namespace + logical root
 
-`luna-namespace` provides private mount namespace creation, private mount propagation, OverlayFS composition over an immutable lower System Image, controlled read-only mapping application, private `/proc`, read-only `/sys`, an initially empty `/dev` tmpfs, and logical-root entry via `chroot`.
-
-The backend remains an OS-specific primitive layer. It does not own Security policy, Bundle semantics, or application lifecycle.
+`luna-namespace` provides private mount namespace creation, private mount propagation, OverlayFS composition over an immutable lower System Image, controlled mapping application, private `/proc`, read-only `/sys`, an initially empty `/dev` tmpfs, device exposure primitives and logical-root entry via `chroot`.
 
 ### Security
 
@@ -55,13 +53,13 @@ The backend remains an OS-specific primitive layer. It does not own Security pol
 
 ### System runtime process supervision
 
-`luna-system-runtime` contains a real `ProcessSupervisor` based on `std::process::Command`/`Child`. It can spawn real child processes, poll them without blocking, terminate and reap them, and reconcile all finished children. `SystemRuntimeService` additionally owns UserSession creation and the initial interactive shell lifecycle.
+`luna-system-runtime` contains a real `ProcessSupervisor` based on `std::process::Command`/`Child`. `SystemRuntimeService` is the sole process owner and exposes typed spawn/poll/terminate operations to upper runtime layers. Its normal `supervise()` path only consumes processes that belong to UserSession shell lifecycle, preventing it from accidentally reaping application processes owned through the same supervisor.
 
 ### Application runtime
 
-`luna-app-runtime` validates the Bundle/mapping contract, evaluates explicit Security requests before launch, delegates namespace construction to `luna-namespace`, and binds an `ApplicationInstance` to the process owned by `luna-system-runtime`. Process exit is translated into `Stopped`/`Failed` instance state and staging roots are cleaned up.
+`luna-app-runtime` validates Bundle/mapping contracts, evaluates explicit Security requests before namespace materialization, delegates Linux process ownership to `luna-system-runtime`, and binds each current bring-up `ApplicationInstance` to a supervised process. Process exit is translated into `Stopped`/`Failed` instance state and staging roots are cleaned up.
 
-The current Linux namespace launch path uses `CommandExt::pre_exec` as an integration prototype. It must be replaced by a safer dedicated child-creation primitive before the runtime becomes multi-threaded/production-grade.
+The current Linux namespace launch path uses Unix `CommandExt::pre_exec` as a bring-up implementation. Rust documents that this callback runs after `fork` in a constrained child context, so replacing it with a dedicated child-creation primitive remains a production-hardening task. citeturn607694search2
 
 ### Persistent state
 
@@ -88,20 +86,20 @@ Interrupted operations are reconciled from durable operation state, while rollba
 
 ### Bootable development userspace
 
-The QEMU harness under `boot/luna-boot/tests/ovmf/` now has a complete development bring-up chain:
+The QEMU harness under `boot/luna-boot/tests/ovmf/` now has a development bring-up chain:
 
 ```text
 luna-boot.efi
     ↓
 Linux kernel
     ↓
-CPIO/gzip early userspace
+early initramfs
     ↓
-mount SYSTEM
+SYSTEM
     ↓
-mount selected SquashFS System Image
+SquashFS System Image
     ↓
-mount DATA
+DATA
     ↓
 switch_root
     ↓
@@ -109,10 +107,10 @@ luna-system-runtime
     ↓
 UserSession
     ↓
-interactive /bin/sh
+interactive shell
 ```
 
-The test harness creates separate EFI, SYSTEM and DATA partitions. The early-userspace script is intentionally a temporary bring-up implementation; it is not yet the final production `luna-init` component.
+The repository provides `build-userspace.sh`, `luna-init` and `build-and-run.sh` to assemble this path reproducibly when the host supplies QEMU/OVMF, a Linux kernel, and a static BusyBox.
 
 ## RFC-0002
 
@@ -131,10 +129,20 @@ The remaining RFC-related work is implementation conformance and production sign
 7. End-to-end QEMU/Linux application launch and recovery tests.
 8. Production-safe namespace child creation and runtime hardening.
 
+## Decision records
+
+The current accepted implementation-boundary decisions are additionally recorded in:
+
+```text
+docs/decisions/2026-09-01-RUNTIME-INTEGRATION.md
+```
+
+That record explicitly preserves the rule that `luna-system-runtime` owns process supervision and that `luna-app-runtime` must not create a second supervisor.
+
 ## CI / supply chain
 
 GitHub Actions checks workspace build/test/Clippy/release build and the separate UEFI target. SLSA provenance is configured for release subjects. Rustfmt remains advisory until the existing formatting debt is cleaned up.
 
 ## Bootloader status
 
-`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current boot track reaches the Linux kernel and the real early-userspace handoff used by the QEMU development image. The bootloader remains outside the userspace Cargo workspace.
+`luna-boot.efi` is maintained separately under `boot/luna-boot/`. The current boot track reaches the Linux kernel and the development early-userspace/System-Image/DATA handoff. The bootloader remains outside the userspace Cargo workspace.
