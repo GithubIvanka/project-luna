@@ -56,9 +56,9 @@ if ! command -v x86_64-linux-musl-gcc >/dev/null 2>&1 && ! command -v musl-gcc >
 fi
 
 mkdir -p "$OUT" "$WORK"
-rm -rf "$SYSTEM_ROOT" "$INIT_ROOT" "$DATA_ROOT"
+rm -rf "$SYSTEM_ROOT" "$INIT_ROOT" "$DATA_ROOT" "$WORK/system-partition"
 rm -f "$OUT"/luna-pc.img "$OUT"/luna-efi.img "$OUT"/luna-system.img "$OUT"/luna-data.img \
-      "$OUT"/luna-initramfs.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/SHA256SUMS
+      "$OUT"/luna-initramfs.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/BUILD-INFO "$OUT"/SHA256SUMS
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
@@ -74,7 +74,6 @@ EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
 mkdir -p "$SYSTEM_ROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var,data}
 mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna"
-mkdir -p "$SYSTEM_ROOT/etc/profile.d"
 
 cp "$BUSYBOX" "$SYSTEM_ROOT/bin/busybox"
 chmod 0755 "$SYSTEM_ROOT/bin/busybox"
@@ -135,7 +134,7 @@ cat > "$SYSTEM_ROOT/etc/luna/session" <<'EOF'
 EOF
 
 # Optional desktop root. The directory is copied as a prepared userspace tree;
-# the Luna session launcher will enter niri-session when it is present.
+# when niri-session is present, luna-session enters the graphical desktop path.
 if [ -n "$DESKTOP_ROOT" ]; then
     [ -d "$DESKTOP_ROOT" ] || { echo "LUNA_DESKTOP_ROOT is not a directory: $DESKTOP_ROOT" >&2; exit 1; }
     cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
@@ -155,20 +154,16 @@ chmod 0755 "$INIT_ROOT/init"
     find . -print0 | cpio --null -o -H newc --quiet | gzip -9 > "$OUT/luna-initramfs.img"
 )
 
-rm -rf "$WORK/data-root"
-mkdir -p "$DATA_ROOT/system" "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" \
-         "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" \
-         "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" \
-         "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
-
+mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" \
+         "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" \
+         "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" \
+         "$DATA_ROOT/cache"
 mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" 512M
 
-rm -rf "$WORK/system-partition"
 mkdir -p "$WORK/system-partition/images" "$WORK/system-partition/kernels/default"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$WORK/system-partition/images/luna-${LUNA_VERSION}.squashfs"
 cp "$OUT/luna-initramfs.img" "$WORK/system-partition/kernels/default/initramfs.img"
 cp "$KERNEL" "$WORK/system-partition/kernels/default/bzImage"
-
 cat > "$WORK/system-partition/images/luna-${LUNA_VERSION}.toml" <<EOF
 [image]
 name = "luna"
@@ -181,7 +176,6 @@ arch = "x86_64"
 [kernels]
 compatible = ["default"]
 EOF
-
 mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" 384M
 
 truncate -s 770M "$OUT/luna-pc.img"
@@ -202,6 +196,8 @@ dd if="$OUT/luna-efi.img" of="$OUT/luna-pc.img" bs=512 seek=2048 conv=notrunc st
 dd if="$OUT/luna-system.img" of="$OUT/luna-pc.img" bs=512 seek=264192 conv=notrunc status=none
 dd if="$OUT/luna-data.img" of="$OUT/luna-pc.img" bs=512 seek=1056768 conv=notrunc status=none
 
+MODE="console-bringup"
+[ -n "$DESKTOP_ROOT" ] && MODE="desktop-root-enabled"
 cat > "$OUT/BUILD-INFO" <<EOF
 Project Luna PC development image
 version=$LUNA_VERSION
@@ -210,7 +206,7 @@ system_image=luna-${LUNA_VERSION}.squashfs
 system_libc=musl
 bootloader=luna-boot.efi
 partitions=EFI:128MiB,SYSTEM:384MiB,DATA:512MiB
-mode=$([ -n "$DESKTOP_ROOT" ] && echo desktop-root-enabled || echo console-bringup)
+mode=$MODE
 EOF
 
 sha256sum \
@@ -219,11 +215,9 @@ sha256sum \
     "$OUT/luna-initramfs.img" \
     > "$OUT/SHA256SUMS"
 
-cp "$OUT/luna-initramfs.img" "$OUT/luna-initramfs.img"
-
 echo "Built Project Luna PC image:"
-echo "  disk:       $OUT/luna-pc.img"
-echo "  System:     $OUT/luna-${LUNA_VERSION}.squashfs"
-echo "  initramfs:   $OUT/luna-initramfs.img"
-echo "  bootloader:  $EFI"
-echo "  checksums:   $OUT/SHA256SUMS"
+echo "  disk:        $OUT/luna-pc.img"
+echo "  System:      $OUT/luna-${LUNA_VERSION}.squashfs"
+echo "  initramfs:    $OUT/luna-initramfs.img"
+echo "  bootloader:   $EFI"
+echo "  checksums:    $OUT/SHA256SUMS"
