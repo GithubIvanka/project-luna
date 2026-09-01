@@ -2,7 +2,7 @@
 
 **Дата:** 2026-09-01  
 **Статус:** accepted implementation decision  
-**Branch:** `integration/gui-boot-session`  
+**Branch:** `development`  
 **Architectural Source of Truth:** `docs/ARCHITECTURE.md`
 
 ## 1. Normal boot is graphical
@@ -71,13 +71,24 @@ full boot/kernel diagnostics
 
 Verbose mode removes `quiet`, raises the kernel log level and enables `ignore_loglevel` for the selected boot. The text console remains visible throughout the diagnostic boot path.
 
-Normal boot keeps the quiet console parameters and shows the graphical splash.
+Normal boot keeps the quiet boot parameters and shows the graphical splash.
 
 ## 5. Boot Menu
 
 `B` remains the only normal entry into Boot Menu. The menu is a special pre-OS control surface and is allowed to be text based. It is not the normal user interface.
 
-The menu currently exposes the normal Luna target and the Verbose Boot action. Recovery/factory/external-media entries remain future target-management work and are not silently invented as implemented features.
+The accepted action set is:
+
+```text
+Continue to Luna
+System Image selection
+Recovery Environment
+Factory Environment
+Boot from USB / External Device
+Verbose Boot
+```
+
+The current development implementation exposes every accepted action explicitly. Recovery, Factory and External Boot are represented as typed menu actions; their real boot backends remain separate implementation work and must not be replaced with a fake target or a TTY fallback.
 
 ## 6. Graphical login contract
 
@@ -102,7 +113,7 @@ This process-exit handshake is a Phase 2 integration contract. The final product
 
 ## 7. No shell fallback in graphical PC images
 
-The PC image builder no longer creates `/usr/bin/luna-session`, `/etc/luna/session` or a graphical-to-shell fallback.
+The PC image builder must not create `/usr/bin/luna-session`, `/etc/luna/session` or a graphical-to-shell fallback.
 
 A graphical PC image requires a prepared desktop root containing at least:
 
