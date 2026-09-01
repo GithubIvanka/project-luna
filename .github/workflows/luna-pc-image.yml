@@ -1,0 +1,59 @@
+name: Luna PC image
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+a permissions:
+  contents: read
+
+jobs:
+  build-pc-image:
+    name: Build x86_64 PC image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
+
+      - name: Install image toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            busybox-static \
+            cpio \
+            dosfstools \
+            e2fsprogs \
+            gdisk \
+            gzip \
+            linux-image-amd64 \
+            musl-tools \
+            mtools \
+            squashfs-tools
+
+      - name: Build Luna PC image
+        run: tools/build-pc-image.sh
+
+      - name: Inspect generated image
+        run: |
+          file dist/luna-pc.img
+          cat dist/BUILD-INFO
+          cat dist/SHA256SUMS
+
+      - name: Upload Luna PC image
+        uses: actions/upload-artifact@v4
+        with:
+          name: luna-pc-x86_64
+          path: |
+            dist/luna-pc.img
+            dist/luna-*.squashfs
+            dist/luna-initramfs.img
+            dist/BUILD-INFO
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
