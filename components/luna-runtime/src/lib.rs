@@ -98,22 +98,14 @@ impl RuntimeResolver {
 
         let loader = match kind {
             RuntimeKind::Luna => None,
-            RuntimeKind::Glibc => {
-                let candidate = root.join("lib64/ld-linux-x86-64.so.2");
-                if candidate.is_file() { Some(candidate) } else { None }
-            }
-            RuntimeKind::Bundle => {
-                let candidate = root.join("loader");
-                if candidate.is_file() {
-                    Some(candidate)
-                } else {
-                    None
-                }
-            }
+            RuntimeKind::Glibc => Some(root.join("lib64/ld-linux-x86-64.so.2")),
+            RuntimeKind::Bundle => Some(root.join("loader")),
         };
 
-        if kind != RuntimeKind::Luna && loader.is_none() {
-            return Err(RuntimeResolutionError::InvalidLoader(root.join("loader")));
+        if let Some(candidate) = &loader {
+            if !candidate.is_file() {
+                return Err(RuntimeResolutionError::InvalidLoader(candidate.clone()));
+            }
         }
 
         Ok(RuntimeArtifact { kind, root, loader })
@@ -157,16 +149,16 @@ mod tests {
     }
 
     #[test]
-    fn glibc_requires_its_loader() {
+    fn glibc_reports_the_actual_missing_loader_path() {
         let root = std::env::temp_dir().join(format!("luna-runtime-glibc-loader-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("lib64")).unwrap();
 
         let resolver = RuntimeResolver::new("/native").with_glibc_root(&root);
-        assert!(matches!(
+        assert_eq!(
             resolver.resolve(RuntimeKind::Glibc),
-            Err(RuntimeResolutionError::InvalidLoader(_))
-        ));
+            Err(RuntimeResolutionError::InvalidLoader(root.join("lib64/ld-linux-x86-64.so.2")))
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
