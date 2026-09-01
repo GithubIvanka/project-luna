@@ -6,6 +6,8 @@ use std::fmt;
 use std::process::{Child, Command, ExitStatus, Stdio};
 
 use luna_event::{EventPublisher, EventType};
+use luna_state::RedbStateStore;
+use luna_system_manager::{PersistentSystemManager, SystemState};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,7 +17,7 @@ pub trait SystemRuntime { type Error; fn state(&self)->RuntimeState; fn sessions
 pub fn session_event_type()->EventType{EventType::new("session.state.changed")}
 pub fn accepts_event_publisher<P:EventPublisher>(_publisher:&P){}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone,Copy,Debug,Eq,PartialEq,Ord,PartialOrd,Hash)]
 pub struct ProcessId(u32);
 impl ProcessId{pub const fn new(value:u32)->Self{Self(value)}pub const fn get(self)->u32{self.0}}
 #[derive(Debug)]
@@ -30,11 +32,7 @@ impl ProcessSupervisor{
  pub fn spawn<I,S>(&mut self,program:&str,args:I)->Result<ProcessId,ProcessError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>{self.spawn_command(program,args,false,None::<fn()->std::io::Result<()>>)}
  pub fn spawn_inherited<I,S>(&mut self,program:&str,args:I)->Result<ProcessId,ProcessError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>{self.spawn_command(program,args,true,None::<fn()->std::io::Result<()>>)}
  #[cfg(unix)]pub fn spawn_with_pre_exec<I,S,F>(&mut self,program:&str,args:I,setup:F)->Result<ProcessId,ProcessError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>,F:FnMut()->std::io::Result<()>+Send+Sync+'static{self.spawn_command(program,args,false,Some(setup))}
- fn spawn_command<I,S,F>(&mut self,program:&str,args:I,inherited_stdio:bool,setup:Option<F>)->Result<ProcessId,ProcessError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>,F:FnMut()->std::io::Result<()>+Send+Sync+'static{
-  let mut command=Command::new(program);command.args(args);if inherited_stdio{command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());}else{command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());}
-  #[cfg(unix)]if let Some(setup)=setup{unsafe{std::os::unix::process::CommandExt::pre_exec(&mut command,setup);}}
-  let child=command.spawn().map_err(ProcessError::Spawn)?;let id=ProcessId::new(child.id());self.processes.insert(id,SupervisedProcess{child});Ok(id)
- }
+ fn spawn_command<I,S,F>(&mut self,program:&str,args:I,inherited_stdio:bool,setup:Option<F>)->Result<ProcessId,ProcessError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>,F:FnMut()->std::io::Result<()>+Send+Sync+'static{let mut command=Command::new(program);command.args(args);if inherited_stdio{command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());}else{command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());}#[cfg(unix)]if let Some(setup)=setup{unsafe{std::os::unix::process::CommandExt::pre_exec(&mut command,setup);}}let child=command.spawn().map_err(ProcessError::Spawn)?;let id=ProcessId::new(child.id());self.processes.insert(id,SupervisedProcess{child});Ok(id)}
  pub fn poll(&mut self,id:ProcessId)->Result<ProcessState,ProcessError>{let process=self.processes.get_mut(&id).ok_or(ProcessError::Unknown(id))?;match process.child.try_wait().map_err(ProcessError::Wait)?{Some(status)=>{self.processes.remove(&id);Ok(ProcessState::Exited(status))},None=>Ok(ProcessState::Running)}}
  pub fn terminate(&mut self,id:ProcessId)->Result<ExitStatus,ProcessError>{let mut process=self.processes.remove(&id).ok_or(ProcessError::Unknown(id))?;process.child.kill().map_err(ProcessError::Kill)?;process.child.wait().map_err(ProcessError::Wait)}
  pub fn reap_finished(&mut self)->Result<Vec<(ProcessId,ExitStatus)>,ProcessError>{let ids:Vec<_>=self.processes.keys().copied().collect();let mut finished=Vec::new();for id in ids{if let ProcessState::Exited(status)=self.poll(id)?{finished.push((id,status));}}Ok(finished)}
@@ -42,15 +40,18 @@ impl ProcessSupervisor{
 }
 impl Drop for ProcessSupervisor{fn drop(&mut self){let ids:Vec<_>=self.processes.keys().copied().collect();for id in ids{let _=self.terminate(id);}}}
 
-#[derive(Debug)]pub enum RuntimeError{Process(ProcessError),UnknownSession(SessionId),Session(String)}
-impl fmt::Display for RuntimeError{fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{match self{Self::Process(e)=>write!(f,"process supervision failed: {e}"),Self::UnknownSession(id)=>write!(f,"unknown session {}",id.get()),Self::Session(e)=>write!(f,"session transition failed: {e}")}}}
+#[derive(Debug)]pub enum RuntimeError{Process(ProcessError),UnknownSession(SessionId),Session(String),State(String)}
+impl fmt::Display for RuntimeError{fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{match self{Self::Process(e)=>write!(f,"process supervision failed: {e}"),Self::UnknownSession(id)=>write!(f,"unknown session {}",id.get()),Self::Session(e)=>write!(f,"session transition failed: {e}"),Self::State(e)=>write!(f,"system state failed: {e}")}}}
 impl std::error::Error for RuntimeError{} impl From<ProcessError> for RuntimeError{fn from(value:ProcessError)->Self{Self::Process(value)}}
 
-pub struct SystemRuntimeService{state:RuntimeState,next_session_id:u128,sessions:BTreeMap<SessionId,UserSession>,session_processes:BTreeMap<ProcessId,SessionId>,supervisor:ProcessSupervisor}
+pub struct SystemRuntimeService{state:RuntimeState,next_session_id:u128,sessions:BTreeMap<SessionId,UserSession>,session_processes:BTreeMap<ProcessId,SessionId>,supervisor:ProcessSupervisor,system_manager:Option<PersistentSystemManager<RedbStateStore>>}
 impl Default for SystemRuntimeService{fn default()->Self{Self::new()}}
 impl SystemRuntimeService{
- pub fn new()->Self{Self{state:RuntimeState::Starting,next_session_id:1,sessions:BTreeMap::new(),session_processes:BTreeMap::new(),supervisor:ProcessSupervisor::new()}}
+ pub fn new()->Self{Self{state:RuntimeState::Starting,next_session_id:1,sessions:BTreeMap::new(),session_processes:BTreeMap::new(),supervisor:ProcessSupervisor::new(),system_manager:None}}
  pub fn start(&mut self){self.state=RuntimeState::Running}
+ pub fn attach_system_manager(&mut self,manager:PersistentSystemManager<RedbStateStore>){self.system_manager=Some(manager)}
+ pub fn system_state(&self)->Option<&SystemState>{self.system_manager.as_ref().map(PersistentSystemManager::state)}
+ pub fn system_state_revision(&self)->Option<luna_state::Revision>{self.system_manager.as_ref().map(PersistentSystemManager::revision)}
  pub fn create_session(&mut self,user:luna_common::UserId)->Result<SessionId,RuntimeError>{let id=SessionId::new(self.next_session_id);self.next_session_id=self.next_session_id.saturating_add(1);let mut session=UserSession::new(id,user);session.transition(SessionState::Active).map_err(|e|RuntimeError::Session(e.to_string()))?;self.sessions.insert(id,session);Ok(id)}
  pub fn session(&self,id:SessionId)->Result<&UserSession,RuntimeError>{self.sessions.get(&id).ok_or(RuntimeError::UnknownSession(id))}
  pub fn spawn_process<I,S>(&mut self,program:&str,args:I)->Result<ProcessId,RuntimeError> where I:IntoIterator<Item=S>,S:AsRef<std::ffi::OsStr>{Ok(self.supervisor.spawn(program,args)?)}
