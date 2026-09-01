@@ -8,7 +8,7 @@ use std::fmt;
 
 use luna_common::UserId;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u128);
 
 impl SessionId {
