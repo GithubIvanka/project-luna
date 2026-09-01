@@ -15,6 +15,7 @@ mod discovery;
 mod e820;
 mod error;
 mod ext4;
+mod external;
 mod filesystem;
 mod gpt;
 mod handoff;
