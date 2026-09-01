@@ -1,6 +1,6 @@
 # Project Luna — Status
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 > `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and the subsequent accepted decisions are consolidated there.
 
@@ -22,6 +22,7 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 | Persistent state | Durable redb backend implemented under `DATA/system/state`; reopen/revision semantics tested |
 | Update/checkpoint/rollback | Durable intent + per-operation applied/inflight journal implemented; physical domain-manager backends remain to be connected |
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
+| `luna-system-runtime` process supervision | Real child-process spawn/poll/terminate/reap backend implemented; namespace integration remains |
 | `luna-boot.efi` | Working prototype reaches kernel + test init + `sh`; production hardening remains |
 
 ## Current workspace
@@ -76,7 +77,11 @@ The backend remains an OS-specific primitive layer. It does not own Security pol
 
 ### Application runtime
 
-`luna-app-runtime` has a security-aware namespace preparation boundary. Production callers can supply the central `PolicyAuthority` and explicit authorization requests; non-`Allow` decisions fail closed before namespace materialization. Process creation and supervision remain above the namespace layer.
+`luna-app-runtime` has a security-aware namespace preparation boundary. Production callers can supply the central `PolicyAuthority` and explicit authorization requests; non-`Allow` decisions fail closed before namespace materialization. Process creation and supervision are now provided by `luna-system-runtime`; binding the two through the higher-level runtime orchestration remains next.
+
+### System runtime process supervision
+
+`luna-system-runtime` now contains a real `ProcessSupervisor` based on `std::process::Command`/`Child`. It can spawn authorized child processes, poll them without blocking, terminate and reap them, and reconcile all finished children. The supervisor intentionally does not perform Security decisions or namespace construction; those remain separate architectural boundaries.
 
 ### Persistent state
 
@@ -109,8 +114,8 @@ The remaining RFC-related work is implementation conformance and production sign
 
 ## Current implementation sequence
 
-1. Finish fine-grained security-to-mapping/device authorization.
-2. Add real child-process creation and supervision through `luna-system-runtime`.
+1. Connect `luna-system-runtime` process supervision to `luna-app-runtime` launch orchestration without moving Security or namespace ownership.
+2. Finish fine-grained security-to-mapping/device authorization and filtered `/dev` population.
 3. Connect update backends to `luna-system-manager`, `luna-kernel-manager`, and `luna-app-manager`.
 4. Finish LBP1 conformance tests and Ed25519 verification/trust binding.
 5. Connect durable state to runtime/domain-manager ownership.
