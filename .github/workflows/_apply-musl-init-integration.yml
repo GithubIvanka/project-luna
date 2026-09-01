@@ -1,11 +1,14 @@
 name: _apply-musl-init-integration
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - integration/musl-init-enforcement
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs(runtime): enforce musl-native system userspace and init boundary') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +22,6 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-
           builder = Path('boot/luna-boot/tests/ovmf/build-userspace.sh')
           text = builder.read_text()
           start = text.index('RUNTIME_TARGET=')
@@ -47,15 +49,14 @@ fi
           s = status.read_text()
           marker = '### Runtime/libc and init contract\n'
           if marker not in s:
-              s += '''\n### Runtime/libc and init contract\n\nThe native Luna userspace is **musl-based**. The QEMU bring-up builder now requires the Rust `x86_64-unknown-linux-musl` target and no longer falls back to a glibc-linked system-runtime build. glibc is reserved for the separately managed compatibility-runtime path.\n\n`luna-init` is the narrow early-userspace handoff layer. It prepares the selected System Image, DATA and required kernel virtual filesystems, then transfers control to `luna-system-runtime` as the permanent PID 1 supervisor.\n'''
+              s += '''\n### Runtime/libc and init contract\n\nLuna uses **musl libc as the native system userspace libc**. The QEMU bring-up builder now requires the Rust `x86_64-unknown-linux-musl` target and no longer falls back to a glibc-linked system-runtime build. glibc is reserved for the separately managed compatibility-runtime path.\n\n`luna-init` is the narrow early-userspace handoff layer. It prepares the selected System Image, DATA and required kernel virtual filesystems, then transfers control to `luna-system-runtime` as the permanent PID 1 supervisor.\n'''
               status.write_text(s)
 
           readme = Path('README.md')
           r = readme.read_text()
-          needle = '## Runtime and isolation\n'
-          if needle in r and '**musl**' not in r:
-              addition = '''## Runtime/libc and init\n\nLuna uses **musl libc as the native system userspace libc**. glibc is an optional, versioned compatibility runtime materialized only inside approved application namespaces. A single process uses one selected libc environment.\n\n`luna-init` is the small early-userspace handoff stage between the Linux kernel and the permanent `luna-system-runtime` PID 1 supervisor.\n\n'''
-              r = r.replace(needle, addition + needle, 1)
+          marker = '## Runtime/libc and init\n'
+          if marker not in r:
+              r += '''\n## Runtime/libc and init\n\nLuna uses **musl libc as the native system userspace libc**. glibc is an optional, versioned compatibility runtime materialized only inside approved application namespaces. A single process uses one selected libc environment.\n\n`luna-init` is the small early-userspace handoff stage between the Linux kernel and the permanent `luna-system-runtime` PID 1 supervisor.\n'''
               readme.write_text(r)
 
           sot = Path('docs/ARCHITECTURE.md')
@@ -66,21 +67,10 @@ fi
           PY
 
           chmod +x boot/luna-boot/tests/ovmf/build-userspace.sh
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add boot/luna-boot/tests/ovmf/build-userspace.sh STATUS.md README.md docs/ARCHITECTURE.md
-          git commit -m "docs(runtime): enforce musl-native system userspace and init boundary" || exit 0
+          git commit -m "docs(runtime): enforce musl-native system userspace and init boundary"
+          git rm .github/workflows/_apply-musl-init-integration.yml
+          git commit -m "chore(ci): remove temporary musl integration workflow"
           git push
-
-      - name: Remove temporary workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm "$GITHUB_WORKFLOW"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(ci): remove temporary integration workflow"
-          git push
-        env:
-          GITHUB_WORKFLOW: .github/workflows/_apply-musl-init-integration.yml
