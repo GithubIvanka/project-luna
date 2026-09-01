@@ -4,7 +4,7 @@ use uefi::boot::{self, open_protocol_exclusive};
 use uefi::proto::console::text::{Input, Output};
 
 use crate::boot_key::boot_menu_requested;
-use crate::config::BootConfig;
+use crate::discovery::BootCatalog;
 use crate::error::{BootError, BootResult};
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::KernelHandoff;
@@ -15,7 +15,8 @@ use crate::splash;
 use crate::target::BootTarget;
 
 pub fn boot_flow() -> BootResult<()> {
-    let config = BootConfig::default_config();
+    let mut filesystem = SystemFilesystem::open()?;
+    let catalog = BootCatalog::discover(&mut filesystem)?;
 
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
     let mut input = open_protocol_exclusive::<Input>(input_handle)?;
@@ -28,17 +29,11 @@ pub fn boot_flow() -> BootResult<()> {
         let stdout = open_protocol_exclusive::<Output>(stdout_handle)?;
         let stdin = open_protocol_exclusive::<Input>(stdin_handle)?;
         let mut menu = BootMenu::new(stdout, stdin);
-        menu.show(config.targets(), config.default_target)
-            .unwrap_or(BootSelection {
-                action: BootMenuAction::Continue,
-                target_index: config.default_target,
-            })
+        menu.show(&catalog.targets, catalog.default_target)
+            .unwrap_or(BootSelection { action: BootMenuAction::Continue, target_index: catalog.default_target })
     } else {
         splash::show();
-        BootSelection {
-            action: BootMenuAction::Continue,
-            target_index: config.default_target,
-        }
+        BootSelection { action: BootMenuAction::Continue, target_index: catalog.default_target }
     };
 
     match selection.action {
@@ -46,45 +41,46 @@ pub fn boot_flow() -> BootResult<()> {
             return Err(BootError::RecoveryUnavailable);
         }
         BootMenuAction::Factory => {
-            return Err(BootError::Unsupported("factory environment is not installed in this development image"));
+            return Err(BootError::Unsupported("factory selection requires persisted factory boot state"));
         }
         BootMenuAction::ExternalBoot => {
-            return Err(BootError::Unsupported("external-device boot is not wired yet"));
+            return Err(BootError::Unsupported("external-device boot backend is not enabled in this build"));
         }
         BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {}
     }
 
-    let mut target = config
-        .targets()
-        .get(selection.target_index)
-        .ok_or(BootError::TargetNotFound)?
-        .clone();
-
-    if selection.action == BootMenuAction::VerboseBoot {
-        target.kernel_cmdline = target
-            .kernel_cmdline
-            .split_whitespace()
-            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
-            .collect::<alloc::vec::Vec<_>>()
-            .join(" ");
-        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
+    let selected_index = selection.target_index;
+    let mut prepared = None;
+    let mut target_for_handoff = None;
+    for (index, candidate) in catalog.targets.iter().enumerate().skip(selected_index) {
+        let mut target = candidate.clone();
+        if selection.action == BootMenuAction::VerboseBoot && index == selected_index {
+            target.kernel_cmdline = target
+                .kernel_cmdline
+                .split_whitespace()
+                .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
+                .collect::<alloc::vec::Vec<_>>()
+                .join(" ");
+            target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
+        }
+        match KernelLoader::new(&mut filesystem).prepare(&target) {
+            Ok(kernel) => {
+                prepared = Some(kernel);
+                target_for_handoff = Some(target);
+                if index != selected_index {
+                    if selection.action != BootMenuAction::VerboseBoot {
+                        // Soft fallback to the next older discovered System Image.
+                        // No state is rewritten during fallback.
+                    }
+                }
+                break;
+            }
+            Err(_) => continue,
+        }
     }
 
-    let mut filesystem = SystemFilesystem::open()?;
-    let prepared = match KernelLoader::new(&mut filesystem).prepare(&target) {
-        Ok(kernel) => kernel,
-        Err(primary) => {
-            let factory = config
-                .targets()
-                .iter()
-                .find(|candidate| candidate.is_factory && !candidate.is_recovery)
-                .ok_or(primary)?;
-            if core::ptr::eq(&target, factory) {
-                return Err(primary);
-            }
-            KernelLoader::new(&mut filesystem).prepare(factory)?
-        }
-    };
+    let prepared = prepared.ok_or(BootError::KernelLoadFailed)?;
+    let _target = target_for_handoff.ok_or(BootError::TargetNotFound)?;
 
     let page_table = prepare_identity_map()?;
     let mut handoff = KernelHandoff {
@@ -99,9 +95,7 @@ pub fn boot_flow() -> BootResult<()> {
         page_table,
     };
 
-    if !handoff.is_ready() {
-        return Err(BootError::InvalidKernel);
-    }
+    if !handoff.is_ready() { return Err(BootError::InvalidKernel); }
 
     let final_map = unsafe { boot::exit_boot_services(None) };
     handoff.boot_params.set_e820_from_map(&final_map)?;
