@@ -17,4 +17,5 @@ luna-bundle = { path = "../luna-bundle" }
 luna-root-mapping = { path = "../luna-root-mapping" }
 luna-namespace = { path = "../luna-namespace" }
 luna-security = { path = "../luna-security" }
+luna-system-runtime = { path = "../luna-system-runtime" }
 luna-user-session = { path = "../luna-user-session" }
