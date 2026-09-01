@@ -36,51 +36,42 @@ pub fn boot_flow() -> BootResult<()> {
         BootSelection { action: BootMenuAction::Continue, target_index: catalog.default_target }
     };
 
-    match selection.action {
-        BootMenuAction::Recovery => {
-            return Err(BootError::RecoveryUnavailable);
+    let mut target = match selection.action {
+        BootMenuAction::Recovery => catalog.recovery.clone().ok_or(BootError::RecoveryUnavailable)?,
+        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported("factory environment is unavailable on this installation"))?,
+        BootMenuAction::ExternalBoot => return Err(BootError::Unsupported("external-device boot backend is not yet available")),
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {
+            catalog.targets.get(selection.target_index).cloned().ok_or(BootError::TargetNotFound)?
         }
-        BootMenuAction::Factory => {
-            return Err(BootError::Unsupported("factory selection requires persisted factory boot state"));
-        }
-        BootMenuAction::ExternalBoot => {
-            return Err(BootError::Unsupported("external-device boot backend is not enabled in this build"));
-        }
-        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {}
+    };
+
+    if selection.action == BootMenuAction::VerboseBoot {
+        target.kernel_cmdline = target
+            .kernel_cmdline
+            .split_whitespace()
+            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
+            .collect::<alloc::vec::Vec<_>>()
+            .join(" ");
+        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
     }
 
-    let selected_index = selection.target_index;
-    let mut prepared = None;
-    let mut target_for_handoff = None;
-    for (index, candidate) in catalog.targets.iter().enumerate().skip(selected_index) {
-        let mut target = candidate.clone();
-        if selection.action == BootMenuAction::VerboseBoot && index == selected_index {
-            target.kernel_cmdline = target
-                .kernel_cmdline
-                .split_whitespace()
-                .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
-                .collect::<alloc::vec::Vec<_>>()
-                .join(" ");
-            target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
-        }
+    let prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
+        KernelLoader::new(&mut filesystem).prepare(&target)
+    } else {
         match KernelLoader::new(&mut filesystem).prepare(&target) {
-            Ok(kernel) => {
-                prepared = Some(kernel);
-                target_for_handoff = Some(target);
-                if index != selected_index {
-                    if selection.action != BootMenuAction::VerboseBoot {
-                        // Soft fallback to the next older discovered System Image.
-                        // No state is rewritten during fallback.
+            Ok(value) => Ok(value),
+            Err(primary) => {
+                let mut fallback = None;
+                for candidate in catalog.targets.iter().skip(selection.target_index + 1) {
+                    if let Ok(value) = KernelLoader::new(&mut filesystem).prepare(candidate) {
+                        fallback = Some(value);
+                        break;
                     }
                 }
-                break;
+                fallback.ok_or(primary)
             }
-            Err(_) => continue,
         }
-    }
-
-    let prepared = prepared.ok_or(BootError::KernelLoadFailed)?;
-    let _target = target_for_handoff.ok_or(BootError::TargetNotFound)?;
+    }?;
 
     let page_table = prepare_identity_map()?;
     let mut handoff = KernelHandoff {
