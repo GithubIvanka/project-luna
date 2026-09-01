@@ -38,18 +38,19 @@ const CURRENT_KERNEL:&str="system/current/kernel";
 const FACTORY_IMAGE:&str="system/factory/image";
 const FACTORY_KERNEL:&str="system/factory/kernel";
 
-/// Durable system-state owner. It stores only logical state; update execution
-/// remains in `luna-update-manager`.
 pub struct PersistentSystemManager<S:StateStore>{store:S,state:SystemState}
 impl<S:StateStore> PersistentSystemManager<S>{
- pub fn load(mut store:S)->Result<Self,SystemManagerError>{let state=read_state(&store)?;Ok(Self{store,state})}
- pub fn initialize(mut store:S,state:SystemState)->Result<Self,SystemManagerError>{let tx=encode_state(&state);if !tx.is_empty(){store.transaction(store.revision(),tx).map_err(state_error)?;}Ok(Self{store,state})}
+ pub fn load(store:S)->Result<Self,SystemManagerError>{let state=read_state(&store)?;Ok(Self{store,state})}
+ pub fn initialize(mut store:S,state:SystemState)->Result<Self,SystemManagerError>{let tx=encode_state(&state);store.transaction(store.revision(),tx).map_err(state_error)?;Ok(Self{store,state})}
  pub fn state(&self)->&SystemState{&self.state}
  pub fn revision(&self)->Revision{self.store.revision()}
  pub fn store(&self)->&S{&self.store}
  pub fn set_current(&mut self,image:Version,kernel:Version,expected:Revision)->Result<Revision,SystemManagerError>{let next=SystemState::new(SystemImageRef::new(image),self.state.factory().clone(),KernelRef::new(kernel),self.state.factory_kernel().clone());let mut tx=StateTransaction::new();tx.set(StateKey::new(CURRENT_IMAGE),StateValue::new(image.to_string().into_bytes())).set(StateKey::new(CURRENT_KERNEL),StateValue::new(kernel.to_string().into_bytes()));let revision=self.store.transaction(expected,tx).map_err(state_error)?;self.state=next;Ok(revision)}
 }
-impl PersistentSystemManager<RedbStateStore>{pub fn open_redb(data_root:impl AsRef<std::path::Path>)->Result<Self,SystemManagerError>{Self::load(RedbStateStore::open_system_state(data_root).map_err(state_error)?)} }
+impl PersistentSystemManager<RedbStateStore>{
+ pub fn open_redb(data_root:impl AsRef<std::path::Path>)->Result<Self,SystemManagerError>{Self::load(RedbStateStore::open_system_state(data_root).map_err(state_error)?)}
+ pub fn open_or_initialize_redb(data_root:impl AsRef<std::path::Path>,default_state:SystemState)->Result<Self,SystemManagerError>{let store=RedbStateStore::open_system_state(data_root).map_err(state_error)?;match read_state(&store){Ok(state)=>Ok(Self{store,state}),Err(SystemManagerError::MissingState(_))=>Self::initialize(store,default_state),Err(error)=>Err(error)}}
+}
 impl<S:StateStore> SystemQuery for PersistentSystemManager<S>{type Error=SystemManagerError;fn state(&self)->Result<SystemState,Self::Error>{Ok(self.state.clone())}}
 
 fn encode_state(state:&SystemState)->StateTransaction{let mut tx=StateTransaction::new();tx.set(StateKey::new(CURRENT_IMAGE),StateValue::new(state.current().version().to_string().into_bytes())).set(StateKey::new(CURRENT_KERNEL),StateValue::new(state.current_kernel().version().to_string().into_bytes())).set(StateKey::new(FACTORY_IMAGE),StateValue::new(state.factory().version().to_string().into_bytes())).set(StateKey::new(FACTORY_KERNEL),StateValue::new(state.factory_kernel().version().to_string().into_bytes()));tx}
@@ -60,9 +61,10 @@ fn state_error(error:luna_state::StateError)->SystemManagerError{SystemManagerEr
 
 #[cfg(test)]
 mod tests{
- use super::*;use luna_state::{MemoryStateStore,StateStore};
+ use super::*;use luna_state::MemoryStateStore;
  fn state()->SystemState{SystemState::new(SystemImageRef::new(Version::new(3,0,0)),SystemImageRef::new(Version::new(1,0,0)),KernelRef::new(Version::new(8,2,0)),KernelRef::new(Version::new(7,0,0)))}
  #[test]fn system_state_keeps_current_factory_image_and_kernel_separate(){let state=state();assert_eq!(state.current().version(),Version::new(3,0,0));assert_eq!(state.factory().version(),Version::new(1,0,0));assert_eq!(state.current_kernel().version(),Version::new(8,2,0));assert_eq!(state.factory_kernel().version(),Version::new(7,0,0));}
  #[test]fn durable_system_state_round_trips(){let initial=state();let mut manager=PersistentSystemManager::initialize(MemoryStateStore::new(),initial.clone()).unwrap();let revision=manager.revision();let next=manager.set_current(Version::new(4,0,0),Version::new(9,0,0),revision).unwrap();assert_eq!(next,revision.next());assert_eq!(manager.state().current().version(),Version::new(4,0,0));assert_eq!(manager.state().current_kernel().version(),Version::new(9,0,0));assert_eq!(manager.state().factory(),initial.factory());assert_eq!(manager.state().factory_kernel(),initial.factory_kernel());}
  #[test]fn stale_revision_does_not_change_state(){let initial=state();let mut manager=PersistentSystemManager::initialize(MemoryStateStore::new(),initial.clone()).unwrap();let stale=Revision::initial();let current=manager.revision();assert_ne!(current,stale);assert!(manager.set_current(Version::new(5,0,0),Version::new(10,0,0),stale).is_err());assert_eq!(manager.state(),&initial);}
+ #[test]fn missing_redb_state_is_initialized(){let root=std::env::temp_dir().join(format!("luna-system-manager-test-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);let manager=PersistentSystemManager::open_or_initialize_redb(&root,state()).unwrap();assert_eq!(manager.state().current().version(),Version::new(3,0,0));let _=std::fs::remove_dir_all(root);}
 }
