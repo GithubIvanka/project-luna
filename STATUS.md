@@ -8,7 +8,7 @@ Last updated: 2026-09-01
 
 Project Luna has completed the architecture decision cycle through **Phase 1.1–1.6-HZ** and is in **Phase 2 runtime/boot integration, PC bring-up, desktop integration and hardening**.
 
-The Phase 2 stacked integration chain has been consolidated into `main` as commit `9013a8efb305c1b98587b0fc356cf79e473dcd39`. Old stacked PRs were closed as superseded; new work continues from the single `development` branch.
+The Phase 2 stacked integration chain was consolidated into `main` as commit `9013a8efb305c1b98587b0fc356cf79e473dcd39`. New work continues from the single `development` branch.
 
 ### Phase status
 
@@ -16,21 +16,23 @@ The Phase 2 stacked integration chain has been consolidated into `main` as commi
 |---|---|
 | Architecture 1.1–1.6-HZ | Accepted and consolidated |
 | Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth |
-| Repository/Cargo audit | Completed baseline; repeated during implementation passes |
-| Crate map | Synchronized with repository |
+| Repository/Cargo audit | Completed baseline |
 | Foundation/domain APIs | Implemented baseline |
 | Manager/runtime APIs | Implemented baseline |
-| Typed runtime contract | Implemented: `luna`, `glibc`, `bundle` |
-| Runtime ↔ mapping ↔ security | Implemented contract and pre-materialization authorization |
-| Runtime resolver | Not part of Luna architecture; removed. Runtime choice remains with existing runtime/mapping/security boundaries. |
-| Linux namespace/materialization | OverlayFS logical-root backend implemented; security-aware runtime preparation and real child launch integration implemented; production child-creation hardening remains |
-| Persistent state | Durable redb backend implemented under `DATA/system/state`; System Manager owns current/factory image+kernel state |
-| Update/checkpoint/rollback | Durable intent + per-operation journal implemented; concrete domain mutation backends remain |
+| Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
+| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` implemented as application execution properties |
+| Generic `luna-runtime` crate | Explicitly rejected and removed |
+| Runtime ↔ mapping ↔ security | Contract implemented; authorization precedes namespace materialization |
+| Linux namespace/materialization | Development mount namespace backend implemented; production child-creation hardening remains |
+| Persistent state | Durable redb backend implemented under `DATA/system/state` |
+| Update/checkpoint/rollback | Durable orchestration implemented; concrete mutation backends remain |
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
-| `luna-system-runtime` process supervision | Real child spawn/poll/terminate/reap implemented; sole process owner |
-| `luna-app-runtime` process launch | ApplicationInstance ↔ ProcessId binding, runtime-aware authorization and exit reconciliation implemented |
-| `luna-boot.efi` | Development UEFI loader reaches early userspace/System Image/DATA handoff; GUI splash and full Boot Menu action set are represented; recovery/factory/external boot backends remain to be wired |
-| x86_64 PC image | Reproducible GPT/UEFI development image builder implemented; graphical images require login + niri payload |
+| `luna-system-runtime` | Real child supervision and UserSession lifecycle ownership implemented |
+| `luna-app-runtime` | ApplicationInstance lifecycle and execution setup implemented |
+| `luna-boot.efi` | GUI splash; dynamic SYSTEM image/kernel discovery; compatibility filtering; soft fallback; Boot Menu action set implemented |
+| Recovery / Factory boot | Image-role discovery and target execution implemented; final recovery tooling/repair UX remains |
+| External/USB boot | Menu action exists; UEFI external chainload backend remains |
+| x86_64 PC image | Reproducible GPT/UEFI development image builder implemented |
 | Graphical desktop | UserSession login boundary exists; final niri + Noctalia payload/seat/device integration remains |
 
 ## Boot and user experience
@@ -71,22 +73,78 @@ Noctalia Shell
 
 There is no normal TTY login, console shell fallback, or `luna-session` component.
 
-Pressing `B` during `luna-boot.efi` entry opens the exceptional text Boot Menu. It contains:
+Pressing `B` opens the exceptional text Boot Menu. The accepted action order is:
 
 ```text
-Continue to Luna
-System Image: <version>
-Recovery Environment
-Factory Environment
-Boot from USB / External Device
-Verbose Boot
+1. Continue to Luna
+2. Verbose Boot
+3. System Image selection
+4. Recovery Environment
+5. Factory Environment
+6. Boot from USB / External Device
 ```
 
 `Verbose Boot` suppresses the GUI splash and enables full kernel diagnostics for that boot. TTY/serial remains a development, diagnostic or recovery mechanism only.
 
-The current development image represents Recovery/Factory/External Boot as explicit menu actions but does not pretend those backends are complete yet; selecting an unavailable backend returns a controlled boot error.
+## Boot discovery
+
+`luna-boot.efi` now discovers bootable System Images directly from SYSTEM instead of using a hardcoded `luna-0.1.0` target.
+
+The discovery path is:
+
+```text
+SYSTEM/images/*.squashfs
+        +
+SYSTEM/images/*.toml
+        ↓
+manifest validation
+        ↓
+SYSTEM/kernels/<version>/bzImage
+        ↓
+compatible kernel filtering
+        ↓
+version ordering
+        ↓
+BootTarget catalog
+```
+
+The highest compatible normal System Image is the default target. A failed normal target can fall back to an older discovered compatible target without rewriting persistent boot state.
+
+Factory and Recovery images may be marked by image metadata role during the current development phase and are kept outside the normal image selection list.
 
 ## Runtime architecture
+
+The ownership hierarchy is:
+
+```text
+luna-system-runtime
+├── UserSession A
+│   └── luna-app-runtime
+│       └── ApplicationInstance(s)
+└── UserSession B
+    └── luna-app-runtime
+        └── ApplicationInstance(s)
+```
+
+The execution pipeline is separate:
+
+```text
+ApplicationInstance
+    ↓
+resource/declaration request
+    ↓
+luna-root-mapping
+    ↓
+luna-security
+    ↓
+luna-namespace
+    ↓
+process execution
+    ↓
+luna-system-runtime supervision
+```
+
+`RuntimeKind` is only a typed property of the ApplicationInstance execution environment:
 
 ```text
 RuntimeKind::Luna   → native Luna userspace / musl
@@ -94,20 +152,19 @@ RuntimeKind::Glibc  → approved glibc compatibility runtime
 RuntimeKind::Bundle → Bundle-private runtime
 ```
 
-`RuntimeKind` is a shared typed value. There is no generic `luna-runtime` subsystem. Runtime launch is owned by `luna-app-runtime`, with `luna-root-mapping`, `luna-security` and `luna-namespace` providing the surrounding policy/materialization contracts.
-
-The final RFC-0002 manifest field for runtime selection is deliberately not introduced yet; that requires a dedicated Bundle/schema decision.
+There is no generic `luna-runtime` crate or daemon. The existing crates retain their architecture-defined ownership boundaries.
 
 ## Current implementation sequence
 
-1. Extend `luna-app-runtime` to resolve `RuntimeKind` using existing mapping and security contracts and materialize loader/library mappings inside the application namespace.
+1. Finish the UEFI external/USB chainload backend.
 2. Implement the final graphical `luna-login` payload and niri + Noctalia desktop runtime tree.
-3. Finish fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
-4. Complete durable boot/update state integration and persistent boot-success state.
-5. Finish LBP1 conformance and Ed25519 verification/trust binding.
-6. Implement IPC/event transport, resource enforcement and device/volume integration.
-7. Expand to real `.lbp` installation and ApplicationInstance launch/recovery.
-8. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
+3. Extend `luna-app-runtime` to materialize runtime-specific loader/library mappings while preserving security and mapping ownership.
+4. Finish fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
+5. Complete durable boot/update state integration and persistent boot-success state.
+6. Finish LBP1 conformance and Ed25519 verification/trust binding.
+7. Implement IPC/event transport, resource enforcement and device/volume integration.
+8. Expand to real `.lbp` installation and ApplicationInstance launch/recovery.
+9. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
 
 ## Decision records
 
@@ -120,5 +177,5 @@ docs/decisions/2026-09-01-PC-BUILD.md
 docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
 docs/decisions/2026-09-01-GIT-WORKFLOW.md
 docs/decisions/2026-09-01-MAIN-PROTECTION.md
-docs/decisions/2026-09-01-RUNTIME-BOUNDARIES.md
+docs/decisions/2026-09-01-GIT-WORKFLOW.md
 ```
