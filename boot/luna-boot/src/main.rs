@@ -11,7 +11,6 @@ mod block;
 mod boot;
 mod boot_key;
 mod boot_params;
-mod config;
 mod discovery;
 mod e820;
 mod error;
