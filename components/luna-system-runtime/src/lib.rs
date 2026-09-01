@@ -154,6 +154,10 @@ impl ProcessSupervisor {
     pub fn len(&self) -> usize {
         self.processes.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.processes.is_empty()
+    }
 }
 
 impl Drop for ProcessSupervisor {
@@ -177,13 +181,15 @@ mod tests {
     #[test]
     fn supervisor_spawns_and_reaps_real_child() {
         let mut supervisor = ProcessSupervisor::new();
-        let id = supervisor.spawn("true", std::iter::empty::<&str>()).expect("spawn true");
+        let id = supervisor
+            .spawn("true", std::iter::empty::<&str>())
+            .expect("spawn true");
         assert!(supervisor.contains(id));
 
         let mut exited = false;
-        for _ in 0..20 {
+        for _ in 0..50 {
             match supervisor.poll(id).expect("poll child") {
-                ProcessState::Running => std::thread::yield_now(),
+                ProcessState::Running => std::thread::sleep(std::time::Duration::from_millis(5)),
                 ProcessState::Exited(status) => {
                     assert!(status.success());
                     exited = true;
@@ -192,7 +198,7 @@ mod tests {
             }
         }
         assert!(exited, "child did not exit during bounded polling");
-        assert_eq!(supervisor.len(), 0);
+        assert!(supervisor.is_empty());
     }
 
     #[test]
@@ -204,6 +210,6 @@ mod tests {
         assert!(supervisor.contains(id));
         let status = supervisor.terminate(id).expect("terminate child");
         assert!(!status.success());
-        assert_eq!(supervisor.len(), 0);
+        assert!(supervisor.is_empty());
     }
 }
