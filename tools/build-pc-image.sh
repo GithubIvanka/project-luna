@@ -133,11 +133,12 @@ cat > "$SYSTEM_ROOT/etc/luna/session" <<'EOF'
 /usr/bin/luna-session
 EOF
 
-# Optional desktop root. The directory is copied as a prepared userspace tree;
-# when niri-session is present, luna-session enters the graphical desktop path.
 if [ -n "$DESKTOP_ROOT" ]; then
     [ -d "$DESKTOP_ROOT" ] || { echo "LUNA_DESKTOP_ROOT is not a directory: $DESKTOP_ROOT" >&2; exit 1; }
     cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
+    printf 'graphical\n' > "$SYSTEM_ROOT/etc/luna/mode"
+else
+    printf 'console\n' > "$SYSTEM_ROOT/etc/luna/mode"
 fi
 
 mksquashfs "$SYSTEM_ROOT" "$OUT/luna-${LUNA_VERSION}.squashfs" \
@@ -178,7 +179,9 @@ compatible = ["default"]
 EOF
 mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" 384M
 
-truncate -s 770M "$OUT/luna-pc.img"
+# The three partitions need just over 1 GiB of usable disk space; leave ample
+# room for GPT metadata and future development growth.
+truncate -s 1152M "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
 sgdisk \
     -n 1:2048:+128M -t 1:ef00 -c 1:EFI \
@@ -206,6 +209,7 @@ system_image=luna-${LUNA_VERSION}.squashfs
 system_libc=musl
 bootloader=luna-boot.efi
 partitions=EFI:128MiB,SYSTEM:384MiB,DATA:512MiB
+image_size=1152MiB
 mode=$MODE
 EOF
 
