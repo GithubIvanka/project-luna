@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
+use luna_common::RuntimeKind;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct LogicalPath(String);
 
@@ -135,6 +137,7 @@ pub enum MappingError {
     DuplicateLogicalPath,
     NotMapped,
     ConflictingPhysicalPath,
+    RuntimeConflict { existing: RuntimeKind, requested: RuntimeKind },
 }
 
 impl fmt::Display for MappingError {
@@ -148,6 +151,9 @@ impl fmt::Display for MappingError {
             Self::DuplicateLogicalPath => "logical path is already mapped",
             Self::NotMapped => "logical path is not mapped",
             Self::ConflictingPhysicalPath => "logical path has conflicting physical mappings",
+            Self::RuntimeConflict { existing, requested } => {
+                return write!(f, "mapping runtime conflict: {existing} vs {requested}")
+            }
         };
         f.write_str(message)
     }
@@ -158,11 +164,42 @@ impl std::error::Error for MappingError {}
 #[derive(Clone, Debug, Default)]
 pub struct MappingTable {
     rules: Vec<MappingRule>,
+    runtime: Option<RuntimeKind>,
 }
 
 impl MappingTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_runtime(runtime: RuntimeKind) -> Self {
+        Self { rules: Vec::new(), runtime: Some(runtime) }
+    }
+
+    /// Bind this mapping plan to exactly one execution runtime.
+    ///
+    /// A mapping plan may be runtime-neutral while it is being assembled. Once
+    /// accepted for execution, changing its runtime is rejected.
+    pub fn bind_runtime(&mut self, runtime: RuntimeKind) -> Result<(), MappingError> {
+        match self.runtime {
+            None => {
+                self.runtime = Some(runtime);
+                Ok(())
+            }
+            Some(existing) if existing == runtime => Ok(()),
+            Some(existing) => Err(MappingError::RuntimeConflict { existing, requested: runtime }),
+        }
+    }
+
+    pub fn runtime(&self) -> Option<RuntimeKind> {
+        self.runtime
+    }
+
+    /// Returns whether this plan is compatible with the requested runtime.
+    /// Runtime-neutral plans are accepted so legacy mapping construction can be
+    /// migrated incrementally; a bound plan must match exactly.
+    pub fn accepts_runtime(&self, runtime: RuntimeKind) -> bool {
+        self.runtime.is_none() || self.runtime == Some(runtime)
     }
 
     pub fn insert(&mut self, rule: MappingRule) -> Result<(), MappingError> {
@@ -175,9 +212,7 @@ impl MappingTable {
 
     /// Resolves a logical resource to its physical backing path.
     pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
-        if let Some(rule) = self.rules.iter().find(|rule| {
-            rule.logical == *logical
-        }) {
+        if let Some(rule) = self.rules.iter().find(|rule| rule.logical == *logical) {
             return Ok(rule.physical.clone());
         }
 
@@ -201,14 +236,11 @@ impl MappingTable {
     pub fn materialize(&self) -> Result<MaterializedNamespace, MappingError> {
         let mut entries = BTreeMap::new();
         for rule in &self.rules {
-            if entries
-                .insert(rule.logical.clone(), rule.physical.clone())
-                .is_some()
-            {
+            if entries.insert(rule.logical.clone(), rule.physical.clone()).is_some() {
                 return Err(MappingError::ConflictingPhysicalPath);
             }
         }
-        Ok(MaterializedNamespace { entries })
+        Ok(MaterializedNamespace { entries, runtime: self.runtime })
     }
 
     pub fn remove(&mut self, logical: &LogicalPath) -> Result<MappingRule, MappingError> {
@@ -236,11 +268,16 @@ impl MappingTable {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MaterializedNamespace {
     entries: BTreeMap<LogicalPath, PhysicalPath>,
+    runtime: Option<RuntimeKind>,
 }
 
 impl MaterializedNamespace {
     pub fn resolve(&self, logical: &LogicalPath) -> Result<&PhysicalPath, MappingError> {
         self.entries.get(logical).ok_or(MappingError::NotMapped)
+    }
+
+    pub fn runtime(&self) -> Option<RuntimeKind> {
+        self.runtime
     }
 
     pub fn len(&self) -> usize {
@@ -269,6 +306,7 @@ fn path_depth(path: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath};
+    use luna_common::RuntimeKind;
     use std::path::Path;
 
     #[test]
@@ -299,15 +337,25 @@ mod tests {
         let mut table = MappingTable::new();
         table.insert(MappingRule::subtree(logical, physical)).unwrap();
         assert_eq!(table.iter().next().unwrap().kind(), MappingKind::Subtree);
-        assert_eq!(
-            table.resolve(&child).unwrap().as_path(),
-            Path::new("/data/system/libs/gtk/4/libgtk.so")
-        );
-        assert_eq!(
-            table.resolve(&nested).unwrap().as_path(),
-            Path::new("/data/system/libs/gtk/4/themes/default.ini")
-        );
+        assert_eq!(table.resolve(&child).unwrap().as_path(), Path::new("/data/system/libs/gtk/4/libgtk.so"));
+        assert_eq!(table.resolve(&nested).unwrap().as_path(), Path::new("/data/system/libs/gtk/4/themes/default.ini"));
         assert_eq!(table.resolve(&outside), Err(MappingError::NotMapped));
+    }
+
+    #[test]
+    fn runtime_binding_is_immutable_after_first_choice() {
+        let mut table = MappingTable::new();
+        assert_eq!(table.runtime(), None);
+        table.bind_runtime(RuntimeKind::Glibc).unwrap();
+        assert!(table.accepts_runtime(RuntimeKind::Glibc));
+        assert!(!table.accepts_runtime(RuntimeKind::Luna));
+        table.bind_runtime(RuntimeKind::Glibc).unwrap();
+        assert_eq!(
+            table.bind_runtime(RuntimeKind::Bundle),
+            Err(MappingError::RuntimeConflict { existing: RuntimeKind::Glibc, requested: RuntimeKind::Bundle })
+        );
+        let materialized = table.materialize().unwrap();
+        assert_eq!(materialized.runtime(), Some(RuntimeKind::Glibc));
     }
 
     #[test]
