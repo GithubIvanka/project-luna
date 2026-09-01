@@ -16,11 +16,9 @@ The Phase 2 stacked integration chain was consolidated into `main` as commit `90
 |---|---|
 | Architecture 1.1–1.6-HZ | Accepted and consolidated |
 | Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth |
-| Repository/Cargo audit | Completed baseline |
 | Foundation/domain APIs | Implemented baseline |
-| Manager/runtime APIs | Implemented baseline |
 | Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
-| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` implemented as application execution properties |
+| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` implemented as ApplicationInstance execution properties |
 | Generic `luna-runtime` crate | Explicitly rejected and removed |
 | Runtime ↔ mapping ↔ security | Contract implemented; authorization precedes namespace materialization |
 | Linux namespace/materialization | Development mount namespace backend implemented; production child-creation hardening remains |
@@ -29,9 +27,9 @@ The Phase 2 stacked integration chain was consolidated into `main` as commit `90
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
 | `luna-system-runtime` | Real child supervision and UserSession lifecycle ownership implemented |
 | `luna-app-runtime` | ApplicationInstance lifecycle and execution setup implemented |
-| `luna-boot.efi` | GUI splash; dynamic SYSTEM image/kernel discovery; compatibility filtering; soft fallback; Boot Menu action set implemented |
-| Recovery / Factory boot | Image-role discovery and target execution implemented; final recovery tooling/repair UX remains |
-| External/USB boot | Menu action exists; UEFI external chainload backend remains |
+| `luna-boot.efi` | GUI splash; dynamic SYSTEM image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
+| Recovery / Factory boot | Metadata-role discovery and target execution implemented; final recovery tooling/repair UX remains |
+| External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend implemented |
 | x86_64 PC image | Reproducible GPT/UEFI development image builder implemented |
 | Graphical desktop | UserSession login boundary exists; final niri + Noctalia payload/seat/device integration remains |
 
@@ -73,7 +71,7 @@ Noctalia Shell
 
 There is no normal TTY login, console shell fallback, or `luna-session` component.
 
-Pressing `B` opens the exceptional text Boot Menu. The accepted action order is:
+Pressing `B` opens the exceptional text Boot Menu. The fixed action order is:
 
 ```text
 1. Continue to Luna
@@ -84,33 +82,27 @@ Pressing `B` opens the exceptional text Boot Menu. The accepted action order is:
 6. Boot from USB / External Device
 ```
 
-`Verbose Boot` suppresses the GUI splash and enables full kernel diagnostics for that boot. TTY/serial remains a development, diagnostic or recovery mechanism only.
+Verbose Boot suppresses the GUI splash and enables full kernel diagnostics for that boot. TTY/serial remains a development, diagnostic or recovery mechanism only.
 
 ## Boot discovery
 
-`luna-boot.efi` now discovers bootable System Images directly from SYSTEM instead of using a hardcoded `luna-0.1.0` target.
-
-The discovery path is:
+`luna-boot.efi` discovers normal boot targets from SYSTEM instead of using a hardcoded release list:
 
 ```text
-SYSTEM/images/*.squashfs
-        +
-SYSTEM/images/*.toml
-        ↓
-manifest validation
-        ↓
+SYSTEM/images/*.squashfs + adjacent *.toml
+              ↓
+       manifest validation
+              ↓
 SYSTEM/kernels/<version>/bzImage
-        ↓
-compatible kernel filtering
-        ↓
-version ordering
-        ↓
-BootTarget catalog
+              ↓
+   compatible kernel filter
+              ↓
+      version ordering
+              ↓
+       BootTarget catalog
 ```
 
-The highest compatible normal System Image is the default target. A failed normal target can fall back to an older discovered compatible target without rewriting persistent boot state.
-
-Factory and Recovery images may be marked by image metadata role during the current development phase and are kept outside the normal image selection list.
+Recovery and Factory images are special System Image roles and remain outside the normal selection list. External boot is a UEFI-only chainload path and does not depend on Linux or the internal System Image being healthy.
 
 ## Runtime architecture
 
@@ -152,30 +144,29 @@ RuntimeKind::Glibc  → approved glibc compatibility runtime
 RuntimeKind::Bundle → Bundle-private runtime
 ```
 
-There is no generic `luna-runtime` crate or daemon. The existing crates retain their architecture-defined ownership boundaries.
+There is no generic `luna-runtime` crate or daemon.
 
 ## Current implementation sequence
 
-1. Finish the UEFI external/USB chainload backend.
-2. Implement the final graphical `luna-login` payload and niri + Noctalia desktop runtime tree.
-3. Extend `luna-app-runtime` to materialize runtime-specific loader/library mappings while preserving security and mapping ownership.
+1. Validate the complete PC image in QEMU/OVMF and on real UEFI hardware.
+2. Package the final graphical `luna-login` + niri + Noctalia desktop runtime tree.
+3. Extend `luna-app-runtime` with runtime-specific loader/library mappings while preserving security and mapping ownership.
 4. Finish fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
 5. Complete durable boot/update state integration and persistent boot-success state.
 6. Finish LBP1 conformance and Ed25519 verification/trust binding.
 7. Implement IPC/event transport, resource enforcement and device/volume integration.
-8. Expand to real `.lbp` installation and ApplicationInstance launch/recovery.
+8. Complete real `.lbp` installation and ApplicationInstance launch/recovery.
 9. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
 
 ## Decision records
-
-Current implementation decisions include:
 
 ```text
 docs/decisions/2026-09-01-RUNTIME-INTEGRATION.md
 docs/decisions/2026-09-01-RUNTIME-CONTRACT.md
 docs/decisions/2026-09-01-PC-BUILD.md
 docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
+docs/decisions/2026-09-01-BOOT-DISCOVERY.md
 docs/decisions/2026-09-01-GIT-WORKFLOW.md
 docs/decisions/2026-09-01-MAIN-PROTECTION.md
-docs/decisions/2026-09-01-GIT-WORKFLOW.md
+docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
 ```
