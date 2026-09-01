@@ -31,10 +31,15 @@ jobs:
             e2fsprogs \
             gdisk \
             gzip \
-            linux-image-amd64 \
+            linux-image-generic \
             musl-tools \
             mtools \
             squashfs-tools
+
+      - name: Verify host kernel payload
+        run: |
+          test -n "$(compgen -G '/boot/vmlinuz-*' || true)" || { echo 'No /boot/vmlinuz-* kernel was installed' >&2; exit 1; }
+          ls -l /boot/vmlinuz-*
 
       - name: Build Luna PC image
         run: tools/build-pc-image.sh
