@@ -21,13 +21,12 @@ System runtime supervisor         ← IMPLEMENTED
 UserSession graphical lifecycle   ← IMPLEMENTED
 Typed runtime contract            ← IMPLEMENTED
 Runtime ↔ mapping ↔ Security      ← IMPLEMENTED CONTRACT
-Runtime resolver                  ← IMPLEMENTED
 QEMU userspace bring-up           ← IMPLEMENTED DEVELOPMENT PATH
 x86_64 PC image builder           ← IMPLEMENTED DEVELOPMENT PATH
 Guarded PC installer              ← IMPLEMENTED DEVELOPMENT PATH
-PC image CI workflow              ← IMPLEMENTED
+PC image CI workflow               ← IMPLEMENTED
 Graphical boot splash             ← IMPLEMENTED DEVELOPMENT PATH
-Boot Menu Verbose Boot            ← IMPLEMENTED DEVELOPMENT PATH
+Boot Menu full action set         ← IMPLEMENTED DEVELOPMENT PATH
 ```
 
 ## Phase 2 sequence
@@ -53,7 +52,7 @@ versioned SquashFS System Image, kernel, persistent DATA, and a standard UEFI
 fallback at `EFI/BOOT/BOOTX64.EFI`.
 
 Normal boot is graphical; the image builder requires a prepared graphical root
-containing the login surface and `niri-session` rather than producing a TTY/
+containing the login surface and `niri-session` rather than producing a TTY or
 shell fallback.
 
 Next:
@@ -73,16 +72,15 @@ RuntimeKind::Glibc  → approved compatibility runtime
 RuntimeKind::Bundle → Bundle-private runtime
 ```
 
-The first resolver layer is implemented by `luna-runtime`. It resolves a
-runtime kind to an approved immutable runtime artifact, including loader
-identity where applicable. It does not perform mounts, security authorization,
-or process launch.
+`RuntimeKind` is only a typed execution-environment value. There is no generic
+runtime resolver crate. `luna-app-runtime` owns application launch semantics,
+while `luna-root-mapping`, `luna-security`, and `luna-namespace` provide mapping,
+authorization, and namespace materialization contracts.
 
 Next:
 
-- connect `luna-runtime` to `luna-app-runtime`;
-- materialize loader/library mappings inside the application namespace;
-- version and manage glibc compatibility trees through Luna;
+- resolve runtime-specific loader/library mappings inside `luna-app-runtime`;
+- version and manage glibc compatibility trees through the existing application/runtime boundaries;
 - reject libc mixing within one process;
 - keep physical runtime paths hidden behind mapping.
 
@@ -130,8 +128,20 @@ niri
 Noctalia Shell
 ```
 
-There is no normal TTY login and no shell fallback. Verbose Boot is selected
-from the B-key Boot Menu and suppresses the splash while exposing diagnostics.
+There is no normal TTY login and no shell fallback. Pressing `B` enters the
+exceptional Boot Menu, which provides the accepted controls:
+
+```text
+Continue to Luna
+System Image selection
+Recovery Environment
+Factory Environment
+Boot from USB / External Device
+Verbose Boot
+```
+
+Verbose Boot suppresses the graphical splash and exposes full kernel
+diagnostics for that boot.
 
 Next, package the final desktop runtime tree into the immutable System Image,
 including the login surface, niri, Noctalia and required device/portal support,
@@ -148,9 +158,9 @@ verify
  ↓
 install into DATA
  ↓
-resolve RuntimeSpec
+RuntimeKind
  ↓
-resolve RuntimeArtifact
+luna-app-runtime
  ↓
 security + mapping
  ↓
@@ -182,10 +192,11 @@ System Image/kernel updates and revision-checked durable state.
 
 ## Git workflow
 
-`main` is the canonical integration branch. Normal implementation work uses
-one short-lived development branch from current `main` and one PR against
-`main`. Stacked `integration/*` PR chains are not the normal workflow. See
-`docs/decisions/2026-09-01-GIT-WORKFLOW.md`.
+`main` is the canonical integration branch and is protected by the repository
+ruleset. Normal implementation work uses one short-lived development branch
+from current `main` and one PR against `main`. Stacked `integration/*` PR chains
+are not the normal workflow. See `docs/decisions/2026-09-01-GIT-WORKFLOW.md` and
+`docs/decisions/2026-09-01-MAIN-PROTECTION.md`.
 
 ## Non-negotiable constraints
 
@@ -199,5 +210,7 @@ one short-lived development branch from current `main` and one PR against
 - `UserSession` is the combined user/session entity.
 - TTY/serial is development, diagnostic or recovery-only; it is never the normal user path.
 - Normal boot uses a GUI splash, graphical login and the Wayland → niri → Noctalia desktop path.
-- Verbose Boot is an explicit Boot Menu diagnostic mode and suppresses the splash.
+- Boot Menu is entered only on explicit request and contains the accepted System Image, Recovery, Factory, External/USB and Verbose Boot controls.
+- Verbose Boot suppresses the splash and enables full diagnostics for that boot.
+- No generic `luna-runtime` component is part of the architecture.
 - Accepted decisions are recorded under `docs/decisions/` and consolidated into the SoT.
