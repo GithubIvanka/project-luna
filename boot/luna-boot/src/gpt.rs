@@ -1,5 +1,5 @@
 //! Small GPT reader. Luna identifies its system partition by GPT partition
-//! name `system`, keeping the bootloader independent of host OS mount code.
+//! name `SYSTEM`, keeping the bootloader independent of host OS mount code.
 
 use alloc::vec::Vec;
 
@@ -41,10 +41,7 @@ pub fn find_system_partition<D: BlockDevice>(device: &mut D) -> BootResult<Parti
         let count = (entry_count - index).min(entries_per_read as u32);
         let mut raw = Vec::new();
         raw.resize(count as usize * entry_size as usize, 0);
-        device.read_at(
-            entries_lba * bs + index as u64 * entry_size as u64,
-            &mut raw,
-        )?;
+        device.read_at(entries_lba * bs + index as u64 * entry_size as u64, &mut raw)?;
 
         for n in 0..count as usize {
             let e = &raw[n * entry_size as usize..(n + 1) * entry_size as usize];
@@ -53,8 +50,10 @@ pub fn find_system_partition<D: BlockDevice>(device: &mut D) -> BootResult<Parti
             }
             let first = u64_at(e, 32);
             let last = u64_at(e, 40);
-            if first > last { continue; }
-            if partition_name(e) == "system" {
+            if first > last {
+                continue;
+            }
+            if partition_name_is_system(e) {
                 return Ok(Partition { first_lba: first, last_lba: last });
             }
         }
@@ -63,18 +62,22 @@ pub fn find_system_partition<D: BlockDevice>(device: &mut D) -> BootResult<Parti
     Err(BootError::TargetNotFound)
 }
 
-fn partition_name(entry: &[u8]) -> &str {
-    // GPT names are UTF-16LE at offset 56. For the boot partition name used by
-    // Luna we only need ASCII BMP characters, so decode without allocation.
-    // A fixed static cannot safely expose decoded text, therefore this helper
-    // recognizes exactly the canonical ASCII name.
-    const NAME: [u16; 6] = [b's' as u16, b'y' as u16, b's' as u16, b't' as u16, b'e' as u16, b'm' as u16];
-    if entry.len() < 68 { return ""; }
-    for i in 0..NAME.len() {
-        let p = 56 + i * 2;
-        if u16::from_le_bytes([entry[p], entry[p + 1]]) != NAME[i] { return ""; }
+fn partition_name_is_system(entry: &[u8]) -> bool {
+    if entry.len() < 68 {
+        return false;
     }
-    "system"
+    const NAME: &[u8] = b"system";
+    for (i, expected) in NAME.iter().enumerate() {
+        let p = 56 + i * 2;
+        let mut actual = entry[p];
+        if actual.is_ascii_uppercase() {
+            actual = actual.to_ascii_lowercase();
+        }
+        if actual != *expected || entry[p + 1] != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
