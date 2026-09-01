@@ -1,27 +1,52 @@
 #!/bin/busybox sh
-# Luna early userspace bring-up. This script is intentionally tiny and is the
-# current QEMU prototype for the future dedicated luna-init implementation.
+# Luna early userspace bring-up.
+#
+# The normal build uses filesystem labels rather than Linux device names so the
+# same early userspace can boot from QEMU, SATA/NVMe and a USB installation.
 set -eu
 
 BB=/bin/busybox
 SYSTEM_IMAGE=/images/luna-test.squashfs
+SYSTEM_DEVICE=LABEL=LUNA-SYSTEM
+DATA_DEVICE=LABEL=LUNA-DATA
+
+fail() {
+    echo "Luna init: $*" >&2
+    exec "$BB" sh
+}
 
 $BB mount -t proc proc /proc
 $BB mount -t sysfs sysfs /sys
-$BB mount -t devtmpfs devtmpfs /dev 2>/dev/null || $BB mount -t tmpfs -o mode=0755,nosuid devtmpfs /dev
+$BB mount -t devtmpfs devtmpfs /dev 2>/dev/null || \
+    $BB mount -t tmpfs -o mode=0755,nosuid devtmpfs /dev
 $BB mkdir -p /run/system /newroot
 
 for arg in $(cat /proc/cmdline); do
     case "$arg" in
         luna.system_image=*) SYSTEM_IMAGE="${arg#luna.system_image=}" ;;
+        luna.system_device=*) SYSTEM_DEVICE="${arg#luna.system_device=}" ;;
+        luna.data_device=*) DATA_DEVICE="${arg#luna.data_device=}" ;;
     esac
 done
 
-$BB mount -t ext4 -o ro /dev/sda2 /run/system
-[ -f "/run/system${SYSTEM_IMAGE}" ] || { echo "Luna init: system image not found: ${SYSTEM_IMAGE}" >&2; exec $BB sh; }
-$BB mount -t squashfs -o ro,loop "/run/system${SYSTEM_IMAGE}" /newroot
+# Try the architecture-level labels first. A device-name fallback is retained
+# for old QEMU bring-up disks and explicit recovery/debug boot arguments.
+if ! $BB mount -t ext4 -o ro "$SYSTEM_DEVICE" /run/system 2>/dev/null; then
+    $BB mount -t ext4 -o ro /dev/sda2 /run/system 2>/dev/null || fail "cannot mount SYSTEM ($SYSTEM_DEVICE)"
+fi
+
+[ -f "/run/system${SYSTEM_IMAGE}" ] || \
+    fail "system image not found: ${SYSTEM_IMAGE}"
+
+$BB mount -t squashfs -o ro,loop "/run/system${SYSTEM_IMAGE}" /newroot || \
+    fail "cannot mount System Image"
 $BB mkdir -p /newroot/data /newroot/dev /newroot/proc /newroot/sys /newroot/run
-$BB mount -t ext4 /dev/sda3 /newroot/data
+
+if ! $BB mount -t ext4 "$DATA_DEVICE" /newroot/data 2>/dev/null; then
+    $BB mount -t ext4 /dev/sda3 /newroot/data 2>/dev/null || \
+        fail "cannot mount DATA ($DATA_DEVICE)"
+fi
+
 $BB mount --move /dev /newroot/dev
 $BB mount --move /proc /newroot/proc
 $BB mount --move /sys /newroot/sys
