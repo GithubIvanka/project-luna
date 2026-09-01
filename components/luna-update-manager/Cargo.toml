@@ -14,3 +14,4 @@ path = "src/main.rs"
 [dependencies]
 luna-common = { path = "../luna-common" }
 luna-state = { path = "../luna-state" }
+luna-system-manager = { path = "../luna-system-manager" }

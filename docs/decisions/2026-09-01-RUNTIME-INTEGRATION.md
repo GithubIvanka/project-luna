@@ -4,27 +4,22 @@
 **Статус:** принято как текущая реализационная фиксация  
 **Архитектурный SoT:** `docs/ARCHITECTURE.md`
 
-Этот файл фиксирует решения, принятые при переходе от отдельных backend-прототипов к интегрированному runtime/bootable userspace. Он не заменяет Source of Truth и не вводит новый архитектурный слой.
+Этот файл фиксирует решения текущего перехода к интегрированному runtime/bootable userspace. Он не заменяет Source of Truth.
 
-## 1. Единственный владелец системного process supervision
+## 1. Единственный владелец process supervision
 
 `luna-system-runtime` является единственным владельцем `ProcessSupervisor`.
+`luna-app-runtime` не содержит собственного supervisor; он хранит связь `ApplicationInstance ↔ ProcessId` и обращается к `SystemRuntimeService` за spawn/poll/terminate.
 
-`luna-app-runtime` не содержит отдельного process supervisor. Он хранит только связь `ApplicationInstance ↔ ProcessId` и обращается к `luna-system-runtime` для spawn/poll/terminate.
+## 2. ApplicationInstance и PID
 
-## 2. ApplicationInstance и процесс
-
-`ApplicationInstanceId` не равен PID.
-
-Процесс является техническим runtime resource, а `ApplicationInstance` — доменной сущностью Luna. Один instance потенциально может содержать несколько процессов; текущий bring-up использует один основной process handle.
+`ApplicationInstanceId` не равен PID. Процесс — технический runtime resource, `ApplicationInstance` — доменная сущность Luna. Текущий bring-up использует один основной process handle; модель допускает несколько процессов в одном instance.
 
 ## 3. Namespace boundary
 
-Security authorization и Mapping validation должны завершиться до materialization.
+Security authorization и Mapping validation завершаются до materialization. Текущий child-side namespace setup — временный integration backend; до production/multithreaded use он должен быть заменён безопасным dedicated child-creation primitive.
 
-Текущий Linux prototype использует child-side namespace preparation перед `exec`. Это временный integration backend и должен быть заменён безопасным dedicated child-creation primitive до production/multithreaded use.
-
-## 4. Bootable userspace bring-up
+## 4. Bootable userspace
 
 Разработческий QEMU путь проверяет:
 
@@ -41,15 +36,11 @@ luna-boot.efi
 → shell
 ```
 
-## 5. DATA в development image
+## 5. Development storage
 
-QEMU development disk содержит отдельные EFI, SYSTEM и DATA области. DATA монтируется как `/data` внутри logical root.
+Тестовый QEMU disk содержит отдельные EFI, SYSTEM и DATA области. DATA монтируется как `/data` внутри logical root.
 
-## 6. System Image в development image
-
-Development System Image является прямым SquashFS artifact. Он не меняет production System Image specification.
-
-## 7. Runtime process lifecycle
+## 6. Runtime process lifecycle
 
 Завершение application process приводит к обновлению `ApplicationInstance`:
 
@@ -65,16 +56,24 @@ Failed   (non-zero/abnormal exit)
 
 Staging namespace resources удаляются после завершения процесса.
 
-## 8. PID 1 development behaviour
+## 7. PID 1 development behaviour
 
-`luna-system-runtime` как development init поддерживает продолжение runtime после завершения пользовательского shell и может создать новую UserSession/shell.
+`luna-system-runtime` как development init поддерживает продолжение runtime после завершения пользовательского shell и может создать новую UserSession/shell. `LUNA_NO_RESPAWN=1` разрешена только для bring-up/debugging.
 
-`LUNA_NO_RESPAWN=1` разрешена только для bring-up/debugging.
+## 8. Status discipline
 
-## 9. Status discipline
+Наличие scripts/harness в GitHub не означает фактическую проверку QEMU/OVMF на машине пользователя. До реального запуска статус остаётся `development path`.
 
-Наличие скриптов в репозитории не означает, что QEMU/OVMF фактически проверен на машине пользователя. До реального запуска статус остаётся `development path`.
+## 9. Rust ownership rule
 
-## 10. Rust implementation rule
+Владелец системного процесса один — `system-runtime`. Остальные компоненты работают через typed API и не дублируют ownership системных процессов.
 
-Process ownership остаётся на уровне `system-runtime`. Остальные компоненты работают через typed API/borrowed service boundary и не дублируют ownership системных процессов.
+## 10. Scope
+
+Эти решения уточняют implementation/integration boundaries и не изменяют принятые фундаментальные архитектурные решения, RFC-0002 или модель `EFI / SYSTEM / DATA / SWAP`.
+
+## 11. Durable System State ownership
+
+`luna-system-manager` является владельцем логического состояния текущей/заводской System Image и current/factory kernel. Это состояние хранится через `luna-state` в `DATA/system/state`.
+
+`luna-system-runtime` может владеть подключённым `PersistentSystemManager`, чтобы runtime работал с актуальным System State, но update execution по-прежнему остаётся ответственностью `luna-update-manager`.

@@ -1,10 +1,7 @@
 //! Boot target policy.
 //!
-//! The physical `current`/manifest format remains an architecture item to be
-//! formalized. Until that contract is finalized this module provides the
-//! smallest deterministic test configuration: load the kernel and a temporary
-//! test initramfs directly from the ext4 `system` partition. The initramfs is
-//! only a bring-up aid; the real Luna System Image will be added later.
+//! The normal target is graphical and intentionally quiet. Diagnostics are a
+//! boot-mode concern, not a second OS/serial target.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -22,22 +19,29 @@ impl BootConfig {
     pub fn default_config() -> Self {
         let targets = vec![
             BootTarget::new(
-                "Luna Kernel Test",
-                "test",
+                "Luna PC System",
+                "pc",
                 "",
-                "/boot/bzImage",
+                "/kernels/default/bzImage",
             )
-            .with_initrd("/boot/initramfs-test.img")
-            // This stage is deliberately a kernel+initramfs test only. Do not
-            // ask Linux to discover or mount a real Luna root filesystem yet.
-            .with_cmdline("console=ttyS0 rdinit=/init"),
+            .with_initrd("/kernels/default/initramfs.img")
+            .with_cmdline(
+                "console=tty0 quiet loglevel=3 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/luna-0.1.0.squashfs luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA",
+            ),
         ];
-        Self { default_target: 0, targets }
+        Self {
+            default_target: 0,
+            targets,
+        }
     }
 
     pub fn default_target(&self) -> BootResult<&BootTarget> {
-        self.targets.get(self.default_target).ok_or(BootError::NoBootTargets)
+        self.targets
+            .get(self.default_target)
+            .ok_or(BootError::NoBootTargets)
     }
 
-    pub fn targets(&self) -> &[BootTarget] { &self.targets }
+    pub fn targets(&self) -> &[BootTarget] {
+        &self.targets
+    }
 }

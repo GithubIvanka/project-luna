@@ -20,6 +20,7 @@ mod kernel;
 mod linux;
 mod menu;
 mod paging;
+mod splash;
 mod target;
 
 #[entry]

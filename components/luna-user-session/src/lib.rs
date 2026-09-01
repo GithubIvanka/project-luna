@@ -1,14 +1,14 @@
 //! UserSession domain boundary for Project Luna.
 //!
-//! A UserSession represents one interactive user context. It owns session
-//! identity/lifecycle, while application execution belongs to app-runtime and
-//! system-wide supervision belongs to system-runtime.
+//! A UserSession represents one interactive user context. It owns user/session
+//! identity and lifecycle. The graphical login surface is part of this
+//! lifecycle; it is not a separate `luna-session` component.
 
 use std::fmt;
 
 use luna_common::UserId;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u128);
 
 impl SessionId {
@@ -19,10 +19,20 @@ impl SessionId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionState {
     Starting,
+    Authenticating,
     Active,
     Restricted,
     Ending,
     Ended,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoginState {
+    Visible,
+    Authenticating,
+    Succeeded,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,22 +40,49 @@ pub struct UserSession {
     id: SessionId,
     user: UserId,
     state: SessionState,
+    login_state: LoginState,
 }
 
 impl UserSession {
     pub fn new(id: SessionId, user: UserId) -> Self {
-        Self { id, user, state: SessionState::Starting }
+        Self {
+            id,
+            user,
+            state: SessionState::Starting,
+            login_state: LoginState::Visible,
+        }
     }
 
     pub const fn id(&self) -> SessionId { self.id }
     pub fn user(&self) -> &UserId { &self.user }
     pub const fn state(&self) -> SessionState { self.state }
+    pub const fn login_state(&self) -> LoginState { self.login_state }
+
+    pub fn login_succeeded(&mut self) -> Result<(), SessionError> {
+        if self.state != SessionState::Authenticating {
+            return Err(SessionError::InvalidTransition {
+                from: self.state,
+                to: SessionState::Active,
+            });
+        }
+        self.login_state = LoginState::Succeeded;
+        self.transition(SessionState::Active)
+    }
+
+    pub fn login_failed(&mut self) {
+        self.login_state = LoginState::Failed;
+    }
+
+    pub fn login_cancelled(&mut self) {
+        self.login_state = LoginState::Cancelled;
+    }
 
     pub fn transition(&mut self, next: SessionState) -> Result<(), SessionError> {
         let valid = matches!(
             (self.state, next),
-            (SessionState::Starting, SessionState::Active)
-                | (SessionState::Starting, SessionState::Ending)
+            (SessionState::Starting, SessionState::Authenticating)
+                | (SessionState::Authenticating, SessionState::Active)
+                | (SessionState::Authenticating, SessionState::Ending)
                 | (SessionState::Active, SessionState::Restricted)
                 | (SessionState::Active, SessionState::Ending)
                 | (SessionState::Restricted, SessionState::Active)
@@ -79,18 +116,25 @@ impl std::error::Error for SessionError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionId, SessionState, UserSession};
+    use super::{LoginState, SessionId, SessionState, UserSession};
     use luna_common::UserId;
 
     #[test]
-    fn session_has_explicit_lifecycle() {
+    fn graphical_login_precedes_active_session() {
         let mut session = UserSession::new(SessionId::new(1), UserId::from("alice"));
-        assert_eq!(session.state(), SessionState::Starting);
-        session.transition(SessionState::Active).expect("activate session");
-        session.transition(SessionState::Restricted).expect("restrict session");
-        session.transition(SessionState::Active).expect("restore session");
-        session.transition(SessionState::Ending).expect("end session");
-        session.transition(SessionState::Ended).expect("finish session");
-        assert_eq!(session.state(), SessionState::Ended);
+        assert_eq!(session.login_state(), LoginState::Visible);
+        session.transition(SessionState::Authenticating).expect("enter login");
+        session.login_succeeded().expect("authenticate session");
+        assert_eq!(session.state(), SessionState::Active);
+        assert_eq!(session.login_state(), LoginState::Succeeded);
+    }
+
+    #[test]
+    fn login_failure_does_not_activate_session() {
+        let mut session = UserSession::new(SessionId::new(2), UserId::from("alice"));
+        session.transition(SessionState::Authenticating).expect("enter login");
+        session.login_failed();
+        assert_eq!(session.state(), SessionState::Authenticating);
+        assert_eq!(session.login_state(), LoginState::Failed);
     }
 }

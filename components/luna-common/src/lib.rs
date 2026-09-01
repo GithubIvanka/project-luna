@@ -6,9 +6,11 @@
 //! to their owning crates.
 
 mod id;
+mod runtime;
 mod user;
 mod version;
 
 pub use id::{BundleId, ComponentId};
+pub use runtime::{ParseRuntimeKindError, RuntimeKind, RuntimeSpec};
 pub use user::UserId;
 pub use version::Version;

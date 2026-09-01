@@ -1,3 +1,157 @@
+use std::fs;
+use std::process::ExitStatus;
+use std::time::Duration;
+
+use luna_common::{UserId, Version};
+use luna_system_manager::{KernelRef, PersistentSystemManager, SystemImageRef, SystemState};
+use luna_system_runtime::{ProcessState, SystemRuntime, SystemRuntimeService};
+use luna_user_session::SessionState;
+
+fn default_development_system_state() -> SystemState {
+    SystemState::new(
+        SystemImageRef::new(Version::new(0, 1, 0)),
+        SystemImageRef::new(Version::new(0, 1, 0)),
+        KernelRef::new(Version::new(0, 1, 0)),
+        KernelRef::new(Version::new(0, 1, 0)),
+    )
+}
+
+fn graphical_login_command() -> String {
+    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_LOGIN_COMMAND") {
+        if !command.is_empty() {
+            return command.to_string_lossy().into_owned();
+        }
+    }
+
+    fs::read_to_string("/etc/luna/graphical-login")
+        .ok()
+        .and_then(|value| {
+            value
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "/usr/bin/luna-login".to_owned())
+}
+
+fn graphical_session_command() -> String {
+    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_SESSION_COMMAND") {
+        if !command.is_empty() {
+            return command.to_string_lossy().into_owned();
+        }
+    }
+
+    fs::read_to_string("/etc/luna/graphical-session")
+        .ok()
+        .and_then(|value| {
+            value
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "/usr/bin/niri-session".to_owned())
+}
+
+fn login_succeeded(status: &ExitStatus) -> bool {
+    status.success()
+}
+
 fn main() {
-    // Runtime implementation will be added after the API contract is specified.
+    let login_command = graphical_login_command();
+    let session_command = graphical_session_command();
+    let respawn = std::env::var_os("LUNA_NO_RESPAWN").is_none();
+    let mut runtime = SystemRuntimeService::new();
+
+    match PersistentSystemManager::open_or_initialize_redb("/data", default_development_system_state()) {
+        Ok(manager) => {
+            let state = manager.state().clone();
+            runtime.attach_system_manager(manager);
+            eprintln!(
+                "luna-system-runtime: System Image {}, kernel {}",
+                state.current().version(),
+                state.current_kernel().version()
+            );
+        }
+        Err(error) => {
+            eprintln!("luna-system-runtime: persistent system state unavailable: {error}");
+            std::process::exit(1);
+        }
+    }
+
+    runtime.start();
+
+    loop {
+        let session = match runtime.create_login_session(UserId::from("luna")) {
+            Ok(id) => id,
+            Err(error) => {
+                eprintln!("luna-system-runtime: failed to create graphical UserSession: {error}");
+                std::process::exit(1);
+            }
+        };
+
+        let login_process = match runtime.spawn_process(&login_command, std::iter::empty::<&str>()) {
+            Ok(id) => id,
+            Err(error) => {
+                eprintln!("luna-system-runtime: failed to launch graphical login {login_command}: {error}");
+                std::process::exit(1);
+            }
+        };
+
+        let login_status = loop {
+            match runtime.poll_process(login_process) {
+                Ok(ProcessState::Running) => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Ok(ProcessState::Exited(status)) => break status,
+                Err(error) => {
+                    eprintln!("luna-system-runtime: graphical login supervision failed: {error}");
+                    std::process::exit(1);
+                }
+            }
+        };
+
+        if !login_succeeded(&login_status) {
+            eprintln!("luna-system-runtime: graphical authentication failed; returning to login screen");
+            let _ = runtime.cancel_login(session);
+            if !respawn {
+                break;
+            }
+            continue;
+        }
+
+        if let Err(error) = runtime.authenticate_session(session) {
+            eprintln!("luna-system-runtime: authentication transition failed: {error}");
+            std::process::exit(1);
+        }
+
+        if let Err(error) = runtime.launch_graphical_session(
+            session,
+            &session_command,
+            std::iter::empty::<&str>(),
+        ) {
+            eprintln!("luna-system-runtime: failed to launch niri session {session_command}: {error}");
+            std::process::exit(1);
+        }
+
+        loop {
+            if let Err(error) = runtime.supervise() {
+                eprintln!("luna-system-runtime: supervision error: {error}");
+                std::process::exit(1);
+            }
+            if runtime
+                .session(session)
+                .map(|value| value.state() == SessionState::Ended)
+                .unwrap_or(true)
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        if !respawn {
+            break;
+        }
+    }
 }
