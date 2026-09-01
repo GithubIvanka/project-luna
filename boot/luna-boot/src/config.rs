@@ -26,7 +26,7 @@ impl BootConfig {
             )
             .with_initrd("/kernels/default/initramfs.img")
             .with_cmdline(
-                "console=tty0 quiet loglevel=3 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/luna-0.1.0.squashfs luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA",
+                "quiet loglevel=3 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/luna-0.1.0.squashfs luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA",
             ),
         ];
         Self {
