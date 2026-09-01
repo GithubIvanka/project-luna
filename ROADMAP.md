@@ -27,13 +27,36 @@ RFC-0002                         ← ACCEPTED
 LBP1 codec                       ← IMPLEMENTED / HARDENING
 System runtime process backend   ← IMPLEMENTED
 Application process binding      ← IMPLEMENTED PROTOTYPE
+Typed runtime contract           ← IMPLEMENTED DEVELOPMENT CONTRACT
 QEMU boot/userspace bring-up     ← IMPLEMENTED DEVELOPMENT PATH
 luna-boot                        ← WORKING PROTOTYPE → kernel + early userspace + System Image + DATA + shell
 ```
 
 ## Next implementation sequence
 
-### 1. Security-authorized runtime integration
+### 1. Runtime materialization
+
+The runtime choice is now a typed cross-subsystem contract:
+
+```text
+RuntimeKind::Luna  → native Luna / musl
+RuntimeKind::Glibc → approved glibc compatibility runtime
+RuntimeKind::Bundle → Bundle-private runtime
+```
+
+`ApplicationInstance` stores its selected `RuntimeSpec`, mappings can be bound to exactly one runtime kind, and `luna-security` treats runtime access as `Resource::Runtime(kind)` with `Permission::Use`.
+
+Next goals:
+
+- resolve the selected runtime to an approved runtime artifact;
+- materialize its loader/library mappings inside the application namespace;
+- make glibc runtime versioned and Luna-managed rather than globally visible;
+- reject libc/runtime mixing inside one process;
+- add runtime compatibility checks without exposing physical runtime paths.
+
+The semantic contract is implemented in `docs/decisions/2026-09-01-RUNTIME-CONTRACT.md`; the final RFC-0002 manifest field remains a separate Bundle decision.
+
+### 2. Security-authorized runtime integration
 
 The first real process/namespace launch path is now connected. Finish the security and resource boundaries around it.
 
@@ -45,7 +68,7 @@ Goals:
 - resource-control setup before execution;
 - production-safe child creation without relying on post-fork `pre_exec` for complex namespace setup.
 
-### 2. Durable state integration
+### 3. Durable state integration
 
 `luna-state` uses `redb` under `DATA/system/state/luna-state.redb` as the first durable backend.
 
@@ -56,7 +79,7 @@ Goals:
 - retain revision-checked atomic transactions;
 - add integrity/recovery coverage.
 
-### 3. Domain-backed update / checkpoint / rollback engine
+### 4. Domain-backed update / checkpoint / rollback engine
 
 `luna-update-manager` is the mutation coordinator; domain managers remain owners of their respective models.
 
@@ -69,7 +92,7 @@ Goals:
 - System Image/kernel independence;
 - application update/migration transactions.
 
-### 4. RFC-0002 implementation conformance
+### 5. RFC-0002 implementation conformance
 
 RFC-0002 is now accepted. The remaining work is to make `luna-bundle` a complete, tested reference implementation of the accepted specification.
 
@@ -82,7 +105,7 @@ Goals:
 - compatibility tests for future/unknown fields according to the accepted rules;
 - installation-stage integration through `luna-app-manager`.
 
-### 5. Production security / signature chain
+### 6. Production security / signature chain
 
 Implement:
 
@@ -96,7 +119,7 @@ Implement:
 
 Signature, trust and permission remain separate concepts.
 
-### 6. System Image + kernel specifications
+### 7. System Image + kernel specifications
 
 Formalize:
 
@@ -110,15 +133,15 @@ Formalize:
 
 System Images remain direct SquashFS files named `luna-X.Y.Z.squashfs`.
 
-### 7. IPC and event transport
+### 8. IPC and event transport
 
 Select the final local IPC/event implementation from the accepted contract: Unix-domain socket control plane with versioned typed protocol, plus the Luna event model. Keep GUI/CLI thin over the backend.
 
-### 8. Resource enforcement
+### 9. Resource enforcement
 
 Integrate Linux resource-control mechanisms for CPU, memory, process count, descriptors and useful storage/I/O limits, while reserving protected system-critical resources.
 
-### 9. Device / volume integration
+### 10. Device / volume integration
 
 Implement discovery → security policy → authorized access for external devices.
 
@@ -130,9 +153,39 @@ DATA/system/volumes/<friendly-name>
 
 and in the file manager's Volumes view without manual mount commands.
 
-### 10. End-to-end validation
+### 11. Desktop System Image
 
-The first development boot path is now present. Expand it from shell bring-up to a real Bundle/application launch and recovery test:
+Once the typed runtime contract and runtime materialization are complete, replace the shell-only development System Image with the first real desktop System Image:
+
+```text
+UEFI
+ ↓
+luna-boot
+ ↓
+Linux kernel
+ ↓
+luna-init
+ ↓
+System Image + DATA
+ ↓
+luna-system-runtime (PID 1)
+ ↓
+graphical UserSession
+ ↓
+authentication
+ ↓
+Wayland
+ ↓
+niri
+ ↓
+Noctalia Shell
+```
+
+The desktop image remains immutable; mutable desktop/session state belongs in DATA. TTY/serial remains development, diagnostic or recovery-only.
+
+### 12. End-to-end validation
+
+Expand the QEMU path from shell bring-up to a real Bundle/application launch and recovery test:
 
 ```text
 UEFI
@@ -152,6 +205,10 @@ luna-system-runtime
 UserSession
  ↓
 luna-app-runtime
+ ↓
+RuntimeKind
+ ↓
+namespace + security
  ↓
 ApplicationInstance
  ↓
