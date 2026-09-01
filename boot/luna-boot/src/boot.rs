@@ -1,11 +1,12 @@
 //! Main luna-boot orchestration.
 
 use uefi::boot::{self, open_protocol_exclusive};
-use uefi::proto::console::text::{Input, Output};
+use uefi::proto::console::text::Input;
 
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
 use crate::error::{BootError, BootResult};
+use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::KernelHandoff;
 use crate::kernel::KernelLoader;
@@ -15,34 +16,65 @@ use crate::splash;
 use crate::target::BootTarget;
 
 pub fn boot_flow() -> BootResult<()> {
-    let mut filesystem = SystemFilesystem::open()?;
-    let catalog = BootCatalog::discover(&mut filesystem)?;
-
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
     let mut input = open_protocol_exclusive::<Input>(input_handle)?;
     let menu_requested = boot_menu_requested(&mut input);
     drop(input);
 
-    let selection = if menu_requested {
-        let stdout_handle = boot::get_handle_for_protocol::<Output>()?;
-        let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
-        let stdout = open_protocol_exclusive::<Output>(stdout_handle)?;
-        let stdin = open_protocol_exclusive::<Input>(stdin_handle)?;
-        let mut menu = BootMenu::new(stdout, stdin);
-        menu.show(&catalog.targets, catalog.default_target)
-            .unwrap_or(BootSelection { action: BootMenuAction::Continue, target_index: catalog.default_target })
-    } else {
-        splash::show();
-        BootSelection { action: BootMenuAction::Continue, target_index: catalog.default_target }
+    // An external-media request must remain usable even when the internal
+    // SYSTEM filesystem is damaged or absent. Normal boot still requires it.
+    let mut filesystem = match SystemFilesystem::open() {
+        Ok(value) => Some(value),
+        Err(error) if menu_requested => None,
+        Err(error) => return Err(error),
     };
 
-    let mut target = match selection.action {
-        BootMenuAction::Recovery => catalog.recovery.clone().ok_or(BootError::RecoveryUnavailable)?,
-        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported("factory environment is unavailable on this installation"))?,
-        BootMenuAction::ExternalBoot => return Err(BootError::Unsupported("external-device boot backend is not yet available")),
-        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {
-            catalog.targets.get(selection.target_index).cloned().ok_or(BootError::TargetNotFound)?
+    let catalog = match filesystem.as_mut() {
+        Some(fs) => BootCatalog::discover(fs).unwrap_or_default(),
+        None => BootCatalog::default(),
+    };
+
+    let selection = if menu_requested {
+        let stdout_handle = boot::get_handle_for_protocol::<uefi::proto::console::text::Output>()?;
+        let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
+        let stdout = open_protocol_exclusive(stdout_handle)?;
+        let stdin = open_protocol_exclusive(stdin_handle)?;
+        let mut menu = BootMenu::new(stdout, stdin);
+        menu.show(&catalog.targets, catalog.default_target)
+            .unwrap_or(BootSelection {
+                action: BootMenuAction::Continue,
+                target_index: catalog.default_target,
+            })
+    } else {
+        splash::show();
+        BootSelection {
+            action: BootMenuAction::Continue,
+            target_index: catalog.default_target,
         }
+    };
+
+    if selection.action == BootMenuAction::ExternalBoot {
+        return boot_first_external();
+    }
+
+    let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
+    let mut target = match selection.action {
+        BootMenuAction::Recovery => catalog
+            .recovery
+            .clone()
+            .ok_or(BootError::RecoveryUnavailable)?,
+        BootMenuAction::Factory => catalog
+            .factory
+            .clone()
+            .ok_or(BootError::Unsupported(
+                "factory environment is unavailable on this installation",
+            ))?,
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => catalog
+            .targets
+            .get(selection.target_index)
+            .cloned()
+            .ok_or(BootError::TargetNotFound)?,
+        BootMenuAction::ExternalBoot => unreachable!(),
     };
 
     if selection.action == BootMenuAction::VerboseBoot {
@@ -56,14 +88,14 @@ pub fn boot_flow() -> BootResult<()> {
     }
 
     let prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
-        KernelLoader::new(&mut filesystem).prepare(&target)
+        KernelLoader::new(filesystem).prepare(&target)
     } else {
-        match KernelLoader::new(&mut filesystem).prepare(&target) {
+        match KernelLoader::new(filesystem).prepare(&target) {
             Ok(value) => Ok(value),
             Err(primary) => {
                 let mut fallback = None;
                 for candidate in catalog.targets.iter().skip(selection.target_index + 1) {
-                    if let Ok(value) = KernelLoader::new(&mut filesystem).prepare(candidate) {
+                    if let Ok(value) = KernelLoader::new(filesystem).prepare(candidate) {
                         fallback = Some(value);
                         break;
                     }
