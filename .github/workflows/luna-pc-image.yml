@@ -50,7 +50,7 @@ jobs:
         run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
 
       - name: Build Project Luna kernel
-        run: tools/build-luna-kernel.sh
+        run: bash tools/build-luna-kernel.sh
 
       - name: Verify Project Luna kernel payload
         run: |
@@ -60,27 +60,27 @@ jobs:
           echo "LUNA_KERNEL_VERSION=$(cat dist/kernel/current/release)" >> "$GITHUB_ENV"
 
       - name: Build complete desktop payload
-        run: tools/build-desktop-root.sh
+        run: bash tools/build-desktop-root.sh
 
       - name: Add curated Nerd Fonts
         run: |
-          tools/build-nerd-fonts.sh
+          bash tools/build-nerd-fonts.sh
           cp -a dist/nerd-fonts-root/. dist/desktop-root/
 
       - name: Add current Yazi file engine and Luna Files GUI
         env:
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
-        run: tools/build-yazi-payload.sh
+        run: bash tools/build-yazi-payload.sh
 
       - name: Add audio network Bluetooth and removable-media services
         env:
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
-        run: tools/prepare-desktop-services.sh
+        run: bash tools/prepare-desktop-services.sh
 
       - name: Apply Luna graphical session audio bootstrap
         env:
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
-        run: tools/patch-niri-session.sh
+        run: bash tools/patch-niri-session.sh
 
       - name: Verify desktop payload
         run: |
@@ -131,7 +131,7 @@ jobs:
         env:
           LUNA_TEST_KERNEL: ${{ github.workspace }}/dist/kernel/current/bzImage
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
-        run: tools/build-pc-image.sh
+        run: bash tools/build-pc-image.sh
 
       - name: Inspect generated image
         run: |
