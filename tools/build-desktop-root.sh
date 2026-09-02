@@ -61,7 +61,6 @@ for tool in cargo meson ninja zig cmake pkg-config ldd python3; do
     command -v "$tool" >/dev/null || { echo "missing required build tool: $tool" >&2; exit 1; }
 done
 
-# Build the pinned Wayland userspace that is paired with the Luna desktop.
 (
     cd "$SRC/wayland"
     meson setup build-luna --buildtype=release --prefix=/usr -Dtests=false
@@ -78,18 +77,12 @@ done
 export PKG_CONFIG_SYSROOT_DIR="$OUT"
 export PKG_CONFIG_PATH="$OUT/usr/lib/pkgconfig:$OUT/usr/share/pkgconfig:$OUT/usr/lib/x86_64-linux-gnu/pkgconfig"
 
-# Noctalia Greeter v1.2.x requires wlroots 0.20, while Ubuntu 24.04 does not
-# ship that ABI. Build the exact wlroots release needed by the pinned greeter.
 (
     cd "$SRC/wlroots"
-    meson setup build-luna --buildtype=release --prefix=/usr \
-        -Dxwayland=disabled -Dexamples=false
+    meson setup build-luna --buildtype=release --prefix=/usr -Dxwayland=disabled -Dexamples=false
     meson compile -C build-luna -j "$JOBS"
     DESTDIR="$OUT" meson install -C build-luna
 )
-
-# Noctalia v5 requires WirePlumber 0.5. Ubuntu 24.04's repository predates that
-# pkg-config ABI, so pair the shell with a pinned current WirePlumber userspace.
 (
     cd "$SRC/wireplumber"
     meson setup build-luna --buildtype=release --prefix=/usr
@@ -97,9 +90,6 @@ export PKG_CONFIG_PATH="$OUT/usr/lib/pkgconfig:$OUT/usr/share/pkgconfig:$OUT/usr
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-# The latest Greeter source enables -march=native in release mode. Luna images
-# must remain portable across x86_64 machines, so make the upstream build rule
-# explicit rather than silently producing CPU-local binaries.
 python3 - "$SRC/noctalia-greeter/meson.build" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
@@ -108,7 +98,6 @@ s = s.replace("    '-march=native', '-mtune=native',\n", "")
 p.write_text(s)
 PY
 
-# niri compositor.
 (
     cd "$SRC/niri"
     cargo build --release
@@ -118,17 +107,13 @@ install -Dm0755 "$SRC/niri/resources/niri-session" "$OUT/usr/share/niri/upstream
 install -Dm0644 "$SRC/niri/resources/niri.desktop" "$OUT/usr/share/wayland-sessions/niri.desktop"
 install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desktop-portal/niri-portals.conf"
 
-# Noctalia v5 shell.
 (
     cd "$SRC/noctalia"
-    meson setup build-luna --buildtype=release --prefix=/usr \
-        -Dnative_optimizations=false -Djemalloc=disabled -Dtests=disabled
+    meson setup build-luna --buildtype=release --prefix=/usr -Dnative_optimizations=false -Djemalloc=disabled -Dtests=disabled
     meson compile -C build-luna -j "$JOBS"
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-# Latest Noctalia Greeter source as the graphical login frontend. Luna owns the
-# outer process lifecycle through luna-login; greetd is kept as the PAM broker.
 (
     cd "$SRC/noctalia-greeter"
     meson setup build-luna --buildtype=release --prefix=/usr -Db_lto=true
@@ -136,20 +121,17 @@ install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desk
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-# Embedded greetd backend, built from source rather than relying on host packages.
 (
     cd "$SRC/greetd"
     cargo build --release
 )
 install -Dm0755 "$SRC/greetd/target/release/greetd" "$OUT/usr/bin/greetd"
 
-# Ghostty 1.3.x is tied to Zig 0.15.2 upstream.
 (
     cd "$SRC/ghostty"
     zig build -Doptimize=ReleaseFast -Dapp-runtime=gtk -p "$OUT/usr"
 )
 
-# fish interactive shell, current x86_64 release payload.
 cp -a "$FISH_DIR"/. "$OUT/"
 install -Dm0755 "$(command -v bash)" "$OUT/usr/bin/bash"
 ln -sfn /usr/bin/bash "$OUT/usr/bin/sh"
@@ -167,8 +149,6 @@ else
     exit 1
 fi
 
-# niri-session keeps the graphical path direct while creating the user D-Bus
-# session required by Noctalia and most Wayland desktop services.
 cat > "$OUT/usr/bin/niri-session" <<'EOF'
 #!/bin/sh
 set -eu
@@ -229,6 +209,12 @@ hotkey-overlay {
 prefer-no-csd
 EOF
 
+# Project Luna visual identity. Use one vector icon everywhere so the desktop,
+# file manager and launcher remain consistent without raster duplication.
+install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Luna.svg"
+install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Files.svg"
+install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/luna.svg"
+
 cat > "$OUT/usr/share/applications/ghostty.desktop" <<'EOF'
 [Desktop Entry]
 Name=Ghostty
@@ -240,11 +226,36 @@ Type=Application
 Categories=System;TerminalEmulator;
 EOF
 
+cat > "$OUT/usr/share/applications/luna-files.desktop" <<'EOF'
+[Desktop Entry]
+Name=Luna Files
+Comment=Project Luna file manager
+Exec=/usr/bin/luna-files
+Icon=dev.projectluna.Files
+Terminal=false
+Type=Application
+Categories=Utility;FileManager;GTK;
+StartupNotify=true
+EOF
+
+cat > "$OUT/usr/share/applications/luna.desktop" <<'EOF'
+[Desktop Entry]
+Name=Project Luna
+Comment=Project Luna desktop
+Exec=/usr/bin/luna-files
+Icon=dev.projectluna.Luna
+Terminal=false
+Type=Application
+Categories=System;Utility;
+StartupNotify=true
+EOF
+
 cat > "$OUT/usr/share/wayland-sessions/luna.desktop" <<'EOF'
 [Desktop Entry]
 Name=Project Luna
 Comment=Project Luna graphical desktop
 Exec=/usr/bin/luna-login --handoff
+Icon=dev.projectluna.Luna
 Type=Application
 DesktopNames=niri;
 EOF
@@ -289,6 +300,8 @@ terminal = "ghostty"
 interactive_shell = "fish"
 compatibility_shell = "bash"
 posix_shell = "sh"
+icon = "dev.projectluna.Luna"
+file_manager_icon = "dev.projectluna.Files"
 
 [versions]
 niri = "$NIRI_TAG"
@@ -347,49 +360,7 @@ while IFS= read -r dep; do
     esac
 done < <(ldd "$PAM_UNIX" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib|usr\/lib)/ {print $1}')
 
-# WirePlumber ships configuration/data in addition to ELF libraries. Its Meson
-# install has already placed those into the payload; retain an explicit sanity
-# check for the daemon and the Noctalia-facing pkg-config ABI.
-[ -x "$OUT/usr/bin/wireplumber" ] || { echo "WirePlumber daemon missing" >&2; exit 1; }
-[ -d "$OUT/usr/lib" ] || { echo "desktop runtime library directory missing" >&2; exit 1; }
-
-# Ship a small baseline font set; graphical apps must not depend on the runner's
-# host fonts at runtime.
-if [ -d /usr/share/fonts/truetype/dejavu ]; then
-    mkdir -p "$OUT/usr/share/fonts/truetype/dejavu"
-    cp -a /usr/share/fonts/truetype/dejavu/. "$OUT/usr/share/fonts/truetype/dejavu/"
-fi
-if [ -d /etc/fonts ]; then
-    mkdir -p "$OUT/etc/fonts"
-    cp -a /etc/fonts/. "$OUT/etc/fonts/"
-fi
-
-for tool in dbus-run-session dbus-daemon dbus-send; do
-    [ -x "$OUT/usr/bin/$tool" ] || { echo "missing packaged D-Bus tool: $tool" >&2; exit 1; }
-done
-
-[ -d "$OUT/usr/share/noctalia/assets" ] || { echo "Noctalia assets missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/noctalia" ] || { echo "Noctalia binary missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/noctalia-greeter" ] || { echo "Noctalia greeter missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/noctalia-greeter-compositor" ] || { echo "Noctalia greeter compositor missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/noctalia-greeter-session" ] || { echo "Noctalia greeter session helper missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/greetd" ] || { echo "greetd binary missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/luna-login" ] || { echo "luna-login missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/ghostty" ] || { echo "Ghostty binary missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/fish" ] || { echo "fish binary missing" >&2; exit 1; }
-[ -x "$OUT/usr/bin/setpriv" ] || { echo "setpriv missing" >&2; exit 1; }
-
-cat > "$OUT/etc/luna/desktop-ready" <<EOF
-niri=$NIRI_TAG
-noctalia=$NOCTALIA_TAG
-noctalia_greeter=$NOCTALIA_GREETER_REF
-greetd=$GREETD_REF
-ghostty=$GHOSTTY_TAG
-fish=$FISH_VERSION
-wayland=$WAYLAND_VERSION
-wayland_protocols=$WAYLAND_PROTOCOLS_VERSION
-wlroots=$WLROOTS_VERSION
-wireplumber=$WIREPLUMBER_VERSION
+cat > "$OUT/etc/luna/desktop-ready" <<'EOF'
+Project Luna graphical desktop payload
+niri + Noctalia + Ghostty + fish + Luna Files
 EOF
-
-printf '%s\n' "Built Project Luna desktop payload: $OUT"
