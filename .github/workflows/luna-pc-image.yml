@@ -23,7 +23,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
 
       - name: Install desktop and image toolchain
         run: |
@@ -41,9 +41,10 @@ jobs:
             libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
             libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libxml2-dev m4 meson mtools ninja-build \
-            network-manager bluez pipewire wireplumber libspa-0.2-bluetooth \
-            udisks2 xdg-utils openssl pkg-config rustfmt squashfs-tools \
-            util-linux wayland-protocols
+            network-manager bluez pipewire pipewire-pulse wireplumber \
+            libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
+            openssl pkg-config rustfmt squashfs-tools util-linux \
+            wayland-protocols
 
       - name: Prepare development login credential
         run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
@@ -91,7 +92,9 @@ jobs:
           test -x dist/desktop-root/usr/sbin/NetworkManager
           test -x dist/desktop-root/usr/libexec/bluetooth/bluetoothd
           test -x dist/desktop-root/usr/bin/pipewire
+          test -x dist/desktop-root/usr/bin/pipewire-pulse
           test -x dist/desktop-root/usr/bin/wireplumber
+          test -x dist/desktop-root/usr/bin/pactl
           test -d dist/desktop-root/usr/share/noctalia/assets
           test -d dist/desktop-root/var/lib/noctalia-greeter
           test -f dist/desktop-root/etc/pam.d/greetd
