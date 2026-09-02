@@ -66,12 +66,13 @@ mkdir -p "$runtime"
 chown "$uid:$gid" "$runtime"
 chmod 0700 "$runtime"
 
-export HOME="$(getent passwd "$user" | cut -d: -f6)"
+home="$(awk -F: -v wanted="$user" '$1 == wanted { print $6; exit }' /etc/passwd)"
+[ -n "$home" ] || { echo "cannot resolve home directory for $user" >&2; exit 1; }
+
+export HOME="$home"
 export USER="$user"
 export LOGNAME="$user"
 export XDG_RUNTIME_DIR="$runtime"
-
-[ -n "$HOME" ] || { echo "cannot resolve home directory for $user" >&2; exit 1; }
 
 exec /usr/bin/setpriv \
     --reuid="$uid" \
