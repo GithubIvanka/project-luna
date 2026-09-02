@@ -23,7 +23,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
 
       - name: Install desktop and image toolchain
         run: |
@@ -41,7 +41,8 @@ jobs:
             libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
             libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libxml2-dev m4 meson mtools ninja-build \
-            nlohmann-json3-dev openssl pkg-config rustfmt squashfs-tools \
+            network-manager bluez pipewire wireplumber libspa-0.2-bluetooth \
+            udisks2 xdg-utils openssl pkg-config rustfmt squashfs-tools \
             util-linux wayland-protocols
 
       - name: Prepare development login credential
@@ -60,6 +61,16 @@ jobs:
       - name: Build complete desktop payload
         run: tools/build-desktop-root.sh
 
+      - name: Add current Yazi file engine and Luna Files GUI
+        env:
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: tools/build-yazi-payload.sh
+
+      - name: Add audio network Bluetooth and removable-media services
+        env:
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: tools/prepare-desktop-services.sh
+
       - name: Verify desktop payload
         run: |
           test -x dist/desktop-root/usr/bin/luna-login
@@ -73,11 +84,22 @@ jobs:
           test -x dist/desktop-root/usr/bin/ghostty
           test -x dist/desktop-root/usr/bin/fish
           test -x dist/desktop-root/usr/bin/bash
+          test -x dist/desktop-root/usr/bin/yazi
+          test -x dist/desktop-root/usr/bin/ya
+          test -x dist/desktop-root/usr/bin/luna-files
           test -L dist/desktop-root/usr/bin/sh
+          test -x dist/desktop-root/usr/sbin/NetworkManager
+          test -x dist/desktop-root/usr/libexec/bluetooth/bluetoothd
+          test -x dist/desktop-root/usr/bin/pipewire
+          test -x dist/desktop-root/usr/bin/wireplumber
           test -d dist/desktop-root/usr/share/noctalia/assets
           test -d dist/desktop-root/var/lib/noctalia-greeter
           test -f dist/desktop-root/etc/pam.d/greetd
           test -f dist/desktop-root/usr/share/wayland-sessions/luna.desktop
+          test -f dist/desktop-root/etc/luna/files.toml
+          test -f dist/desktop-root/etc/luna/services/network.toml
+          test -f dist/desktop-root/etc/luna/services/bluetooth.toml
+          test -f dist/desktop-root/etc/luna/services/audio.toml
           cat dist/desktop-root/etc/luna/desktop-ready
 
       - name: Build Luna PC image
