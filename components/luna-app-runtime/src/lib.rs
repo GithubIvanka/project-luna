@@ -79,6 +79,7 @@ pub enum RuntimeError {
     SessionNotActive,
     InstanceNotFound,
     Process(ProcessError),
+    Supervisor(luna_system_runtime::RuntimeError),
     ProcessAlreadyAttached,
     NoProcess,
     InvalidExecutable(String),
@@ -96,6 +97,7 @@ impl std::fmt::Display for RuntimeError {
             Self::SessionNotActive => f.write_str("session is not active"),
             Self::InstanceNotFound => f.write_str("application instance not found"),
             Self::Process(e) => write!(f, "process supervision failed: {e}"),
+            Self::Supervisor(e) => write!(f, "system runtime operation failed: {e}"),
             Self::ProcessAlreadyAttached => f.write_str("application instance already has a process"),
             Self::NoProcess => f.write_str("application instance has no process"),
             Self::InvalidExecutable(e) => write!(f, "invalid application executable: {e}"),
@@ -106,6 +108,7 @@ impl std::fmt::Display for RuntimeError {
 }
 impl std::error::Error for RuntimeError {}
 impl From<ProcessError> for RuntimeError { fn from(value: ProcessError) -> Self { Self::Process(value) } }
+impl From<luna_system_runtime::RuntimeError> for RuntimeError { fn from(value: luna_system_runtime::RuntimeError) -> Self { Self::Supervisor(value) } }
 
 pub trait ApplicationRuntime {
     type Error;
