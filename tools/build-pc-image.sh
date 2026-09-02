@@ -70,7 +70,7 @@ EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 mkdir -p "$SYSTEM_ROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var,data}
 mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna" "$SYSTEM_ROOT/etc/pam.d"
 cp "$BUSYBOX" "$SYSTEM_ROOT/bin/busybox"; chmod 0755 "$SYSTEM_ROOT/bin/busybox"
-for applet in sh ls cat mount umount ps pwd echo clear hostname dmesg mkdir rm; do ln -sf busybox "$SYSTEM_ROOT/bin/$applet"; done
+for applet in sh ls cat mount umount ps pwd echo clear hostname dmesg mkdir rm chmod id; do ln -sf busybox "$SYSTEM_ROOT/bin/$applet"; done
 cp "$RUNTIME" "$SYSTEM_ROOT/sbin/luna-system-runtime"; chmod 0755 "$SYSTEM_ROOT/sbin/luna-system-runtime"; ln -sf luna-system-runtime "$SYSTEM_ROOT/sbin/init"
 
 cat > "$SYSTEM_ROOT/etc/os-release" <<EOF
@@ -99,8 +99,6 @@ EOF
 
 cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
 
-# The desktop payload is responsible for graphical applications. SYSTEM owns
-# only the final identity database entries that are specific to this image.
 if ! grep -q '^luna:' "$SYSTEM_ROOT/etc/passwd"; then
     printf '%s\n' 'luna:x:1000:1000:Luna User:/home/luna:/usr/bin/fish' >> "$SYSTEM_ROOT/etc/passwd"
 fi
@@ -110,13 +108,23 @@ fi
 if ! grep -q '^greeter:' "$SYSTEM_ROOT/etc/passwd"; then
     printf '%s\n' 'greeter:x:992:992:Luna Graphical Login:/var/lib/noctalia-greeter:/usr/bin/sh' >> "$SYSTEM_ROOT/etc/passwd"
 fi
+if ! grep -q '^root:' "$SYSTEM_ROOT/etc/group"; then
+    printf '%s\n' 'root:x:0:' >> "$SYSTEM_ROOT/etc/group"
+fi
+if ! grep -q '^luna:' "$SYSTEM_ROOT/etc/group"; then
+    printf '%s\n' 'luna:x:1000:' >> "$SYSTEM_ROOT/etc/group"
+fi
 if ! grep -q '^greeter:' "$SYSTEM_ROOT/etc/group"; then
     printf '%s\n' 'greeter:x:992:' >> "$SYSTEM_ROOT/etc/group"
 fi
-mkdir -p "$SYSTEM_ROOT/var/lib/noctalia-greeter" "$SYSTEM_ROOT/home/luna"
+
+rm -rf "$SYSTEM_ROOT/home"
+mkdir -p "$SYSTEM_ROOT/data/users/luna/home" "$SYSTEM_ROOT/data/users/luna/data" "$SYSTEM_ROOT/data/users/luna/config" "$SYSTEM_ROOT/data/cache"
+ln -s /data/users/luna/home "$SYSTEM_ROOT/home"
+mkdir -p "$SYSTEM_ROOT/var/lib/noctalia-greeter"
+chown 1000:1000 "$SYSTEM_ROOT/data/users/luna/home" "$SYSTEM_ROOT/data/users/luna/data" "$SYSTEM_ROOT/data/users/luna/config"
 chown 992:992 "$SYSTEM_ROOT/var/lib/noctalia-greeter"
-chown 1000:1000 "$SYSTEM_ROOT/home/luna"
-chmod 0700 "$SYSTEM_ROOT/home/luna"
+chmod 0700 "$SYSTEM_ROOT/data/users/luna/home"
 
 cat > "$SYSTEM_ROOT/etc/luna/graphical-login" <<'EOF'
 /usr/bin/luna-login
@@ -137,6 +145,8 @@ cp "$REPO_ROOT/boot/luna-boot/tests/ovmf/luna-init" "$INIT_ROOT/init"; chmod 075
 )
 
 mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
+chown -R 1000:1000 "$DATA_ROOT/users/luna"
+chmod 0700 "$DATA_ROOT/users/luna/home"
 mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" 512M
 
 mkdir -p "$WORK/system-partition/images" "$WORK/system-partition/kernels/$KERNEL_VERSION"
