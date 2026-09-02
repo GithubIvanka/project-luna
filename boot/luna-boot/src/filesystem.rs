@@ -26,6 +26,10 @@ impl SystemFilesystem {
     pub fn read_dir(&mut self, path: &str) -> BootResult<alloc::vec::Vec<DirEntry>> {
         self.fs.read_dir(path)
     }
+
+    pub fn file_exists(&mut self, path: &str) -> BootResult<bool> {
+        self.fs.file_exists(path)
+    }
 }
 
 pub fn validate_system_filesystem() -> BootResult<()> {
