@@ -95,4 +95,35 @@ cat > "$ROOT/etc/luna/yazi.version" <<EOF
 $YAZI_TAG
 EOF
 
+# The GUI and Yazi are glibc user-space applications. Copy their complete
+# shared-library closure into the immutable System Image so the payload does
+# not depend on the CI host after boot.
+bundle_elf_deps() {
+  local root="$1" pass=0
+  while [ "$pass" -lt 8 ]; do
+    pass=$((pass + 1)); local changed=0
+    while IFS= read -r -d '' elf; do
+      file "$elf" | grep -q 'ELF' || continue
+      while IFS= read -r dep; do
+        case "$dep" in
+          /lib/*|/lib64/*|/usr/lib/*)
+            [ -e "$dep" ] || continue
+            local rel="${dep#/}" dst="$root/$rel"
+            if [ ! -e "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
+            ;;
+        esac
+      done < <(ldd "$elf" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib|usr\/lib)/ {print $1}')
+    done < <(find "$root" -type f -perm -0100 -print0)
+    [ "$changed" -eq 0 ] && break
+  done
+}
+
+command -v file >/dev/null
+command -v ldd >/dev/null
+bundle_elf_deps "$ROOT"
+
+[ -x "$ROOT/usr/bin/yazi" ] || { echo "Yazi binary missing" >&2; exit 1; }
+[ -x "$ROOT/usr/bin/ya" ] || { echo "Yazi helper missing" >&2; exit 1; }
+[ -x "$ROOT/usr/bin/luna-files" ] || { echo "Luna Files GUI missing" >&2; exit 1; }
+
 echo "Built Yazi/Luna Files payload: $YAZI_TAG"
