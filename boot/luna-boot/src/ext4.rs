@@ -139,7 +139,8 @@ impl<D: BlockDevice> Ext4<D> {
         let mut inode = self.read_inode(EXT4_ROOT_INO)?;
         for component in path.split('/').filter(|p| !p.is_empty()) {
             if inode.mode & 0xf000 != 0x4000 { return Err(BootError::FilesystemError); }
-            inode = self.read_inode(self.find_in_directory(&inode, component)?)?;
+            let next = self.find_in_directory(&inode, component)?;
+            inode = self.read_inode(next)?;
         }
         Ok(inode)
     }
