@@ -23,7 +23,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
 
       - name: Install desktop and image toolchain
         run: |
@@ -39,6 +39,7 @@ jobs:
             dosfstools \
             e2fsprogs \
             file \
+            fonts-dejavu-core \
             gdisk \
             git \
             gzip \
@@ -57,10 +58,12 @@ jobs:
             libical-dev \
             libinput-dev \
             libjxl-dev \
+            liblua5.4-dev \
             libmd4c-dev \
             libpam0g-dev \
             libpango1.0-dev \
             libpipewire-0.3-dev \
+            libpixman-1-dev \
             libpolkit-agent-1-dev \
             libpolkit-gobject-1-dev \
             libqalculate-dev \
@@ -71,9 +74,10 @@ jobs:
             libsdbus-c++-dev \
             libstb-dev \
             libsystemd-dev \
+            libtomlplusplus-dev \
+            libudev-dev \
             libwayland-dev \
             libwebp-dev \
-            libwlroots-0.20-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
             libxml2-dev \
@@ -85,10 +89,8 @@ jobs:
             pkg-config \
             rustfmt \
             squashfs-tools \
-            tomlplusplus-dev \
             util-linux \
-            wayland-protocols \
-            zig
+            wayland-protocols
 
       - name: Build Project Luna kernel
         run: tools/build-luna-kernel.sh
@@ -110,12 +112,15 @@ jobs:
           test -x dist/desktop-root/usr/bin/niri-session
           test -x dist/desktop-root/usr/bin/noctalia
           test -x dist/desktop-root/usr/bin/noctalia-greeter
+          test -x dist/desktop-root/usr/bin/noctalia-greeter-compositor
+          test -x dist/desktop-root/usr/bin/noctalia-greeter-session
           test -x dist/desktop-root/usr/bin/greetd
           test -x dist/desktop-root/usr/bin/ghostty
           test -x dist/desktop-root/usr/bin/fish
           test -x dist/desktop-root/usr/bin/bash
           test -L dist/desktop-root/usr/bin/sh
           test -d dist/desktop-root/usr/share/noctalia/assets
+          test -d dist/desktop-root/var/lib/noctalia-greeter
           test -f dist/desktop-root/etc/pam.d/greetd
           test -f dist/desktop-root/usr/share/wayland-sessions/luna.desktop
           cat dist/desktop-root/etc/luna/desktop-ready
