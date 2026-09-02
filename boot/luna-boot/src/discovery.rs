@@ -1,7 +1,8 @@
 //! Discovery of System Images, manifests and compatible kernels from SYSTEM.
 
+use alloc::borrow::ToOwned;
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
@@ -82,7 +83,7 @@ impl BootCatalog {
             let manifest = match ImageManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
             let Some(kernel) = select_kernel(&manifest, &kernels) else { continue; };
             let mut target = BootTarget::new(
-                match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => "Factory Environment".to_owned(), ImageRole::Recovery => "Recovery Environment".to_owned() },
+                match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
                 manifest.version.clone(), format!("/images/{}", image.name), kernel.kernel_path,
             );
             if let Some(initrd) = kernel.initrd_path { target = target.with_initrd(initrd); }
