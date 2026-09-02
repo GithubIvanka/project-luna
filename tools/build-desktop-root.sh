@@ -10,7 +10,7 @@ NIRI_TAG="${LUNA_NIRI_TAG:-v26.04}"
 NOCTALIA_TAG="${LUNA_NOCTALIA_TAG:-v5.0.0-beta.8}"
 NOCTALIA_GREETER_REF="${LUNA_NOCTALIA_GREETER_REF:-b4e668d4f8aada549d5c990c3a18458fae8be6b9}"
 GREETD_REF="${LUNA_GREETD_REF:-0.10.3}"
-GHOSTTY_TAG="${LUNA_GHOSTTY_TAG:-1.3.1}"
+GHOSTTY_TAG="${LUNA_GHOSTTY_TAG:-v1.3.1}"
 GHOSTTY_ZIG_VERSION="${LUNA_GHOSTTY_ZIG_VERSION:-0.15.2}"
 FISH_VERSION="${LUNA_FISH_VERSION:-4.8.1}"
 WAYLAND_VERSION="${LUNA_WAYLAND_VERSION:-1.26.0}"
@@ -18,7 +18,7 @@ WAYLAND_PROTOCOLS_VERSION="${LUNA_WAYLAND_PROTOCOLS_VERSION:-1.49}"
 
 mkdir -p "$OUT" "$SRC"
 rm -rf "$OUT"
-mkdir -p "$OUT/usr/bin" "$OUT/usr/lib" "$OUT/usr/share" "$OUT/etc/profile.d" "$OUT/etc/luna" "$OUT/var/lib/noctalia-greeter"
+mkdir -p "$OUT/usr/bin" "$OUT/usr/lib" "$OUT/usr/share" "$OUT/etc/profile.d" "$OUT/etc/luna" "$OUT/etc/pam.d" "$OUT/var/lib/noctalia-greeter"
 
 fetch_git() {
     local url="$1" ref="$2" dir="$3"
@@ -42,7 +42,10 @@ if [ ! -d "$FISH_DIR" ]; then
     curl -fsSL "https://github.com/fish-shell/fish-shell/releases/download/$FISH_VERSION/fish-$FISH_VERSION-linux-x86_64.tar.xz" -o "$SRC/fish-linux.tar.xz"
     tar -xf "$SRC/fish-linux.tar.xz" -C "$SRC"
 fi
-[ -d "$FISH_DIR" ] || { echo "fish payload directory not found: $FISH_DIR" >&2; exit 1; }
+if [ ! -d "$FISH_DIR" ]; then
+    FISH_DIR="$(find "$SRC" -maxdepth 1 -mindepth 1 -type d -name "fish-$FISH_VERSION-*" -print -quit)"
+fi
+[ -n "$FISH_DIR" ] && [ -d "$FISH_DIR" ] || { echo "fish payload directory not found" >&2; exit 1; }
 
 if ! command -v zig >/dev/null 2>&1 || ! zig version | grep -qx "$GHOSTTY_ZIG_VERSION"; then
     curl -fsSL "https://ziglang.org/download/$GHOSTTY_ZIG_VERSION/zig-linux-x86_64-$GHOSTTY_ZIG_VERSION.tar.xz" -o "$SRC/zig.tar.xz"
@@ -58,8 +61,6 @@ command -v cmake >/dev/null
 command -v pkg-config >/dev/null
 command -v ldd >/dev/null
 
-# Wayland runtime + protocol definitions are pinned so the desktop payload is
-# reproducible instead of inheriting a moving CI host copy.
 (
     cd "$SRC/wayland"
     meson setup build-luna --buildtype=release --prefix=/usr -Dtests=false
@@ -75,7 +76,6 @@ command -v ldd >/dev/null
 export PKG_CONFIG_SYSROOT_DIR="$OUT"
 export PKG_CONFIG_PATH="$OUT/usr/lib/pkgconfig:$OUT/usr/share/pkgconfig:$OUT/usr/lib/x86_64-linux-gnu/pkgconfig"
 
-# niri compositor.
 (
     cd "$SRC/niri"
     cargo build --release
@@ -85,7 +85,6 @@ install -Dm0755 "$SRC/niri/resources/niri-session" "$OUT/usr/share/niri/upstream
 install -Dm0644 "$SRC/niri/resources/niri.desktop" "$OUT/usr/share/wayland-sessions/niri.desktop"
 install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desktop-portal/niri-portals.conf"
 
-# Noctalia v5 shell.
 (
     cd "$SRC/noctalia"
     meson setup build-luna --buildtype=release --prefix=/usr \
@@ -94,8 +93,6 @@ install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desk
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-# Latest Noctalia Greeter source, used as the login UI frontend. Luna owns the
-# surrounding lifecycle; greetd remains an embedded authentication broker.
 (
     cd "$SRC/noctalia-greeter"
     meson setup build-luna --buildtype=release --prefix=/usr -Db_lto=true
@@ -103,35 +100,28 @@ install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desk
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-# greetd backend used only inside luna-login. It is not exposed as a separate
-# session manager service in Luna's architecture.
 (
     cd "$SRC/greetd"
     cargo build --release
 )
 install -Dm0755 "$SRC/greetd/target/release/greetd" "$OUT/usr/bin/greetd"
 
-# Ghostty terminal.
 (
     cd "$SRC/ghostty"
     zig build -Doptimize=ReleaseFast -Dapp-runtime=gtk -p "$OUT/usr"
 )
 
-# fish interactive shell, copied from the current x86_64 release payload.
 cp -a "$FISH_DIR"/. "$OUT/"
 install -Dm0755 "$(command -v bash)" "$OUT/usr/bin/bash"
 ln -sfn /usr/bin/bash "$OUT/usr/bin/sh"
 ln -sfn /usr/bin/fish "$OUT/usr/bin/luna-shell"
 
-# dbus-run-session is used by the current Noctalia Greeter session helper.
 for tool in dbus-run-session dbus-daemon dbus-send; do
     if [ -x "/usr/bin/$tool" ]; then
         install -Dm0755 "/usr/bin/$tool" "$OUT/usr/bin/$tool"
     fi
 done
 
-# util-linux setpriv gives the system runtime a narrow privilege-drop boundary:
-# niri, Noctalia, Ghostty and fish execute as the authenticated desktop user.
 if [ -x /usr/bin/setpriv ]; then
     install -Dm0755 /usr/bin/setpriv "$OUT/usr/bin/setpriv"
 else
@@ -160,7 +150,6 @@ chmod 0755 "$OUT/usr/bin/niri-session"
 cat > "$OUT/usr/bin/luna-run-session" <<'EOF'
 #!/bin/sh
 set -eu
-
 uid="$(id -u luna)"
 gid="$(id -g luna)"
 exec /usr/bin/setpriv --reuid="$uid" --regid="$gid" --init-groups -- /usr/bin/niri-session
@@ -226,8 +215,7 @@ allow_empty_password = false
 request_timeout = 60
 EOF
 
-cat > "$OUT/etc/pam.d.greetd" <<'EOF'
-# Luna's immutable image installs this as /etc/pam.d/greetd.
+cat > "$OUT/etc/pam.d/greetd" <<'EOF'
 auth required pam_unix.so
 account required pam_unix.so
 session required pam_unix.so
@@ -270,6 +258,9 @@ wayland = "$WAYLAND_VERSION"
 wayland_protocols = "$WAYLAND_PROTOCOLS_VERSION"
 EOF
 
+cargo build --release -p luna-login
+install -Dm0755 "$REPO_ROOT/target/release/luna-login" "$OUT/usr/bin/luna-login"
+
 bundle_elf_deps() {
     local root="$1"
     local pass=0
@@ -299,9 +290,20 @@ bundle_elf_deps() {
 
 bundle_elf_deps "$OUT"
 
-# Copy configuration/tooling referenced by the greeter session helper if the
-# host package provides them. Shell scripts are not visible to ldd, so they are
-# explicit.
+# PAM modules are loaded by name from configuration, not linked into an ELF.
+# Copy the Unix authentication module and its dependency closure explicitly.
+PAM_UNIX="$(find /usr/lib /lib -path '*/security/pam_unix.so' -print -quit)"
+[ -n "$PAM_UNIX" ] || { echo "pam_unix.so not found on CI host" >&2; exit 1; }
+install -Dm0644 "$PAM_UNIX" "$OUT/${PAM_UNIX#/}"
+while IFS= read -r dep; do
+    case "$dep" in
+        /lib/*|/lib64/*|/usr/lib/*)
+            rel="${dep#/}"
+            [ -e "$OUT/$rel" ] || { mkdir -p "$(dirname "$OUT/$rel")"; cp -a "$dep" "$OUT/$rel"; }
+            ;;
+    esac
+done < <(ldd "$PAM_UNIX" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib|usr\/lib)/ {print $1}')
+
 for tool in dbus-run-session dbus-daemon dbus-send; do
     [ -x "$OUT/usr/bin/$tool" ] || { echo "missing packaged D-Bus tool: $tool" >&2; exit 1; }
 done
@@ -311,20 +313,10 @@ done
 [ -x "$OUT/usr/bin/noctalia-greeter" ] || { echo "Noctalia greeter missing" >&2; exit 1; }
 [ -x "$OUT/usr/bin/noctalia-greeter-compositor" ] || { echo "Noctalia greeter compositor missing" >&2; exit 1; }
 [ -x "$OUT/usr/bin/greetd" ] || { echo "greetd binary missing" >&2; exit 1; }
+[ -x "$OUT/usr/bin/luna-login" ] || { echo "luna-login missing" >&2; exit 1; }
 [ -x "$OUT/usr/bin/ghostty" ] || { echo "Ghostty binary missing" >&2; exit 1; }
 [ -x "$OUT/usr/bin/fish" ] || { echo "fish binary missing" >&2; exit 1; }
 [ -x "$OUT/usr/bin/setpriv" ] || { echo "setpriv missing" >&2; exit 1; }
-
-cargo build --release -p luna-login
-install -Dm0755 "$REPO_ROOT/target/release/luna-login" "$OUT/usr/bin/luna-login"
-
-mv "$OUT/etc/pam.d.greetd" "$OUT/etc/pam.d.greetd.tmp"
-install -Dm0644 "$OUT/etc/pam.d.greetd.tmp" "$OUT/etc/pam.d/greetd"
-rm -f "$OUT/etc/pam.d.greetd.tmp"
-
-# Minimal greeter account; the PC image builder appends it alongside the user
-# database because it owns the final immutable /etc/passwd.
-mkdir -p "$OUT/var/lib/noctalia-greeter"
 
 cat > "$OUT/etc/luna/desktop-ready" <<EOF
 niri=$NIRI_TAG
