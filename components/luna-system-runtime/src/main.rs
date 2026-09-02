@@ -163,12 +163,12 @@ fn main() {
             std::process::exit(1);
         }
 
-        if let Err(error) = runtime.launch_graphical_session(
+        if let Err(error) = runtime.launch_graphical_session_as_user(
             session,
             &session_command,
             std::iter::empty::<&str>(),
         ) {
-            eprintln!("luna-system-runtime: failed to launch niri session {session_command}: {error}");
+            eprintln!("luna-system-runtime: failed to launch graphical UserSession {session_command}: {error}");
             std::process::exit(1);
         }
 
