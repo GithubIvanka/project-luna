@@ -6,6 +6,7 @@ ROOT="${LUNA_DESKTOP_ROOT:-${REPO_ROOT}/dist/desktop-root}"
 SRC="${LUNA_DESKTOP_SRC:-${REPO_ROOT}/dist/sources}"
 JOBS="${LUNA_BUILD_JOBS:-$(nproc)}"
 YAZI_TAG="${LUNA_YAZI_TAG:-v26.9.1}"
+YAZI_COMMIT="${LUNA_YAZI_COMMIT:-8dd895c695a5950330c2623eb43debf323b60654}"
 
 mkdir -p "$ROOT" "$SRC"
 fetch_git() {
@@ -17,6 +18,11 @@ fetch_git() {
 }
 
 fetch_git https://github.com/sxyazi/yazi.git "$YAZI_TAG" "$SRC/yazi"
+ACTUAL_YAZI_COMMIT="$(git -C "$SRC/yazi" rev-parse HEAD)"
+[ "$ACTUAL_YAZI_COMMIT" = "$YAZI_COMMIT" ] || {
+  echo "Yazi tag $YAZI_TAG resolved to unexpected commit: $ACTUAL_YAZI_COMMIT (expected $YAZI_COMMIT)" >&2
+  exit 1
+}
 (
   cd "$SRC/yazi"
   cargo build --release -p yazi-fm -p yazi-cli -j "$JOBS"
@@ -80,6 +86,7 @@ cat > "$ROOT/etc/luna/files.toml" <<EOF
 name = "Luna Files"
 engine = "yazi"
 engine_version = "$YAZI_TAG"
+engine_commit = "$ACTUAL_YAZI_COMMIT"
 cli = "/usr/bin/yazi"
 cli_helper = "/usr/bin/ya"
 gui = "/usr/bin/luna-files"
@@ -92,7 +99,8 @@ removable_media = "/run/media/luna"
 EOF
 
 cat > "$ROOT/etc/luna/yazi.version" <<EOF
-$YAZI_TAG
+version=$YAZI_TAG
+commit=$ACTUAL_YAZI_COMMIT
 EOF
 
 # The GUI and Yazi are glibc user-space applications. Copy their complete
@@ -126,4 +134,4 @@ bundle_elf_deps "$ROOT"
 [ -x "$ROOT/usr/bin/ya" ] || { echo "Yazi helper missing" >&2; exit 1; }
 [ -x "$ROOT/usr/bin/luna-files" ] || { echo "Luna Files GUI missing" >&2; exit 1; }
 
-echo "Built Yazi/Luna Files payload: $YAZI_TAG"
+echo "Built Yazi/Luna Files payload: $YAZI_TAG ($ACTUAL_YAZI_COMMIT)"
