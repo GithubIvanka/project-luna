@@ -69,8 +69,7 @@ EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 [ -f "$EFI" ] || { echo "UEFI loader was not produced: $EFI" >&2; exit 1; }
 
 mkdir -p "$SYSTEM_ROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var,data}
-mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna" "$SYSTEM_ROOT/etc/pam.d" \
-    "$SYSTEM_ROOT/usr/share"
+mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna" "$SYSTEM_ROOT/etc/pam.d" "$SYSTEM_ROOT/usr/share"
 cp "$BUSYBOX" "$SYSTEM_ROOT/bin/busybox"; chmod 0755 "$SYSTEM_ROOT/bin/busybox"
 for applet in sh ls cat mount umount ps pwd echo clear hostname dmesg mkdir rm chmod id; do ln -sf busybox "$SYSTEM_ROOT/bin/$applet"; done
 cp "$RUNTIME" "$SYSTEM_ROOT/sbin/luna-system-runtime"; chmod 0755 "$SYSTEM_ROOT/sbin/luna-system-runtime"; ln -sf luna-system-runtime "$SYSTEM_ROOT/sbin/init"
@@ -188,7 +187,7 @@ terminal=/usr/bin/ghostty
 compatibility_shells=/usr/bin/bash,/usr/bin/sh
 verbose_boot=boot-menu-only
 login_username=luna
-login_password=development-only: luna
+login_credential=development-only
 EOF
 sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$OUT/luna-initramfs.img" > "$OUT/SHA256SUMS"
 
