@@ -17,10 +17,10 @@ fn default_development_system_state() -> SystemState {
 }
 
 fn graphical_login_command() -> String {
-    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_LOGIN_COMMAND") {
-        if !command.is_empty() {
-            return command.to_string_lossy().into_owned();
-        }
+    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_LOGIN_COMMAND")
+        && !command.is_empty()
+    {
+        return command.to_string_lossy().into_owned();
     }
 
     fs::read_to_string("/etc/luna/graphical-login")
@@ -36,10 +36,10 @@ fn graphical_login_command() -> String {
 }
 
 fn graphical_session_command() -> String {
-    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_SESSION_COMMAND") {
-        if !command.is_empty() {
-            return command.to_string_lossy().into_owned();
-        }
+    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_SESSION_COMMAND")
+        && !command.is_empty()
+    {
+        return command.to_string_lossy().into_owned();
     }
 
     fs::read_to_string("/etc/luna/graphical-session")
