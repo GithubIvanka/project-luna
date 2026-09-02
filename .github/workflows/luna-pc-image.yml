@@ -92,6 +92,10 @@ jobs:
           test -x dist/desktop-root/usr/bin/luna-login
           test -x dist/desktop-root/usr/bin/niri
           test -x dist/desktop-root/usr/bin/niri-session
+          test -x dist/desktop-root/usr/bin/luna-run-session
+          sh -n dist/desktop-root/usr/bin/niri-session
+          sh -n dist/desktop-root/usr/bin/luna-run-session
+          test "$(cat dist/desktop-root/etc/luna/graphical-session)" = "/usr/bin/luna-run-session"
           test -x dist/desktop-root/usr/bin/noctalia
           test -x dist/desktop-root/usr/bin/noctalia-greeter
           test -x dist/desktop-root/usr/bin/noctalia-greeter-compositor
@@ -104,6 +108,7 @@ jobs:
           test -x dist/desktop-root/usr/bin/ya
           test -x dist/desktop-root/usr/bin/luna-files
           test -L dist/desktop-root/usr/bin/sh
+          test -x dist/desktop-root/usr/bin/setpriv
           test -x dist/desktop-root/usr/sbin/NetworkManager
           test -x dist/desktop-root/usr/bin/nmcli
           test -x dist/desktop-root/usr/libexec/bluetooth/bluetoothd
