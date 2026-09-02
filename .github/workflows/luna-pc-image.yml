@@ -32,7 +32,7 @@ jobs:
             busybox-static build-essential clang cpio cmake curl dbus \
             dosfstools e2fsprogs file fonts-dejavu-core gdisk git gzip \
             libadwaita-1-dev libcairo2-dev libdbus-1-dev libdisplay-info-dev \
-            libdrm-dev libegl1-mesa-dev libfontconfig1-dev libfreetype6-dev \
+            libdrm-dev libegl1-mesa-dev libelf-dev libfontconfig1-dev libfreetype6-dev \
             libgbm-dev libgles2-mesa-dev libglib2.0-dev libgtk-4-dev \
             libical-dev libinput-dev libjxl-dev liblua5.4-dev libmd4c-dev \
             libpam0g-dev libpango1.0-dev libpipewire-0.3-dev libpixman-1-dev \
@@ -125,6 +125,8 @@ jobs:
           test -f dist/desktop-root/etc/luna/ghostty.conf
           test -f dist/desktop-root/etc/ghostty/config
           test -f dist/desktop-root/etc/fonts/conf.d/99-luna-nerd-fonts.conf
+          test -f dist/desktop-root/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Luna.svg
+          test -f dist/desktop-root/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Files.svg
           test -f dist/desktop-root/etc/luna/services/network.toml
           test -f dist/desktop-root/etc/luna/services/bluetooth.toml
           test -f dist/desktop-root/etc/luna/services/audio.toml
