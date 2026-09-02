@@ -1,6 +1,5 @@
 //! Discovery of System Images, manifests and compatible kernels from SYSTEM.
 
-use alloc::borrow::ToOwned;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
