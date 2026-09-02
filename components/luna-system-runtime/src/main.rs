@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::process::ExitStatus;
 use std::time::Duration;
@@ -94,6 +95,31 @@ fn nix_like_root() -> bool {
         || std::fs::metadata("/etc/luna/services/network.toml").is_ok()
 }
 
+fn launch_graphical_user_session(
+    runtime: &mut SystemRuntimeService,
+    session_id: luna_user_session::SessionId,
+    program: &str,
+) -> Result<ProcessId, luna_system_runtime::RuntimeError> {
+    let session = runtime.session(session_id)?;
+    if session.state() != SessionState::Active {
+        return Err(luna_system_runtime::RuntimeError::Session(
+            "graphical session requires an authenticated active UserSession".into(),
+        ));
+    }
+
+    let username = session.user().to_string();
+    let args = [
+        OsString::from("--reuid"),
+        OsString::from(username.as_str()),
+        OsString::from("--regid"),
+        OsString::from(username.as_str()),
+        OsString::from("--init-groups"),
+        OsString::from("--"),
+        OsString::from(program),
+    ];
+    runtime.spawn_process("/usr/bin/setpriv", args).map_err(Into::into)
+}
+
 fn main() {
     let login_command = graphical_login_command();
     let session_command = graphical_session_command();
@@ -163,11 +189,7 @@ fn main() {
             std::process::exit(1);
         }
 
-        if let Err(error) = runtime.launch_graphical_session_as_user(
-            session,
-            &session_command,
-            std::iter::empty::<&str>(),
-        ) {
+        if let Err(error) = launch_graphical_user_session(&mut runtime, session, &session_command) {
             eprintln!("luna-system-runtime: failed to launch graphical UserSession {session_command}: {error}");
             std::process::exit(1);
         }
