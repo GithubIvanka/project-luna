@@ -6,3 +6,10 @@ license = "Apache-2.0"
 
 [lib]
 path = "src/lib.rs"
+
+[[bin]]
+name = "luna-files"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = "0.10"
