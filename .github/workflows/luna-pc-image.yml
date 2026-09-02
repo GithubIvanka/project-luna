@@ -42,7 +42,7 @@ jobs:
             gdisk \
             git \
             gzip \
-            libboost-all-dev \
+            libadwaita-1-dev \
             libcairo2-dev \
             libdbus-1-dev \
             libdisplay-info-dev \
@@ -57,18 +57,26 @@ jobs:
             libical-dev \
             libinput-dev \
             libjxl-dev \
+            libmd4c-dev \
             libpam0g-dev \
             libpango1.0-dev \
             libpipewire-0.3-dev \
+            libpolkit-agent-1-dev \
+            libpolkit-gobject-1-dev \
+            libqalculate-dev \
             libseat-dev \
+            libsecret-1-dev \
             libsndfile1-dev \
             libsodium-dev \
+            libsdbus-c++-dev \
+            libstb-dev \
             libsystemd-dev \
             libwayland-dev \
             libwebp-dev \
             libwlroots-0.20-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
+            libxml2-dev \
             m4 \
             meson \
             mtools \
