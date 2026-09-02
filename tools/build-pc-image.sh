@@ -141,7 +141,8 @@ IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1280}"
 mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
 chown -R 1000:1000 "$DATA_ROOT/users/luna"
 chmod 0700 "$DATA_ROOT/users/luna/home"
-mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "${DATA_SIZE_MIB}M" "$OUT/luna-data.img" 2>/dev/null || mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" "${DATA_SIZE_MIB}M"
+truncate -s "${DATA_SIZE_MIB}M" "$OUT/luna-data.img"
+mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" >/dev/null
 
 # Keep enough room in SYSTEM for the immutable graphical stack and its bundled
 # shared libraries while retaining a full writable DATA partition.
@@ -171,7 +172,8 @@ arch = "x86_64"
 [kernels]
 compatible = ["$KERNEL_VERSION"]
 EOF
-mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" "${SYSTEM_SIZE_MIB}M"
+truncate -s "${SYSTEM_SIZE_MIB}M" "$OUT/luna-system.img"
+mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" >/dev/null
 
 truncate -s "${IMAGE_SIZE_MIB}M" "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
