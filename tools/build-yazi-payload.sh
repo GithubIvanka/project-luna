@@ -13,7 +13,7 @@ fetch_git() {
   if [ ! -d "$dir/.git" ]; then git clone --filter=blob:none --no-tags "$url" "$dir"; fi
   git -C "$dir" fetch --depth 1 origin "$ref"
   git -C "$dir" checkout --force FETCH_HEAD
-git -C "$dir" clean -fdx >/dev/null
+  git -C "$dir" clean -fdx >/dev/null
 }
 
 fetch_git https://github.com/sxyazi/yazi.git "$YAZI_TAG" "$SRC/yazi"
@@ -24,6 +24,12 @@ fetch_git https://github.com/sxyazi/yazi.git "$YAZI_TAG" "$SRC/yazi"
 
 install -Dm0755 "$SRC/yazi/target/release/yazi" "$ROOT/usr/bin/yazi"
 install -Dm0755 "$SRC/yazi/target/release/ya" "$ROOT/usr/bin/ya"
+
+# Luna Files is a native Wayland GUI today and will progressively consume the
+# same yazi-core/yazi-fs/yazi-vfs model instead of maintaining a second file
+# operation implementation.
+cargo build --release -p luna-files -j "$JOBS"
+install -Dm0755 "$REPO_ROOT/target/release/luna-files" "$ROOT/usr/bin/luna-files"
 
 mkdir -p "$ROOT/etc/yazi" "$ROOT/usr/share/applications"
 cat > "$ROOT/etc/yazi/luna.toml" <<'EOF'
@@ -46,6 +52,17 @@ max_height = 900
 edit = [{ run = "${EDITOR:-/usr/bin/nvim} %s", block = true, for = "unix" }]
 open = [{ run = "xdg-open %s", orphan = true, desc = "Open" }]
 reveal = [{ run = "luna-files --reveal %s", orphan = true, desc = "Reveal in Luna Files" }]
+EOF
+
+cat > "$ROOT/usr/share/applications/luna-files.desktop" <<'EOF'
+[Desktop Entry]
+Name=Luna Files
+Comment=Project Luna graphical file manager
+Exec=/usr/bin/luna-files
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileManager;
 EOF
 
 cat > "$ROOT/usr/share/applications/yazi.desktop" <<'EOF'
@@ -74,9 +91,8 @@ user_data = "/data/users/luna/data"
 removable_media = "/run/media/luna"
 EOF
 
-# Keep a machine-readable pin beside the image, useful for upgrades and CI.
 cat > "$ROOT/etc/luna/yazi.version" <<EOF
 $YAZI_TAG
 EOF
 
-echo "Built Yazi payload: $ROOT/usr/bin/yazi ($YAZI_TAG)"
+echo "Built Yazi/Luna Files payload: $YAZI_TAG"
