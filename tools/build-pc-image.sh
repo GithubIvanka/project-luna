@@ -59,12 +59,16 @@ RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
 [ -x "$RUNTIME" ] || { echo "runtime binary was not produced: $RUNTIME" >&2; exit 1; }
 file "$RUNTIME" | grep -q 'statically linked' || { echo "luna-system-runtime is not statically linked; refusing to build PC image" >&2; exit 1; }
 
+cargo build --release -p luna-login
+LOGIN="$REPO_ROOT/target/release/luna-login"
+[ -x "$LOGIN" ] || { echo "luna-login was not produced: $LOGIN" >&2; exit 1; }
+
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/boot/luna-boot/Cargo.toml"
 EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 [ -f "$EFI" ] || { echo "UEFI loader was not produced: $EFI" >&2; exit 1; }
 
 mkdir -p "$SYSTEM_ROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var,data}
-mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna"
+mkdir -p "$SYSTEM_ROOT/usr/bin" "$SYSTEM_ROOT/usr/sbin" "$SYSTEM_ROOT/usr/lib" "$SYSTEM_ROOT/etc/luna" "$SYSTEM_ROOT/etc/pam.d"
 cp "$BUSYBOX" "$SYSTEM_ROOT/bin/busybox"; chmod 0755 "$SYSTEM_ROOT/bin/busybox"
 for applet in sh ls cat mount umount ps pwd echo clear hostname dmesg mkdir rm; do ln -sf busybox "$SYSTEM_ROOT/bin/$applet"; done
 cp "$RUNTIME" "$SYSTEM_ROOT/sbin/luna-system-runtime"; chmod 0755 "$SYSTEM_ROOT/sbin/luna-system-runtime"; ln -sf luna-system-runtime "$SYSTEM_ROOT/sbin/init"
@@ -80,24 +84,45 @@ luna
 EOF
 cat > "$SYSTEM_ROOT/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/sh
-luna:x:1000:1000:Luna User:/home/luna:/bin/sh
+luna:x:1000:1000:Luna User:/home/luna:/usr/bin/fish
 EOF
 cat > "$SYSTEM_ROOT/etc/group" <<'EOF'
 root:x:0:
 luna:x:1000:
 EOF
 cat > "$SYSTEM_ROOT/etc/profile" <<'EOF'
-export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 export HOME=/home/luna
 export TERM=${TERM:-linux}
+export SHELL=/usr/bin/fish
 EOF
 
 cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
+
+# The desktop payload is responsible for graphical applications. SYSTEM owns
+# only the final identity database entries that are specific to this image.
+if ! grep -q '^luna:' "$SYSTEM_ROOT/etc/passwd"; then
+    printf '%s\n' 'luna:x:1000:1000:Luna User:/home/luna:/usr/bin/fish' >> "$SYSTEM_ROOT/etc/passwd"
+fi
+if ! grep -q '^root:' "$SYSTEM_ROOT/etc/passwd"; then
+    printf '%s\n' 'root:x:0:0:root:/root:/bin/sh' >> "$SYSTEM_ROOT/etc/passwd"
+fi
+if ! grep -q '^greeter:' "$SYSTEM_ROOT/etc/passwd"; then
+    printf '%s\n' 'greeter:x:992:992:Luna Graphical Login:/var/lib/noctalia-greeter:/usr/bin/sh' >> "$SYSTEM_ROOT/etc/passwd"
+fi
+if ! grep -q '^greeter:' "$SYSTEM_ROOT/etc/group"; then
+    printf '%s\n' 'greeter:x:992:' >> "$SYSTEM_ROOT/etc/group"
+fi
+mkdir -p "$SYSTEM_ROOT/var/lib/noctalia-greeter" "$SYSTEM_ROOT/home/luna"
+chown 992:992 "$SYSTEM_ROOT/var/lib/noctalia-greeter"
+chown 1000:1000 "$SYSTEM_ROOT/home/luna"
+chmod 0700 "$SYSTEM_ROOT/home/luna"
+
 cat > "$SYSTEM_ROOT/etc/luna/graphical-login" <<'EOF'
 /usr/bin/luna-login
 EOF
 cat > "$SYSTEM_ROOT/etc/luna/graphical-session" <<'EOF'
-/usr/bin/niri-session
+/usr/bin/luna-run-session
 EOF
 printf 'graphical\n' > "$SYSTEM_ROOT/etc/luna/mode"
 
@@ -157,6 +182,9 @@ image_size=1152MiB
 boot_ui=graphical
 login_ui=/usr/bin/luna-login
 desktop=/usr/bin/niri-session
+shell=/usr/bin/fish
+terminal=/usr/bin/ghostty
+compatibility_shells=/usr/bin/bash,/usr/bin/sh
 verbose_boot=boot-menu-only
 EOF
 sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$OUT/luna-initramfs.img" > "$OUT/SHA256SUMS"
