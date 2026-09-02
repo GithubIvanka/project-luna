@@ -206,7 +206,7 @@ Type=Application
 DesktopNames=niri;
 EOF
 
-cat > "$OUT/etc/luna/greeter.toml" <<'EOF'
+cat > "$OUT/var/lib/noctalia-greeter/greeter.toml" <<'EOF'
 [session]
 default = "Project Luna"
 
@@ -289,9 +289,6 @@ bundle_elf_deps() {
 }
 
 bundle_elf_deps "$OUT"
-
-# PAM modules are loaded by name from configuration, not linked into an ELF.
-# Copy the Unix authentication module and its dependency closure explicitly.
 PAM_UNIX="$(find /usr/lib /lib -path '*/security/pam_unix.so' -print -quit)"
 [ -n "$PAM_UNIX" ] || { echo "pam_unix.so not found on CI host" >&2; exit 1; }
 install -Dm0644 "$PAM_UNIX" "$OUT/${PAM_UNIX#/}"
