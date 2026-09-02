@@ -12,7 +12,7 @@ use uefi::proto::device_path::{DevicePath, DeviceSubType, DeviceType};
 use uefi::proto::loaded_image::LoadedImage;
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::proto::BootPolicy;
-use uefi::{cstr16, Handle};
+use uefi::{cstr16, Handle, Identify};
 
 use crate::error::{BootError, BootResult};
 
