@@ -4,7 +4,6 @@
 //! explicitly requests it during early `luna-boot.efi` startup.
 
 use alloc::string::String;
-use alloc::vec::Vec;
 
 use uefi::boot::ScopedProtocol;
 use uefi::proto::console::text::{Input, Key, Output, ScanCode};
