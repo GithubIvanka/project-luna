@@ -134,21 +134,24 @@ cp "$REPO_ROOT/boot/luna-boot/tests/ovmf/luna-init" "$INIT_ROOT/init"; chmod 075
     find . -print0 | cpio --null -o -H newc --quiet | gzip -9 > "$OUT/luna-initramfs.img"
 )
 
-mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
-chown -R 1000:1000 "$DATA_ROOT/users/luna"
-chmod 0700 "$DATA_ROOT/users/luna/home"
-mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT"  "$OUT/luna-data.img" 512M
-
-# Keep enough room in SYSTEM for the immutable graphical stack and its bundled
-# shared libraries while retaining a full 512 MiB writable DATA partition.
 SYSTEM_SIZE_MIB="${LUNA_SYSTEM_SIZE_MIB:-512}"
 DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-512}"
 IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1280}"
+
+mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
+chown -R 1000:1000 "$DATA_ROOT/users/luna"
+chmod 0700 "$DATA_ROOT/users/luna/home"
+mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "${DATA_SIZE_MIB}M" "$OUT/luna-data.img" 2>/dev/null || mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" "${DATA_SIZE_MIB}M"
+
+# Keep enough room in SYSTEM for the immutable graphical stack and its bundled
+# shared libraries while retaining a full writable DATA partition.
 SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
 DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
 SYSTEM_START=264192
-DATA_START=$((SYSTEM_START + SYSTEM_SECTORS))
-REQUIRED_SECTORS=$((DATA_START + DATA_SECTORS))
+SYSTEM_END=$((SYSTEM_START + SYSTEM_SECTORS - 1))
+DATA_START=$((SYSTEM_END + 1))
+DATA_END=$((DATA_START + DATA_SECTORS - 1))
+REQUIRED_SECTORS=$((DATA_END + 34))
 REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
 [ "$IMAGE_SIZE_MIB" -ge "$REQUIRED_MIB" ] || { echo "image size ${IMAGE_SIZE_MIB} MiB is too small; need at least ${REQUIRED_MIB} MiB" >&2; exit 1; }
 
@@ -168,13 +171,13 @@ arch = "x86_64"
 [kernels]
 compatible = ["$KERNEL_VERSION"]
 EOF
-mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" "$((SYSTEM_SIZE_MIB))"M
+mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" "${SYSTEM_SIZE_MIB}M"
 
 truncate -s "${IMAGE_SIZE_MIB}M" "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
-sgdisk -n 1:2048:+128M -t 1:ef00 -c 1:EFI \
-       -n 2:${SYSTEM_START}:${SYSTEM_START}+${SYSTEM_SECTORS}-1 -t 2:8300 -c 2:SYSTEM \
-       -n 3:${DATA_START}:${DATA_START}+${DATA_SECTORS}-1 -t 3:8300 -c 3:DATA "$OUT/luna-pc.img" >/dev/null
+sgdisk -n "1:2048:$((2048 + 128 * 2048 - 1))" -t 1:ef00 -c 1:EFI \
+       -n "2:${SYSTEM_START}:${SYSTEM_END}" -t 2:8300 -c 2:SYSTEM \
+       -n "3:${DATA_START}:${DATA_END}" -t 3:8300 -c 3:DATA "$OUT/luna-pc.img" >/dev/null
 truncate -s 128M "$OUT/luna-efi.img"
 mkfs.fat -F 32 "$OUT/luna-efi.img" >/dev/null
 mmd -i "$OUT/luna-efi.img" ::/EFI; mmd -i "$OUT/luna-efi.img" ::/EFI/LUNA; mmd -i "$OUT/luna-efi.img" ::/EFI/BOOT
