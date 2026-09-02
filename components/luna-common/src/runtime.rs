@@ -6,9 +6,10 @@
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum RuntimeKind {
     /// Native Luna userspace. The system libc is musl.
+    #[default]
     Luna,
     /// GNU libc compatibility runtime for applications that require glibc.
     Glibc,
@@ -27,12 +28,6 @@ impl RuntimeKind {
 
     pub const fn is_native(self) -> bool {
         matches!(self, Self::Luna)
-    }
-}
-
-impl Default for RuntimeKind {
-    fn default() -> Self {
-        Self::Luna
     }
 }
 
