@@ -29,5 +29,4 @@ members = [
   "components/luna-app-runtime",
   "components/luna-login",
   "components/luna-cli",
-  "boot/luna-boot",
 ]
