@@ -17,3 +17,4 @@ luna-event = { path = "../luna-event" }
 luna-state = { path = "../luna-state" }
 luna-system-manager = { path = "../luna-system-manager" }
 luna-user-session = { path = "../luna-user-session" }
+libc = "0.2"
