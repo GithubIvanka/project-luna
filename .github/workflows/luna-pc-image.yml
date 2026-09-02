@@ -41,8 +41,11 @@ jobs:
             libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
             libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libxml2-dev m4 meson mtools ninja-build \
-            nlohmann-json3-dev pkg-config rustfmt squashfs-tools util-linux \
-            wayland-protocols
+            nlohmann-json3-dev openssl pkg-config rustfmt squashfs-tools \
+            util-linux wayland-protocols
+
+      - name: Prepare development login credential
+        run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
 
       - name: Build Project Luna kernel
         run: tools/build-luna-kernel.sh
