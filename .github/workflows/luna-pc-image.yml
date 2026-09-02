@@ -40,7 +40,7 @@ jobs:
             libseat-dev libsecret-1-dev libsndfile1-dev libsodium-dev \
             libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
             libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
-            libxkbcommon-x11-dev libxml2-dev m4 meson mtools ninja-build \
+            libxkbcommon-x11-dev libxml2-dev m4 meson mtools musl-tools ninja-build \
             network-manager bluez pipewire pipewire-pulse wireplumber \
             libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
             openssl pkg-config rustfmt squashfs-tools util-linux \
@@ -95,11 +95,17 @@ jobs:
           test -x dist/desktop-root/usr/bin/luna-files
           test -L dist/desktop-root/usr/bin/sh
           test -x dist/desktop-root/usr/sbin/NetworkManager
+          test -x dist/desktop-root/usr/bin/nmcli
           test -x dist/desktop-root/usr/libexec/bluetooth/bluetoothd
+          test -x dist/desktop-root/usr/bin/bluetoothctl
           test -x dist/desktop-root/usr/bin/pipewire
           test -x dist/desktop-root/usr/bin/pipewire-pulse
           test -x dist/desktop-root/usr/bin/wireplumber
           test -x dist/desktop-root/usr/bin/pactl
+          test -x dist/desktop-root/usr/bin/dbus-daemon
+          test -x dist/desktop-root/usr/bin/dbus-run-session
+          test -x dist/desktop-root/usr/libexec/udisks2/udisksd
+          test -x dist/desktop-root/usr/bin/udisksctl
           test -d dist/desktop-root/usr/share/noctalia/assets
           test -d dist/desktop-root/var/lib/noctalia-greeter
           test -f dist/desktop-root/etc/pam.d/greetd
@@ -108,6 +114,8 @@ jobs:
           test -f dist/desktop-root/etc/luna/services/network.toml
           test -f dist/desktop-root/etc/luna/services/bluetooth.toml
           test -f dist/desktop-root/etc/luna/services/audio.toml
+          test -f dist/desktop-root/etc/dbus-1/system.conf
+          cat dist/desktop-root/etc/luna/yazi.version
           cat dist/desktop-root/etc/luna/desktop-ready
 
       - name: Build Luna PC image
