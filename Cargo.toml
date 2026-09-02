@@ -1,7 +1,15 @@
-[workspace]
-resolver = "3"
+[package]
+name = "project-luna"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
 
+[dependencies]
+
+[workspace]
+resolver = "2"
 members = [
+  "components/luna",
   "components/luna-common",
   "components/luna-fs",
   "components/luna-root-mapping",
@@ -21,4 +29,5 @@ members = [
   "components/luna-app-runtime",
   "components/luna-login",
   "components/luna-cli",
+  "boot/luna-boot",
 ]
