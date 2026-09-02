@@ -62,6 +62,11 @@ jobs:
       - name: Build complete desktop payload
         run: tools/build-desktop-root.sh
 
+      - name: Add curated Nerd Fonts
+        run: |
+          tools/build-nerd-fonts.sh
+          cp -a dist/nerd-fonts-root/. dist/desktop-root/
+
       - name: Add current Yazi file engine and Luna Files GUI
         env:
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
@@ -111,11 +116,15 @@ jobs:
           test -f dist/desktop-root/etc/pam.d/greetd
           test -f dist/desktop-root/usr/share/wayland-sessions/luna.desktop
           test -f dist/desktop-root/etc/luna/files.toml
+          test -f dist/desktop-root/etc/luna/fonts.toml
+          test -f dist/desktop-root/etc/fonts/conf.d/99-luna-nerd-fonts.conf
           test -f dist/desktop-root/etc/luna/services/network.toml
           test -f dist/desktop-root/etc/luna/services/bluetooth.toml
           test -f dist/desktop-root/etc/luna/services/audio.toml
           test -f dist/desktop-root/etc/dbus-1/system.conf
+          test -n "$(find dist/desktop-root/usr/share/fonts/truetype/luna -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit)"
           cat dist/desktop-root/etc/luna/yazi.version
+          cat dist/desktop-root/etc/luna/fonts.toml
           cat dist/desktop-root/etc/luna/desktop-ready
 
       - name: Build Luna PC image
