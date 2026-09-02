@@ -1,7 +1,7 @@
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -12,7 +12,6 @@ const RESULT: &str = "/run/luna-login/result";
 const GREETD_CONFIG: &str = "/run/luna-login/greetd.toml";
 const GREETD: &str = "/usr/bin/greetd";
 const GREETER_SESSION: &str = "/usr/bin/noctalia-greeter-session";
-const HANDOFF: &str = "/usr/bin/luna-login-handoff";
 
 fn main() {
     if env::args().nth(1).as_deref() == Some("--handoff") {
@@ -66,7 +65,7 @@ fn run_login() -> io::Result<()> {
 
     let _ = greetd.kill();
     let _ = greetd.wait();
-    println!("{value}", value = result.username);
+    println!("uid={} user={}", result.uid, result.username);
     Ok(())
 }
 
@@ -81,7 +80,7 @@ fn write_greetd_config() -> io::Result<()> {
     writeln!(file, "vt = 1")?;
     writeln!(file)?;
     writeln!(file, "[default_session]")?;
-    writeln!(file, "command = \"{GREETER_SESSION}\" ")?;
+    writeln!(file, "command = \"{GREETER_SESSION}\"")?;
     writeln!(file, "user = \"greeter\"")?;
     Ok(())
 }
@@ -107,7 +106,7 @@ fn read_authenticated_result() -> io::Result<Option<AuthenticatedUser>> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid authenticated uid"))?;
     let username = parts
         .next()
-        .filter(|value| !value.is_empty() && !value.contains('\0'))
+        .filter(|value| !value.is_empty() && !value.contains('\0') && !value.contains(':'))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid authenticated username"))?
         .to_owned();
 
@@ -136,7 +135,7 @@ fn write_handoff() -> io::Result<()> {
     let username = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
         .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "authenticated user environment is missing"))?;
-    let uid = libc_getuid();
+    let uid = unsafe { libc::getuid() };
     let expected = username_for_uid(uid)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "authenticated uid has no passwd entry"))?;
     if expected != username {
@@ -149,11 +148,6 @@ fn write_handoff() -> io::Result<()> {
     file.sync_all()?;
     fs::rename(temp, RESULT)?;
     Ok(())
-}
-
-fn libc_getuid() -> u32 {
-    // getuid is provided by libc on every supported Linux target.
-    unsafe { libc::getuid() }
 }
 
 fn set_mode(path: &str, mode: u32) -> io::Result<()> {
