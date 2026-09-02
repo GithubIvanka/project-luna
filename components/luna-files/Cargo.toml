@@ -12,4 +12,4 @@ name = "luna-files"
 path = "src/main.rs"
 
 [dependencies]
-gtk4 = "0.10"
+gtk4 = "0.11.4"
