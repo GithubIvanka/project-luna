@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build-pc-image:
     name: Build x86_64 PC image
@@ -21,20 +25,62 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
 
-      - name: Install image toolchain
+      - name: Install desktop and image toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             busybox-static \
+            build-essential \
+            clang \
             cpio \
+            cmake \
             curl \
+            dbus \
             dosfstools \
             e2fsprogs \
+            file \
             gdisk \
+            git \
             gzip \
-            musl-tools \
+            libboost-all-dev \
+            libcairo2-dev \
+            libdbus-1-dev \
+            libdisplay-info-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgbm-dev \
+            libgles2-mesa-dev \
+            libglib2.0-dev \
+            libgtk-4-dev \
+            libical-dev \
+            libinput-dev \
+            libjxl-dev \
+            libpam0g-dev \
+            libpango1.0-dev \
+            libpipewire-0.3-dev \
+            libseat-dev \
+            libsndfile1-dev \
+            libsodium-dev \
+            libsystemd-dev \
+            libwayland-dev \
+            libwebp-dev \
+            libwlroots-0.20-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            m4 \
+            meson \
             mtools \
-            squashfs-tools
+            ninja-build \
+            nlohmann-json3-dev \
+            pkg-config \
+            rustfmt \
+            squashfs-tools \
+            tomlplusplus-dev \
+            util-linux \
+            wayland-protocols \
+            zig
 
       - name: Build Project Luna kernel
         run: tools/build-luna-kernel.sh
@@ -46,9 +92,30 @@ jobs:
           cat dist/kernel/current/release
           echo "LUNA_KERNEL_VERSION=$(cat dist/kernel/current/release)" >> "$GITHUB_ENV"
 
+      - name: Build complete desktop payload
+        run: tools/build-desktop-root.sh
+
+      - name: Verify desktop payload
+        run: |
+          test -x dist/desktop-root/usr/bin/luna-login
+          test -x dist/desktop-root/usr/bin/niri
+          test -x dist/desktop-root/usr/bin/niri-session
+          test -x dist/desktop-root/usr/bin/noctalia
+          test -x dist/desktop-root/usr/bin/noctalia-greeter
+          test -x dist/desktop-root/usr/bin/greetd
+          test -x dist/desktop-root/usr/bin/ghostty
+          test -x dist/desktop-root/usr/bin/fish
+          test -x dist/desktop-root/usr/bin/bash
+          test -L dist/desktop-root/usr/bin/sh
+          test -d dist/desktop-root/usr/share/noctalia/assets
+          test -f dist/desktop-root/etc/pam.d/greetd
+          test -f dist/desktop-root/usr/share/wayland-sessions/luna.desktop
+          cat dist/desktop-root/etc/luna/desktop-ready
+
       - name: Build Luna PC image
         env:
           LUNA_TEST_KERNEL: ${{ github.workspace }}/dist/kernel/current/bzImage
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
         run: tools/build-pc-image.sh
 
       - name: Inspect generated image
