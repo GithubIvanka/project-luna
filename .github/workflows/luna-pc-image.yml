@@ -23,73 +23,25 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
 
       - name: Install desktop and image toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            busybox-static \
-            build-essential \
-            clang \
-            cpio \
-            cmake \
-            curl \
-            dbus \
-            dosfstools \
-            e2fsprogs \
-            file \
-            fonts-dejavu-core \
-            gdisk \
-            git \
-            gzip \
-            libadwaita-1-dev \
-            libcairo2-dev \
-            libdbus-1-dev \
-            libdisplay-info-dev \
-            libdrm-dev \
-            libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libgbm-dev \
-            libgles2-mesa-dev \
-            libglib2.0-dev \
-            libgtk-4-dev \
-            libical-dev \
-            libinput-dev \
-            libjxl-dev \
-            liblua5.4-dev \
-            libmd4c-dev \
-            libpam0g-dev \
-            libpango1.0-dev \
-            libpipewire-0.3-dev \
-            libpixman-1-dev \
-            libpolkit-agent-1-dev \
-            libpolkit-gobject-1-dev \
-            libqalculate-dev \
-            libseat-dev \
-            libsecret-1-dev \
-            libsndfile1-dev \
-            libsodium-dev \
-            libsdbus-c++-dev \
-            libstb-dev \
-            libsystemd-dev \
-            libtomlplusplus-dev \
-            libudev-dev \
-            libwayland-dev \
-            libwebp-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            libxml2-dev \
-            m4 \
-            meson \
-            mtools \
-            ninja-build \
-            nlohmann-json3-dev \
-            pkg-config \
-            rustfmt \
-            squashfs-tools \
-            util-linux \
+            busybox-static build-essential clang cpio cmake curl dbus \
+            dosfstools e2fsprogs file fonts-dejavu-core gdisk git gzip \
+            libadwaita-1-dev libcairo2-dev libdbus-1-dev libdisplay-info-dev \
+            libdrm-dev libegl1-mesa-dev libfontconfig1-dev libfreetype6-dev \
+            libgbm-dev libgles2-mesa-dev libglib2.0-dev libgtk-4-dev \
+            libical-dev libinput-dev libjxl-dev liblua5.4-dev libmd4c-dev \
+            libpam0g-dev libpango1.0-dev libpipewire-0.3-dev libpixman-1-dev \
+            libpolkit-agent-1-dev libpolkit-gobject-1-dev libqalculate-dev \
+            libseat-dev libsecret-1-dev libsndfile1-dev libsodium-dev \
+            libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
+            libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libxml2-dev m4 meson mtools ninja-build \
+            nlohmann-json3-dev pkg-config rustfmt squashfs-tools util-linux \
             wayland-protocols
 
       - name: Build Project Luna kernel
@@ -97,7 +49,7 @@ jobs:
 
       - name: Verify Project Luna kernel payload
         run: |
-          test -f dist/kernel/current/bzImage || { echo 'Project Luna kernel was not built' >&2; exit 1; }
+          test -f dist/kernel/current/bzImage
           file dist/kernel/current/bzImage
           cat dist/kernel/current/release
           echo "LUNA_KERNEL_VERSION=$(cat dist/kernel/current/release)" >> "$GITHUB_ENV"
