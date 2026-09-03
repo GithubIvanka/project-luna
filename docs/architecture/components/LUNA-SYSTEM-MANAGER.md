@@ -1,25 +1,34 @@
 # `luna-system-manager`
 
-**Status:** accepted boundary; implementation/integration in progress
+**Статус:** boundary/scaffold; durable system model ещё развивается.
 
-## Purpose
-Own the Luna system-domain model and queries describing installed/selected system state.
+## Назначение
 
-## Owns
-- system state model;
-- system-level queries;
-- domain information used by update/boot/runtime clients.
+Предоставляет domain model и запросы к состоянию установленной Luna, не исполняя сами state-changing transactions.
 
-It does not itself become the runtime supervisor.
+## Владеет
 
-## Does not own
-Kernel process execution, UserSession lifecycle, application lifecycle, authorization, raw filesystem I/O or update transaction execution.
+- System Image inventory semantics;
+- system status/query model;
+- представлением current/factory и доступных версий;
+- системными metadata operations, не принадлежащими bootloader.
 
-## Dependencies
-Consumes `luna-state`, System Image metadata contracts and other domain queries as required.
+## Не владеет
 
-## Contract
-System state is durable logical state, distinct from runtime state, boot state and checkpoints. State mutations that are part of an update transaction are executed through `luna-update-manager`.
+UEFI boot, kernel process loading, application lifecycle, Bundle codec или update transaction execution.
 
-## Open
-Final persistent schema, query API and complete integration with System Image registration remain to be hardened.
+## Update boundary
+
+`luna-update-manager` меняет состояние. `luna-system-manager` предоставляет domain-level view этого состояния.
+
+## Зависимости
+
+`luna-state`, image/kernel domain contracts и необходимые shared types.
+
+## Ошибки
+
+Запрос неизвестной сущности должен давать typed not-found/error semantics, а не скрываться пустым результатом, если отсутствие означает нарушение ожидаемого contract.
+
+## Открыто
+
+Полная system inventory model, activation semantics и reconciliation с Boot State.
