@@ -1,29 +1,36 @@
 # `luna-kernel-manager`
 
-**Status:** accepted boundary; kernel build/inventory integration in progress
+**Статус:** inventory/build direction реализованы частично; boot/update integration продолжается.
 
-## Purpose
-Own the Luna kernel domain: inventory, metadata and compatibility queries.
+## Назначение
 
-## Owns
+Ведёт inventory Linux kernels и предоставляет metadata/compatibility semantics для других компонентов.
+
+## Владеет
+
 - kernel inventory;
-- kernel metadata;
-- compatibility queries between kernels and System Images;
-- kernel-domain validation used by update/boot paths.
+- metadata;
+- version comparison;
+- compatibility queries;
+- lifecycle install/remove в рамках kernel domain;
+- подготовкой данных для update path.
 
-## Does not own
-UEFI execution (`luna-boot`), Linux kernel internals, System Image payload creation, runtime process supervision or update transaction orchestration.
+## Не владеет
 
-## Storage
-Kernels live on SYSTEM under `kernels/`. The current implementation builds upstream Linux and records `bzImage`, `System.map`, config and release metadata.
+UEFI handoff, System Image payload, application runtime или System Image update transaction.
 
-Kernel versions are independent from System Image versions.
+## Совместимость
 
-## Dependencies
-System Image metadata, `luna-state`/system manager where required, and kernel build/inventory tooling.
+Совместимость определяется явно отношением image ↔ kernel. Нельзя объявлять kernel совместимым только по версии.
 
-## Contract
-Compatibility must be explicit. The existence of a kernel file does not make it valid for every System Image. Current kernel must not be removed by ordinary cleanup; Factory retains its known-good kernel.
+## Интеграция
 
-## Open
-Final persistent kernel metadata schema and complete boot/update integration remain.
+`luna-boot.efi` использует kernel compatibility information при выборе boot target. `luna-update-manager` оркестрирует изменение состояния, а этот компонент предоставляет domain operations.
+
+## Ошибки
+
+Недействительное или несовместимое ядро не должно становиться active choice. Ошибка установки не должна удалять текущую рабочую версию.
+
+## Открыто
+
+Точная metadata schema, integrity/authenticity, boot-state integration и retention kernels.
