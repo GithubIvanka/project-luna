@@ -1,87 +1,60 @@
-# Project Luna — Документация архитектуры компонентов
+# Архитектура Project Luna
 
-**Статус:** канонический индекс документации компонентов
-**Источник архитектуры:** `docs/ARCHITECTURE.md`
+Эта директория содержит актуальные архитектурные документы Project Luna. Главным источником истины остаётся `docs/ARCHITECTURE.md`.
 
-Назначение этого каталога — дать отдельный, компактный и однозначный документ для каждой архитектурной границы. Благодаря этому разработчику не требуется каждый раз восстанавливать весь контекст из огромного SoT.
-
-## Иерархия источников
+## Как читать документацию
 
 ```text
-docs/ARCHITECTURE.md
-        ↓
-принятые решения / RFC / ADR
-        ↓
-docs/architecture/components/*
-        ↓
-реализация
+ARCHITECTURE.md
+    ↓
+тематические архитектурные документы
+    ↓
+контракты компонентов
+    ↓
+реализация crate/бинарника
 ```
 
-Документ компонента описывает текущий контракт и не имеет права молча создавать новую архитектуру. При конфликте с `docs/ARCHITECTURE.md` сначала устраняется конфликт документации, затем продолжается реализация.
+Документы не должны переопределять принятые решения из Source of Truth.
 
-Исторические phase/archive документы нужны для traceability и не являются источником новых решений.
+## Главные документы
 
-## Физическая и загрузочная архитектура
+- `../ARCHITECTURE.md` — единый текущий Source of Truth;
+- `CRATE-MAP.md` — карта реальных workspace boundaries;
+- `COMPONENT-STATUS.md` — зрелость и состояние компонентов;
+- `DECISION-MAP.md` — навигация по принятым решениям;
+- `DISK-LAYOUT.md` — физическая и логическая модель хранения;
+- `SYSTEM-IMAGE.md` — семантика System Image;
+- `LUNA-BOOT.md` — граница UEFI bootloader;
+- `RECOVERY-FACTORY.md` — Factory/Recovery;
+- `OS-CAPABILITY-GAPS.md` — что ещё необходимо для полноценной PC ОС;
+- `DEVELOPMENT-ROADMAP.md` — порядок дальнейшей реализации.
 
-- `DISK-LAYOUT.md` — EFI / SYSTEM / DATA / SWAP, файловые системы, владельцы и структура хранения.
-- `LUNA-BOOT.md` — `luna-boot.efi`, выбор загрузки, совместимость, fallback и Boot Menu.
-- `SYSTEM-IMAGE.md` — SquashFS System Image, manifest, версии, совместимость с kernel и retention.
-- `RECOVERY-FACTORY.md` — Recovery и Factory среды и их границы.
+## Контракты Phase 0
 
-## Базовые userspace-компоненты
+Черновики находятся в `docs/contracts/`:
 
-- `LUNA-COMMON.md`
-- `LUNA-FS.md`
-- `LUNA-ROOT-MAPPING.md`
-- `LUNA-NAMESPACE.md`
-- `LUNA-CONFIG.md`
-- `LUNA-SECURITY.md`
-- `LUNA-STATE.md`
-- `LUNA-EVENT.md`
-- `LUNA-BUNDLE.md`
+```text
+SYSTEM-IMAGE-CONTRACT.md
+KERNEL-CONTRACT.md
+BOOT-STATE-CONTRACT.md
+BOOT-HANDOFF-CONTRACT.md
+FAILURE-RECOVERY-CONTRACT.md
+```
 
-## Management-компоненты
+Они пока не считаются принятыми архитектурными решениями.
 
-- `LUNA-APP-MANAGER.md`
-- `LUNA-SYSTEM-MANAGER.md`
-- `LUNA-UPDATE-MANAGER.md`
-- `LUNA-KERNEL-MANAGER.md`
-- `LUNA-DEVICE-MANAGER.md`
+## Компоненты
 
-## Runtime / session / login
+`components/` содержит контракт каждого текущего Luna component. Каждый такой файл должен отвечать на одинаковые вопросы:
 
-- `LUNA-SYSTEM-RUNTIME.md`
-- `USER-SESSION.md`
-- `LUNA-APP-RUNTIME.md`
-- `LUNA-LOGIN.md`
+1. зачем нужен компонент;
+2. что ему принадлежит;
+3. чего он не должен делать;
+4. какие входы/выходы и зависимости существуют;
+5. как обрабатываются ошибки;
+6. что уже реализовано;
+7. что остаётся открытым.
 
-## Пользовательские и аппаратные boundary
+## Исторические материалы
 
-- `LUNA-CLI.md`
-- `LUNA-FILES.md`
-- `LUNA-AUDIO.md`
-- `LUNA-NETWORK.md`
-- `LUNA-BLUETOOTH.md`
-
-## Сквозные правила
-
-1. Компонент нельзя придумывать только потому, что реализация стала неудобной.
-2. Linux utility, daemon или helper не становится Luna-компонентом автоматически.
-3. `UserSession` — граница пользовательской сессии. Отдельного `luna-session` или `luna-run-session` нет.
-4. `luna-system-runtime` — единственный системный runtime/supervisor и координирует `UserSession`.
-5. `luna-app-runtime` владеет выполнением и lifecycle `ApplicationInstance`.
-6. Manager владеет состоянием/операциями своего домена; `luna-update-manager` выполняет state-changing update transactions.
-7. `luna-security` владеет authorization policy; mapping и filesystem не выдают права.
-8. `luna-boot.efi` — отдельная UEFI boundary вне обычного userspace workspace.
-9. System Image — SquashFS. `.lbp` — другой формат и не может использоваться вместо System Image.
-10. Новая архитектурная boundary требует принятого решения до её появления в crate map.
-
-## Статусы
-
-- **Принято** — решение явно принято.
-- **Реализовано** — в репозитории есть значимая реализация.
-- **Интеграция** — реализация существует, но цепочка ещё не завершена.
-- **Запланировано** — направление принято, реализация ещё отсутствует.
-- **Открытый вопрос** — решение пока не фиксировано; код не должен его угадывать.
-
-Документы обязаны различать эти статусы.
+`archive/`, phase records, ADR и RFC нужны для трассируемости. Они не являются заменой текущему Source of Truth. Исторические тексты не переписываются только ради перевода, если это разрушит их функцию исторической записи.
