@@ -1,8 +1,8 @@
-//! Storage discovery for Luna's ext4 system partition.
+//! Storage discovery for Luna's ext4 SYSTEM partition.
 
 use crate::block::{parent_disk_handle, UefiBlockDevice};
 use crate::error::BootResult;
-use crate::ext4::Ext4;
+use crate::ext4::{DirEntry, Ext4};
 use crate::gpt::find_system_partition;
 
 pub struct SystemFilesystem {
@@ -22,11 +22,16 @@ impl SystemFilesystem {
     pub fn read_file(&mut self, path: &str) -> BootResult<alloc::vec::Vec<u8>> {
         self.fs.read_file(path)
     }
+
+    pub fn read_dir(&mut self, path: &str) -> BootResult<alloc::vec::Vec<DirEntry>> {
+        self.fs.read_dir(path)
+    }
+
+    pub fn file_exists(&mut self, path: &str) -> BootResult<bool> {
+        self.fs.file_exists(path)
+    }
 }
 
-/// Kept as a named boundary for callers that need to distinguish storage
-/// discovery failures from a missing UEFI ESP. The system partition is not a
-/// SimpleFileSystem volume and is never accessed through UEFI's FAT API.
 pub fn validate_system_filesystem() -> BootResult<()> {
     let _ = SystemFilesystem::open()?;
     Ok(())

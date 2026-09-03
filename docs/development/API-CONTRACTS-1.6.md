@@ -1,10 +1,10 @@
 # Project Luna — API Contracts (Phase 1.6)
 
-**Status:** Foundation/domain baseline implemented
+**Status:** foundation/domain baseline implemented
 **Source of truth:** `docs/ARCHITECTURE.md`
-**Related:** `docs/development/CRATE-MAP-1.6.md`
+**Component contracts:** `docs/architecture/components/`
 
-This document records the current API boundary for the first implementation wave. It defines ownership and stable concepts before OS-specific implementation. Exact Linux mechanisms, IPC transport, serialization formats, and persistence backends remain deferred unless explicitly stated.
+This document records implementation-facing API boundaries. It must not silently redefine architecture.
 
 ## 1. Global rules
 
@@ -14,283 +14,148 @@ This document records the current API boundary for the first implementation wave
 4. Filesystem primitives are not authorization policy.
 5. Logical-root mapping is not authorization.
 6. Configuration lookup is not permission evaluation.
-7. Error types belong to their owning crate unless they are genuinely foundational.
-8. Lower layers must not acquire higher-layer dependencies just for convenience.
-9. GUI and CLI are clients of the same backend contracts.
+7. Error types belong to their owning crate unless genuinely foundational.
+8. Lower layers must not acquire higher-layer dependencies for convenience.
+9. GUI and CLI are clients of backend contracts.
 10. Linux mechanisms are implementation primitives; they do not redefine Luna's domain model.
 
-## 2. `luna-common`
+## 2. Foundation contracts
 
-### Responsibility
-Minimal shared identity/version value types.
+### `luna-common`
 
-### Implemented public types
+Owns minimal shared values such as `BundleId`, `ComponentId`, `RuntimeKind`, `RuntimeSpec`, `UserId` and `Version`.
 
-- `BundleId`
-- `ComponentId`
-- `UserId`
-- `Version`
+Must not contain filesystem operations, security policy, runtime state, configuration storage, IPC transport or subsystem-specific errors.
 
-The identifier types are opaque wrappers around their textual representation. Canonical syntax validation remains with the owning subsystem. `Version` is a small semantic version value with deterministic ordering and formatting.
+### `luna-fs`
 
-### Must not contain
+Owns low-level filesystem primitives and errors. The current boundary includes `FileSystem` operations such as open/create/remove/metadata and a host-backed implementation for early development.
 
-- generic system-wide error enums;
-- filesystem operations;
-- security policy;
-- runtime state;
-- configuration storage;
-- IPC contracts;
-- serialization policy.
+It does not decide authorization, logical mapping, application ownership or Bundle lifecycle.
 
-## 3. `luna-fs`
+### `luna-root-mapping`
 
-### Responsibility
-Low-level filesystem primitives.
+Owns logical/physical path concepts, mapping rules and validated per-namespace mapping tables. File mappings are the default; explicit subtree mappings are allowed for semantic resource classes.
 
-### Implemented boundary
+A mapping is not a security grant.
 
-```rust
-pub trait FileSystem {
-    fn open(&self, path: &Path) -> Result<FileHandle, FsError>;
-    fn create(&self, path: &Path) -> Result<FileHandle, FsError>;
-    fn remove(&self, path: &Path) -> Result<(), FsError>;
-    fn metadata(&self, path: &Path) -> Result<FileMetadata, FsError>;
-}
-```
+### `luna-namespace`
 
-`HostFileSystem` is the initial host-backed implementation used for tests and early development.
+Owns Linux namespace/materialization primitives. Every ApplicationInstance receives an isolated filesystem/mount namespace. Other namespaces are policy-driven. It enforces supplied plans; it does not own authorization.
 
-### Boundary exclusions
+### `luna-config`
 
-`luna-fs` does not decide:
+Owns scoped configuration and layered lookup. Common precedence is user/application override → application default → system default where applicable. It does not authorize changes.
 
-- whether a caller may access a path;
-- which physical path corresponds to a logical path;
-- which files belong to an application;
-- configuration precedence;
-- bundle lifecycle.
+## 3. Policy/state/event contracts
 
-## 4. `luna-root-mapping`
+### `luna-security`
 
-### Responsibility
-Per-namespace logical filesystem mapping.
+Owns principals, resources, permissions, authorization decisions, policy revisions and trust policy. Signature validity, trust and authorization remain separate.
 
-### Implemented concepts
+### `luna-state`
 
-- `LogicalPath`
-- `PhysicalPath`
-- `MappingRule`
-- `MappingTable`
-- `MappingError`
+Owns durable state and atomic revisioned transactions. The first durable backend is `redb`. It does not own boot state, security policy or update orchestration.
 
-A `MappingTable` belongs to one logical namespace. Individual file mappings are the normal case. Explicit whole-directory/subtree mappings are also permitted when required by a semantic mapping class, for example a library subtree such as GTK resources. Directory mappings are therefore not an unrestricted fallback mechanism and must still pass validation/conflict checks.
+### `luna-event`
 
-Example concepts:
+Owns event/subscription domain contracts. Event transport/broker is not fixed by this crate. Event classes and delivery guarantees follow the accepted event contract.
 
-```text
-/bin/app
-    ↓
-DATA/system/apps/example/resources/bin/app
+## 4. `luna-bundle`
 
-/lib/gtk
-    ↓
-DATA/system/apps/example/resources/lib/gtk
-```
+Owns Bundle representation, manifest validation and the accepted RFC-0002 `.lbp`/LBP1 codec.
 
-Each application namespace may have its own mapping table. Authorization is not evaluated here; `luna-security` owns policy.
+RFC-0002 is **Accepted (2026-08-30)**. It defines the transport/archive representation, deterministic payload, integrity and optional Ed25519 signature section. It does not define application lifecycle, namespace construction, Security policy or System Images.
 
-## 5. `luna-config`
+System Images remain SquashFS and are not `.lbp` Bundles.
 
-### Responsibility
-Configuration representation, scoped storage, and layered lookup.
+## 5. `luna-user-session`
 
-### Implemented concepts
+Owns the UserSession domain model and lifecycle transitions. The system runtime owns/co-ordinates session instances.
 
-- `ConfigScope`
-- `ConfigKey`
-- `ConfigValue`
-- `ConfigStore`
-- `MemoryConfigStore`
-- `LayeredConfig`
+Authentication must precede Active state. Multiple UserSessions may coexist. Session policy supports continue, restricted and terminate behavior when a user leaves the active desktop.
 
-### Accepted precedence for application settings
+## 6. Runtime contracts
 
-```text
-User/Application override
-        ↓
-Application default
-        ↓
-System default
-```
+### `luna-system-runtime`
 
-System-wide mutable settings conceptually live under `DATA/system/config`; user/application overrides belong to the relevant user-owned configuration space. The concrete TOML file layout and serialization API are deferred.
+Single system-wide runtime/supervisor. It coordinates UserSessions, supervises processes and owns system runtime state.
 
-`luna-config` does not authorize changes. Security owns authorization.
+It must not be replaced by a separate session manager.
 
-## 6. `luna-security`
+### `luna-app-runtime`
 
-### Responsibility
-Central policy authority.
+Owns ApplicationInstance lifecycle and execution setup. It requires an active UserSession and uses mapping/security/namespace contracts before exec. `RuntimeKind` is a value property of `RuntimeSpec`, not a component.
 
-### Implemented concepts
+### `luna-login`
 
-- `Principal`
-- `Resource`
-- `Permission`
-- `AuthorizationRequest`
-- `Decision`
-- `PolicyAuthority`
+Provides the graphical login integration for the UserSession authentication phase. Current greetd/Noctalia Greeter handoff is an integration stage; final Luna authentication IPC remains open.
 
-The policy layer can evaluate requests involving users, applications, system resources, user data, application data, devices, and volumes.
+## 7. Management contracts
 
-Low-level kernel/filesystem mechanisms still enforce the resulting decision.
+### `luna-app-manager`
 
-No global `root`/`sudo` abstraction is introduced by this crate.
+Owns Bundle installation/import, registration, update/removal/migration and application-data lifecycle controls. It does not own normal application process execution.
 
-## 7. `luna-state`
+### `luna-system-manager`
 
-### Responsibility
-Durable state boundary with atomic transaction and optimistic-concurrency contracts.
+Owns the system-domain model and queries. It does not own runtime supervision or update transaction execution.
 
-### Implemented concepts
+### `luna-update-manager`
 
-- `StateKey`
-- `StateValue`
-- `Revision`
-- `StateMutation`
-- `StateTransaction`
-- `StateError`
-- `StateStore`
+Owns state-changing update transaction execution: prepare → checkpoint → apply → verify → commit, reconciliation and rollback coordination.
 
-`StateStore` remains synchronous. Higher layers own async orchestration and synchronization around store instances.
+### `luna-kernel-manager`
 
-A store exposes a monotonically increasing global `Revision`. A transaction supplies the revision observed by its caller; a mismatch returns `StateError::RevisionConflict` and must not partially apply the transaction. A successful non-empty transaction advances the store revision exactly once. Empty transactions do not advance it.
+Owns kernel inventory, metadata and image/kernel compatibility queries. It does not load kernels; `luna-boot` owns UEFI boot execution.
 
-The contract deliberately does not prescribe a database, WAL, Btrfs snapshot, file format, or other persistence backend. A backend must provide atomic all-or-nothing transaction semantics.
+### `luna-device-manager`
 
-Specialized state remains with its owning subsystem:
+Owns device/volume discovery and lifecycle, including automatic external-volume orchestration.
 
-- boot state → boot subsystem;
-- configuration → `luna-config`;
-- security policy → `luna-security`;
-- system model → `luna-system-manager`.
+## 8. User-facing/service-domain contracts
 
-## 8. `luna-event`
+### `luna-cli`
 
-### Responsibility
-Event-domain contracts.
+Thin client over backend operations. It must not become a second domain manager.
 
-### Implemented concepts
+### `luna-files`
 
-- `EventType`
-- `Event`
-- `EventPublisher`
-- `EventSubscriber`
-- `Subscription`
+GTK4 file-manager client. It consumes filesystem/volume/security-aware backend contracts. Yazi is packaged as current tooling/engine infrastructure; direct `yazi-core` integration is not claimed until implemented.
 
-The crate defines the message contract only. It is not a Kafka clone and does not select the final broker/channel implementation. Tokio remains an accepted higher-level async-runtime direction.
+### `luna-audio`, `luna-network`, `luna-bluetooth`
 
-## 9. `luna-bundle`
+These define Luna-owned domain/provider boundaries. PipeWire/WirePlumber, NetworkManager and BlueZ are implementation infrastructure, not additional Luna components.
 
-### Responsibility
-Internal bundle domain model.
+## 9. Boot boundary
 
-### Implemented concepts
+`luna-boot.efi` is a separate UEFI project outside the ordinary userspace workspace. Its contract is documented in `docs/architecture/LUNA-BOOT.md`.
 
-- `BundleKind`
-- `BundleMetadata`
-- `BundleResource`
-- `BundleManifest`
-- `BundleError`
-- `validate_manifest`
-
-The domain model is separate from `.lbp`. RFC-0002 remains the authority for the future transport/archive representation and is **not accepted as final yet**.
-
-The current resource model explicitly supports the Luna principle that a logical executable such as `/bin/app` can originate from a resource stored deep inside the application bundle.
-
-## 10. `luna-user-session`
-
-### Responsibility
-One user's interactive session as a single domain instance.
-
-### Implemented concepts
-
-- `SessionId`
-- `SessionState`
-- `UserSession`
-- lifecycle transition validation
-
-The architectural hierarchy remains:
+## 10. Dependency direction
 
 ```text
-system-runtime
-├── UserSession A
-│   └── app-runtime
-└── UserSession B
-    └── app-runtime
+luna-common
+    ↑
+foundation / policy / domain crates
+    ↑
+managers
+    ↑
+system-runtime / app-runtime
+    ↑
+CLI / GUI clients
 ```
 
-This is a Luna domain model, not a Linux TTY abstraction.
+Lower layers must not depend upward for convenience.
 
-## 11. Higher-level scaffolds
+## 11. Implementation gate
 
-The following crates remain intentionally at scaffold/ownership-boundary level until their dependent contracts are sufficiently mature:
-
-- `luna-app-manager`
-- `luna-system-manager`
-- `luna-update-manager`
-- `luna-device-manager`
-- `luna-kernel-manager`
-- `luna-system-runtime`
-- `luna-app-runtime`
-- `luna-cli`
-
-Their responsibilities are fixed by `CRATE-MAP.md`, but detailed public APIs should be derived from the already-established lower-level contracts instead of being guessed independently.
-
-## 12. Dependency direction
-
-The first stable direction is:
-
-```text
-                 luna-common
-                /     |     \
-               /      |      \
-          luna-fs  luna-config  luna-security
-             |
-      luna-root-mapping
-
-luna-common → luna-state
-luna-common → luna-event
-luna-common → luna-bundle
-luna-common → luna-user-session
-```
-
-Higher-level managers and runtimes consume these contracts. Lower-level crates do not depend upward on managers or runtimes.
-
-## 13. Implementation gate
-
-A crate may move from scaffold to implementation when its API can answer:
+Before implementing a boundary, its component document must answer:
 
 - what it owns;
 - what it does not own;
-- what its public inputs and outputs are;
-- which errors belong to it;
-- which lower-level crates it may depend on;
-- which persistence and transport details are still deferred.
+- public inputs/outputs;
+- owning error types;
+- allowed lower-level dependencies;
+- deferred persistence/transport details.
 
-## 14. Current implementation status
-
-Completed in this API pass:
-
-- `luna-common` value-type foundation refined;
-- `luna-fs` low-level contract implemented;
-- `luna-root-mapping` logical mapping contract implemented;
-- `luna-config` layered configuration contract implemented;
-- `luna-security` policy contract implemented;
-- `luna-state` persistence boundary implemented with transactions and revision-based conflict detection;
-- `luna-event` event boundary implemented;
-- `luna-bundle` domain model implemented without final `.lbp` wire format;
-- `luna-user-session` lifecycle model implemented.
-
-The next work is to derive the manager/runtime APIs from these contracts and then add integration tests across the boundaries.
+See `docs/development/AI-DEVELOPMENT-RULES.md` for AI-assisted development requirements.

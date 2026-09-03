@@ -1,80 +1,97 @@
 //! Main luna-boot orchestration.
 
 use uefi::boot::{self, open_protocol_exclusive};
-use uefi::proto::console::text::{Input, Output};
+use uefi::proto::console::text::Input;
 
 use crate::boot_key::boot_menu_requested;
-use crate::config::BootConfig;
+use crate::discovery::BootCatalog;
 use crate::error::{BootError, BootResult};
+use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::KernelHandoff;
 use crate::kernel::KernelLoader;
-use crate::menu::{BootMenu, BootSelection};
+use crate::menu::{BootMenu, BootMenuAction, BootSelection};
 use crate::paging::prepare_identity_map;
 use crate::splash;
 use crate::target::BootTarget;
 
 pub fn boot_flow() -> BootResult<()> {
-    let config = BootConfig::default_config();
-
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
     let mut input = open_protocol_exclusive::<Input>(input_handle)?;
     let menu_requested = boot_menu_requested(&mut input);
     drop(input);
 
+    // An external-media request must remain usable even when the internal
+    // SYSTEM filesystem is damaged or absent. Normal boot still requires it.
+    let mut filesystem = match SystemFilesystem::open() {
+        Ok(value) => Some(value),
+        Err(_) if menu_requested => None,
+        Err(error) => return Err(error),
+    };
+
+    let catalog = match filesystem.as_mut() {
+        Some(fs) => BootCatalog::discover(fs).unwrap_or_default(),
+        None => BootCatalog::default(),
+    };
+
     let selection = if menu_requested {
-        let stdout_handle = boot::get_handle_for_protocol::<Output>()?;
+        let stdout_handle = boot::get_handle_for_protocol::<uefi::proto::console::text::Output>()?;
         let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
-        let stdout = open_protocol_exclusive::<Output>(stdout_handle)?;
-        let stdin = open_protocol_exclusive::<Input>(stdin_handle)?;
+        let stdout = open_protocol_exclusive(stdout_handle)?;
+        let stdin = open_protocol_exclusive(stdin_handle)?;
         let mut menu = BootMenu::new(stdout, stdin);
-        menu.show(config.targets())
+        menu.show(&catalog.targets, catalog.default_target)
             .unwrap_or(BootSelection {
-                target_index: config.default_target,
-                verbose: false,
+                action: BootMenuAction::Continue,
+                target_index: catalog.default_target,
             })
     } else {
-        // The splash belongs exclusively to the normal path. Verbose mode is
-        // reachable only through Boot Menu and intentionally leaves the text
-        // console visible for diagnostics.
         splash::show();
         BootSelection {
-            target_index: config.default_target,
-            verbose: false,
+            action: BootMenuAction::Continue,
+            target_index: catalog.default_target,
         }
     };
 
-    let mut target = config
-        .targets()
-        .get(selection.target_index)
-        .ok_or(BootError::TargetNotFound)?
-        .clone();
+    if selection.action == BootMenuAction::ExternalBoot {
+        return boot_first_external();
+    }
 
-    if selection.verbose {
+    let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
+    let mut target = match selection.action {
+        BootMenuAction::Recovery => catalog.recovery.clone().ok_or(BootError::RecoveryUnavailable)?,
+        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported("factory environment is unavailable on this installation"))?,
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => catalog.targets.get(selection.target_index).cloned().ok_or(BootError::TargetNotFound)?,
+        BootMenuAction::ExternalBoot => unreachable!(),
+    };
+
+    if selection.action == BootMenuAction::VerboseBoot {
         target.kernel_cmdline = target
             .kernel_cmdline
             .split_whitespace()
-            .filter(|part| *part != "quiet")
+            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
             .collect::<alloc::vec::Vec<_>>()
             .join(" ");
         target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
     }
 
-    let mut filesystem = SystemFilesystem::open()?;
-    let prepared = match KernelLoader::new(&mut filesystem).prepare(&target) {
-        Ok(kernel) => kernel,
-        Err(primary) => {
-            let factory = config
-                .targets()
-                .iter()
-                .find(|candidate| candidate.is_factory && !candidate.is_recovery)
-                .ok_or(primary)?;
-            if core::ptr::eq(&target, factory) {
-                return Err(primary);
+    let prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
+        KernelLoader::new(filesystem).prepare(&target)
+    } else {
+        match KernelLoader::new(filesystem).prepare(&target) {
+            Ok(value) => Ok(value),
+            Err(primary) => {
+                let mut fallback = None;
+                for candidate in catalog.targets.iter().skip(selection.target_index + 1) {
+                    if let Ok(value) = KernelLoader::new(filesystem).prepare(candidate) {
+                        fallback = Some(value);
+                        break;
+                    }
+                }
+                fallback.ok_or(primary)
             }
-            KernelLoader::new(&mut filesystem).prepare(factory)?
         }
-    };
+    }?;
 
     let page_table = prepare_identity_map()?;
     let mut handoff = KernelHandoff {
@@ -89,10 +106,7 @@ pub fn boot_flow() -> BootResult<()> {
         page_table,
     };
 
-    if !handoff.is_ready() {
-        return Err(BootError::InvalidKernel);
-    }
-
+    if !handoff.is_ready() { return Err(BootError::InvalidKernel); }
     let final_map = unsafe { boot::exit_boot_services(None) };
     handoff.boot_params.set_e820_from_map(&final_map)?;
     unsafe {

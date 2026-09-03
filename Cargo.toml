@@ -1,6 +1,5 @@
 [workspace]
-resolver = "3"
-
+resolver = "2"
 members = [
   "components/luna-common",
   "components/luna-fs",
@@ -19,5 +18,10 @@ members = [
   "components/luna-system-runtime",
   "components/luna-user-session",
   "components/luna-app-runtime",
+  "components/luna-login",
   "components/luna-cli",
+  "components/luna-audio",
+  "components/luna-network",
+  "components/luna-bluetooth",
+  "components/luna-files",
 ]

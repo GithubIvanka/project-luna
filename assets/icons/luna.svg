@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Project Luna</title>
+  <desc id="desc">A simple crescent-moon emblem for Project Luna.</desc>
+  <defs>
+    <linearGradient id="luna" x1="36" y1="32" x2="220" y2="224" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="0.55" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#111827"/>
+  <path fill="url(#luna)" d="M171 35c-39 10-68 45-68 86 0 48 39 87 87 87 12 0 24-2 35-7-17 18-41 29-67 29-52 0-94-42-94-94 0-48 36-87 83-94 8-1 16-2 24-1z"/>
+  <circle cx="169" cy="89" r="7" fill="#f8fafc"/>
+  <circle cx="198" cy="121" r="4" fill="#f8fafc"/>
+  <circle cx="150" cy="145" r="3" fill="#f8fafc"/>
+</svg>

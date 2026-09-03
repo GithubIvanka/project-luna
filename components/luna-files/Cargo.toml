@@ -1,0 +1,15 @@
+[package]
+name = "luna-files"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "luna-files"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = "0.11.4"

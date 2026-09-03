@@ -2,7 +2,7 @@
 
 **Дата:** 2026-09-01  
 **Статус:** accepted implementation decision  
-**Branch:** `integration/gui-boot-session`  
+**Branch:** `development`  
 **Architectural Source of Truth:** `docs/ARCHITECTURE.md`
 
 ## 1. Normal boot is graphical
@@ -51,8 +51,6 @@ TTY/serial remains a development, diagnostic and recovery facility only.
 
 The normal boot path shows a minimal graphical Luna splash through UEFI GOP. The splash is intentionally tiny and uses only UEFI boot-time facilities; it does not become a desktop or GUI framework.
 
-UEFI GOP is used because the firmware exposes a graphics framebuffer and drawing operations through the Graphics Output Protocol. The implementation therefore stays inside `luna-boot.efi` and does not require Linux to be running first.
-
 ## 4. Verbose Boot
 
 Verbose Boot is a Boot Menu action, not a separate boot target and not a normal operating mode.
@@ -71,13 +69,24 @@ full boot/kernel diagnostics
 
 Verbose mode removes `quiet`, raises the kernel log level and enables `ignore_loglevel` for the selected boot. The text console remains visible throughout the diagnostic boot path.
 
-Normal boot keeps the quiet console parameters and shows the graphical splash.
+Normal boot keeps the quiet boot parameters and shows the graphical splash.
 
 ## 5. Boot Menu
 
 `B` remains the only normal entry into Boot Menu. The menu is a special pre-OS control surface and is allowed to be text based. It is not the normal user interface.
 
-The menu currently exposes the normal Luna target and the Verbose Boot action. Recovery/factory/external-media entries remain future target-management work and are not silently invented as implemented features.
+The accepted action order is:
+
+```text
+1. Continue to Luna
+2. Verbose Boot
+3. System Image selection
+4. Recovery Environment
+5. Factory Environment
+6. Boot from USB / External Device
+```
+
+The development implementation discovers normal System Images from SYSTEM metadata and represents Recovery, Factory and External Boot as typed menu actions. Recovery and Factory are executed when their corresponding System Image targets are present; an unavailable mode is reported as unavailable rather than replaced by a fake target or TTY fallback.
 
 ## 6. Graphical login contract
 
@@ -102,7 +111,7 @@ This process-exit handshake is a Phase 2 integration contract. The final product
 
 ## 7. No shell fallback in graphical PC images
 
-The PC image builder no longer creates `/usr/bin/luna-session`, `/etc/luna/session` or a graphical-to-shell fallback.
+The PC image builder must not create `/usr/bin/luna-session`, `/etc/luna/session` or a graphical-to-shell fallback.
 
 A graphical PC image requires a prepared desktop root containing at least:
 

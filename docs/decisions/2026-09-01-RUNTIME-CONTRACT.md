@@ -1,126 +1,147 @@
 # Project Luna — Typed Runtime Contract
 
 **Дата:** 2026-09-01  
-**Статус:** принято / реализовано в development integration branch  
+**Статус:** принято / реализовано  
 **Архитектурный SoT:** `docs/ARCHITECTURE.md`
 
-## 1. Цель
+## 1. Purpose
 
-Решение из `docs/decisions/2026-09-01-LIBC-AND-INIT.md` переводится из концептуальной модели в typed Rust contract.
+The runtime contract describes the execution environment selected for an `ApplicationInstance`. It does not add another architectural subsystem to Luna.
 
-A runtime environment is represented by:
+The typed value is:
 
 ```text
 RuntimeKind
-  ├── Luna
-  ├── Glibc
-  └── Bundle
+├── Luna
+├── Glibc
+└── Bundle
 ```
 
-and by `RuntimeSpec`, which currently contains the selected `RuntimeKind` only.
+`RuntimeSpec` currently contains the selected `RuntimeKind`.
 
-## 2. Ownership
+## 2. Runtime hierarchy vs execution pipeline
 
-`luna-common` contains only the shared runtime value types because they are consumed across subsystem boundaries. It does **not** own runtime storage, installation, lifecycle, policy or Linux namespace materialization.
+These are deliberately different concepts.
 
-Ownership remains:
+### Ownership hierarchy
+
+```text
+luna-system-runtime
+├── UserSession A
+│   └── luna-app-runtime
+│       └── ApplicationInstance(s)
+└── UserSession B
+    └── luna-app-runtime
+        └── ApplicationInstance(s)
+```
+
+This is the architectural ownership hierarchy. `luna-system-runtime` remains the single system-wide runtime/supervisor; `UserSession` is the combined user/session entity; `luna-app-runtime` owns ApplicationInstance lifecycle and execution setup.
+
+### Application execution pipeline
+
+```text
+ApplicationInstance
+    ↓
+Bundle/resource declarations
+    ↓
+luna-root-mapping
+    ↓
+luna-security
+    ↓
+luna-namespace
+    ↓
+process execution
+    ↓
+luna-system-runtime supervision
+```
+
+This pipeline is not a second hierarchy. The system runtime remains the owner of process supervision even when the application runtime prepares an individual execution environment.
+
+## 3. RuntimeKind semantics
+
+`RuntimeKind` is a small typed value carried by the application execution contract. It is not a manager, daemon, service or independent process boundary.
+
+```text
+RuntimeKind::Luna   → native Luna userspace / musl
+RuntimeKind::Glibc  → approved glibc compatibility environment
+RuntimeKind::Bundle → Bundle-private runtime where permitted
+```
+
+The selected runtime is an attribute of the ApplicationInstance execution environment.
+
+One process uses one libc/runtime environment. Different ApplicationInstances may use different runtime kinds concurrently.
+
+## 4. Ownership
+
+The ownership boundaries remain:
 
 ```text
 luna-common
-    ↓ typed RuntimeKind / RuntimeSpec
-luna-root-mapping
-    ↓ runtime-bound logical mapping plan
-luna-security
-    ↓ authorization of Runtime(kind) + Use
+    ↓ shared RuntimeKind / RuntimeSpec value types only
 luna-app-runtime
-    ↓ execution selection / ApplicationInstance
+    ↓ ApplicationInstance lifecycle and execution setup
+luna-root-mapping
+    ↓ logical mapping semantics
+luna-security
+    ↓ authorization policy
 luna-namespace
-    ↓ Linux materialization
+    ↓ Linux namespace/materialization
 luna-system-runtime
-    ↓ process supervision
+    ↓ process supervision and UserSession orchestration
 ```
 
-## 3. Mapping contract
+There is **no separate generic `luna-runtime` crate or runtime daemon**.
 
-A `MappingTable` may be runtime-neutral while it is being assembled. Once a runtime is bound, the mapping accepts only that exact runtime kind.
+## 5. Mapping and security
 
-Changing:
+A runtime selection does not grant access by itself.
 
-```text
-Glibc → Luna
-```
-
-or any other runtime transition on an accepted mapping plan is rejected.
-
-The mapping layer still does not know physical glibc/musl storage layout.
-
-## 4. Security contract
-
-Runtime use is represented as a normal Security resource:
+The normal order is:
 
 ```text
-Resource::Runtime(RuntimeKind)
-Permission::Use
-```
-
-A runtime declaration therefore does not grant itself access. The selected runtime must be authorized by `luna-security` before namespace materialization/execution.
-
-The application principal is used for the runtime request.
-
-## 5. Application runtime contract
-
-`ApplicationInstance` stores its selected `RuntimeSpec` for its entire lifecycle.
-
-The runtime-aware launch path validates:
-
-1. Bundle validity;
-2. mapping/runtime agreement;
-3. runtime authorization;
-4. other requested resource authorizations;
-5. namespace materialization.
-
-This preserves the required ordering:
-
-```text
-runtime selection
+runtime attribute
     ↓
 mapping validation
     ↓
-security authorization
+Security authorization
     ↓
 namespace materialization
     ↓
-process execution
+execution
 ```
 
-## 6. Compatibility
+`luna-security` remains the central policy authority. Runtime use can be represented as `Resource::Runtime(RuntimeKind)` with `Permission::Use` when the selected runtime is a protected resource.
 
-Existing callers that do not explicitly select a runtime continue to use:
+Mapping declarations remain requests, not grants.
+
+## 6. ApplicationInstance
+
+`ApplicationInstance` stores its selected `RuntimeSpec` for its lifecycle. The system runtime owns global `ApplicationInstanceId` uniqueness; the application runtime owns the individual instance lifecycle after creation.
+
+The runtime selection therefore follows the existing hierarchy:
 
 ```text
-RuntimeKind::Luna
+luna-system-runtime
+    ↓
+UserSession
+    ↓
+luna-app-runtime
+    ↓
+ApplicationInstance { RuntimeSpec }
 ```
-
-as the default. This is transitional API compatibility, not permission bypass. Security-aware execution still requires the normal runtime authorization request.
 
 ## 7. Manifest boundary
 
-The accepted runtime taxonomy is now typed in Rust, but the final RFC-0002 TOML manifest field for runtime selection is intentionally **not** introduced by this decision. That schema requires a dedicated Bundle/RFC compatibility decision.
-
-The future manifest layer will map its validated value onto `RuntimeSpec` rather than introduce a second free-form runtime string throughout the runtime subsystem.
+The final RFC-0002 TOML field for runtime selection is not defined by this decision. A future Bundle/RFC decision must map validated manifest data onto `RuntimeSpec` without introducing a second free-form runtime subsystem.
 
 ## 8. libc rules
 
-This contract does not change the accepted libc architecture:
+- `Luna` uses musl for the native system userspace.
+- `Glibc` is an optional managed compatibility environment for applications that require glibc ABI/runtime behavior.
+- `Bundle` may supply a private runtime where policy allows.
+- libc environments must not be mixed arbitrarily inside one process.
+- Runtime isolation is implemented using the existing mapping/security/namespace architecture, not a new generic runtime manager.
 
-- `RuntimeKind::Luna` → native Luna userspace, musl;
-- `RuntimeKind::Glibc` → approved glibc compatibility runtime;
-- `RuntimeKind::Bundle` → Bundle-private runtime where permitted.
+## 9. Implementation boundary
 
-One process uses one libc environment. Different processes may use different runtime kinds concurrently.
-
-## 9. Current implementation boundary
-
-The current Linux launcher still uses the existing development `pre_exec` namespace hook. This is unchanged by this contract and remains a production-hardening item.
-
-The contract therefore establishes the semantic runtime boundary first; concrete runtime filesystem layout and production-safe child creation remain subsequent implementation work.
+The current Linux application launcher may still use its development namespace child-setup mechanism. That is an implementation-hardening issue, not a reason to introduce another architectural component.
