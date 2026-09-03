@@ -1,35 +1,34 @@
-# Project Luna — Architecture Component Documentation
+# Project Luna — Документация архитектуры компонентов
 
-**Status:** canonical component-documentation index
-**Authority:** `docs/ARCHITECTURE.md`
-**Purpose:** provide a small, stable document for each architectural boundary so development can happen component-by-component without reconstructing the whole SoT.
+**Статус:** канонический индекс документации компонентов
+**Источник архитектуры:** `docs/ARCHITECTURE.md`
 
-## Authority model
+Назначение этого каталога — дать отдельный, компактный и однозначный документ для каждой архитектурной границы. Благодаря этому разработчику не требуется каждый раз восстанавливать весь контекст из огромного SoT.
+
+## Иерархия источников
 
 ```text
 docs/ARCHITECTURE.md
         ↓
-accepted decisions / RFCs
+принятые решения / RFC / ADR
         ↓
 docs/architecture/components/*
         ↓
-implementation
+реализация
 ```
 
-A component document describes the current contract. It does not silently create a new architecture. If a document conflicts with `docs/ARCHITECTURE.md`, the conflict is a documentation defect that must be resolved before implementation continues.
+Документ компонента описывает текущий контракт и не имеет права молча создавать новую архитектуру. При конфликте с `docs/ARCHITECTURE.md` сначала устраняется конфликт документации, затем продолжается реализация.
 
-Historical phase documents and superseded ADR material remain traceability only.
+Исторические phase/archive документы нужны для traceability и не являются источником новых решений.
 
-## Component documentation
+## Физическая и загрузочная архитектура
 
-### Physical / boot architecture
+- `DISK-LAYOUT.md` — EFI / SYSTEM / DATA / SWAP, файловые системы, владельцы и структура хранения.
+- `LUNA-BOOT.md` — `luna-boot.efi`, выбор загрузки, совместимость, fallback и Boot Menu.
+- `SYSTEM-IMAGE.md` — SquashFS System Image, manifest, версии, совместимость с kernel и retention.
+- `RECOVERY-FACTORY.md` — Recovery и Factory среды и их границы.
 
-- `DISK-LAYOUT.md` — EFI / SYSTEM / DATA / SWAP, filesystems, ownership and on-disk layout.
-- `LUNA-BOOT.md` — UEFI loader, boot selection, compatibility, fallback and menu contract.
-- `SYSTEM-IMAGE.md` — SquashFS System Image, manifest, versioning, kernel compatibility and retention.
-- `RECOVERY-FACTORY.md` — Recovery and Factory environments and their boundaries.
-
-### Core userspace boundaries
+## Базовые userspace-компоненты
 
 - `LUNA-COMMON.md`
 - `LUNA-FS.md`
@@ -41,7 +40,7 @@ Historical phase documents and superseded ADR material remain traceability only.
 - `LUNA-EVENT.md`
 - `LUNA-BUNDLE.md`
 
-### Management
+## Management-компоненты
 
 - `LUNA-APP-MANAGER.md`
 - `LUNA-SYSTEM-MANAGER.md`
@@ -49,14 +48,14 @@ Historical phase documents and superseded ADR material remain traceability only.
 - `LUNA-KERNEL-MANAGER.md`
 - `LUNA-DEVICE-MANAGER.md`
 
-### Runtime / session / login
+## Runtime / session / login
 
 - `LUNA-SYSTEM-RUNTIME.md`
 - `USER-SESSION.md`
 - `LUNA-APP-RUNTIME.md`
 - `LUNA-LOGIN.md`
 
-### User-facing / hardware service boundaries
+## Пользовательские и аппаратные boundary
 
 - `LUNA-CLI.md`
 - `LUNA-FILES.md`
@@ -64,25 +63,25 @@ Historical phase documents and superseded ADR material remain traceability only.
 - `LUNA-NETWORK.md`
 - `LUNA-BLUETOOTH.md`
 
-## Cross-cutting rules
+## Сквозные правила
 
-1. No component may be invented because an implementation is inconvenient.
-2. A Linux utility, daemon or helper is not automatically a Luna architectural component.
-3. `UserSession` is the session boundary. There is no separate `luna-session` or `luna-run-session` component.
-4. `luna-system-runtime` is the single system-wide runtime/supervisor and coordinates UserSessions.
-5. `luna-app-runtime` owns ApplicationInstance execution and lifecycle.
-6. Managers own domain state-changing operations; update-manager owns update transaction execution.
-7. `luna-security` owns authorization policy. Mapping and filesystem layers do not grant permissions.
-8. `luna-boot.efi` is a separate UEFI boundary, outside the ordinary userspace workspace.
-9. System Image is SquashFS. `.lbp` is a different format and must never be substituted for a System Image.
-10. New architectural boundaries require an accepted decision before they become part of the component map.
+1. Компонент нельзя придумывать только потому, что реализация стала неудобной.
+2. Linux utility, daemon или helper не становится Luna-компонентом автоматически.
+3. `UserSession` — граница пользовательской сессии. Отдельного `luna-session` или `luna-run-session` нет.
+4. `luna-system-runtime` — единственный системный runtime/supervisor и координирует `UserSession`.
+5. `luna-app-runtime` владеет выполнением и lifecycle `ApplicationInstance`.
+6. Manager владеет состоянием/операциями своего домена; `luna-update-manager` выполняет state-changing update transactions.
+7. `luna-security` владеет authorization policy; mapping и filesystem не выдают права.
+8. `luna-boot.efi` — отдельная UEFI boundary вне обычного userspace workspace.
+9. System Image — SquashFS. `.lbp` — другой формат и не может использоваться вместо System Image.
+10. Новая архитектурная boundary требует принятого решения до её появления в crate map.
 
-## Status vocabulary
+## Статусы
 
-- **Accepted** — architecture/contract is explicitly accepted.
-- **Implemented** — repository contains a meaningful implementation of the accepted contract.
-- **Integration** — implementation exists but integration is incomplete.
-- **Planned** — accepted direction, not yet implemented.
-- **Open** — decision is not fixed; implementation must not guess it.
+- **Принято** — решение явно принято.
+- **Реализовано** — в репозитории есть значимая реализация.
+- **Интеграция** — реализация существует, но цепочка ещё не завершена.
+- **Запланировано** — направление принято, реализация ещё отсутствует.
+- **Открытый вопрос** — решение пока не фиксировано; код не должен его угадывать.
 
-A component document must distinguish these states instead of presenting planned behavior as implemented behavior.
+Документы обязаны различать эти статусы.
