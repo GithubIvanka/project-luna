@@ -1,17 +1,18 @@
 # `UserSession`
 
-**Status:** implemented domain/lifecycle model
+**Статус:** domain/lifecycle model реализована; production integration продолжается.
 
-## Purpose
-Represent one user's interactive session as a single Luna domain entity.
+## Назначение
 
-## Ownership
-`UserSession` is the session boundary and is owned/coordinated by `luna-system-runtime`. It is not a separate session manager process.
+`UserSession` представляет одну интерактивную пользовательскую сессию как единую Luna domain entity.
 
-## State
-The current implementation models session identity, user identity, session state and login state. Authentication must precede Active state.
+## Владение
 
-Conceptually:
+`UserSession` — session boundary, которую владеет и координирует `luna-system-runtime`. Это не отдельный процесс session manager.
+
+## Состояния
+
+Модель должна различать identity пользователя, session state и login/authentication state.
 
 ```text
 Starting
@@ -25,13 +26,12 @@ Restricted / Ending
 Ended
 ```
 
-Login failure/cancellation must not activate the session.
+Login failure или cancellation никогда не переводят session в `Active`.
 
-## Desktop relationship
-GUI/Desktop session belongs to the UserSession lifecycle. The accepted graphical path is:
+## Desktop
 
 ```text
-system-runtime
+luna-system-runtime
  ↓
 UserSession
  ↓
@@ -48,14 +48,20 @@ niri
 Noctalia
 ```
 
-## Application relationship
-A UserSession may own multiple application-runtime activities. `luna-app-runtime` receives the session identity/boundary when launching ApplicationInstances.
+`niri-session` здесь implementation detail, а не новый Luna component.
 
-## Multi-user behavior
-Multiple UserSessions may coexist. When a user leaves the active desktop, application behavior is independently configurable: continue, remain alive but restricted, or terminate. Default is restricted.
+## Приложения
 
-## Does not own
-Application execution implementation, system-wide process supervision, authentication policy authority, bootloader behavior or GUI toolkit implementation.
+Одна UserSession может иметь несколько application runtime activities. `luna-app-runtime` получает session boundary при запуске ApplicationInstance.
 
-## Open
-Full session switching/restriction enforcement, logout/re-authentication and production authentication IPC remain integration work.
+## Несколько пользователей
+
+Несколько UserSessions могут существовать одновременно. При уходе пользователя из активного desktop application behavior определяется policy; допустимы продолжение, restricted lifetime или завершение. Default restriction должен быть явным policy, а не побочным эффектом UI.
+
+## Не владеет
+
+Application execution implementation, system-wide supervision, authorization policy, bootloader behavior или GUI toolkit.
+
+## Открыто
+
+Session switching, restriction enforcement, logout/re-authentication и production authentication IPC.
