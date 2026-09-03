@@ -56,9 +56,16 @@ rm -rf "$SYSTEM_ROOT" "$INIT_ROOT" "$DATA_ROOT" "$WORK/system-partition"
 rm -f "$OUT"/luna-pc.img "$OUT"/luna-efi.img "$OUT"/luna-system.img "$OUT"/luna-data.img "$OUT"/luna-initramfs.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/BUILD-INFO "$OUT"/SHA256SUMS
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
+cargo build --release --manifest-path "$REPO_ROOT/components/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
+LUNA_INIT="$REPO_ROOT/components/luna-init/target/$RUNTIME_TARGET/release/luna-init"
+if [ ! -x "$LUNA_INIT" ]; then
+    LUNA_INIT="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-init"
+fi
 [ -x "$RUNTIME" ] || { echo "runtime binary was not produced: $RUNTIME" >&2; exit 1; }
+[ -x "$LUNA_INIT" ] || { echo "luna-init binary was not produced: $LUNA_INIT" >&2; exit 1; }
 file "$RUNTIME" | grep -q 'statically linked' || { echo "luna-system-runtime is not statically linked; refusing to build PC image" >&2; exit 1; }
+file "$LUNA_INIT" | grep -q 'statically linked' || { echo "luna-init is not statically linked; refusing to build PC image" >&2; exit 1; }
 
 cargo build --release -p luna-login
 LOGIN="$REPO_ROOT/target/release/luna-login"
@@ -107,7 +114,6 @@ export SHELL=/usr/bin/fish
 EOF
 
 cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
-# Старый wrapper не является частью принятой архитектуры UserSession.
 rm -f "$SYSTEM_ROOT/usr/bin/luna-run-session"
 
 rm -rf "$SYSTEM_ROOT/home"
@@ -130,7 +136,7 @@ mksquashfs "$SYSTEM_ROOT" "$OUT/luna-${LUNA_VERSION}.squashfs" -noappend -comp z
 
 mkdir -p "$INIT_ROOT"/{bin,dev,proc,sys,run,newroot}
 cp "$BUSYBOX" "$INIT_ROOT/bin/busybox"; chmod 0755 "$INIT_ROOT/bin/busybox"
-cp "$REPO_ROOT/boot/luna-boot/tests/ovmf/luna-init" "$INIT_ROOT/init"; chmod 0755 "$INIT_ROOT/init"
+cp "$LUNA_INIT" "$INIT_ROOT/init"; chmod 0755 "$INIT_ROOT/init"
 (
     cd "$INIT_ROOT"
     find . -print0 | cpio --null -o -H newc --quiet | gzip -9 > "$OUT/luna-initramfs.img"

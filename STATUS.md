@@ -1,6 +1,6 @@
 # Project Luna — Status
 
-Last updated: 2026-09-01
+Last updated: 2026-09-03
 
 > `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and subsequent accepted decisions are consolidated there. Dated decision records under `docs/decisions/` preserve implementation history and boundaries.
 
@@ -8,14 +8,14 @@ Last updated: 2026-09-01
 
 Project Luna has completed the architecture decision cycle through **Phase 1.1–1.6-HZ** and is in **Phase 2 runtime/boot integration, PC bring-up, desktop integration and hardening**.
 
-The Phase 2 stacked integration chain was consolidated into `main` as commit `9013a8efb305c1b98587b0fc356cf79e473dcd39`. New work continues from the single `development` branch.
+The Phase 2 integration baseline is consolidated in `main`; current native-init work is now part of the mainline boot path.
 
 ### Phase status
 
 | Area | Status |
 |---|---|
 | Architecture 1.1–1.6-HZ | Accepted and consolidated |
-| Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth |
+| Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth and decision records |
 | Foundation/domain APIs | Implemented baseline |
 | Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
 | Typed runtime contract | `RuntimeKind` / `RuntimeSpec` implemented as ApplicationInstance execution properties |
@@ -27,10 +27,11 @@ The Phase 2 stacked integration chain was consolidated into `main` as commit `90
 | Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
 | `luna-system-runtime` | Real child supervision and UserSession lifecycle ownership implemented |
 | `luna-app-runtime` | ApplicationInstance lifecycle and execution setup implemented |
+| `luna-init` | Native musl early-userspace bootstrap implemented; packaged as `/init` in initramfs |
 | `luna-boot.efi` | GUI splash; dynamic SYSTEM image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
 | Recovery / Factory boot | Metadata-role discovery and target execution implemented; final recovery tooling/repair UX remains |
 | External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend implemented |
-| x86_64 PC image | Reproducible GPT/UEFI development image builder implemented |
+| x86_64 PC image | Reproducible GPT/UEFI development image builder implemented; native initramfs uses `luna-init` |
 | Graphical desktop | UserSession login boundary exists; final niri + Noctalia payload/seat/device integration remains |
 
 ## Boot and user experience
@@ -146,6 +147,24 @@ RuntimeKind::Bundle → Bundle-private runtime
 
 There is no generic `luna-runtime` crate or daemon.
 
+## System initialization
+
+```text
+Linux kernel
+    ↓
+initramfs
+    ↓
+/init = luna-init
+    ↓
+prepare SYSTEM + DATA + selected System Image
+    ↓
+switch_root
+    ↓
+/sbin/init = luna-system-runtime
+```
+
+`luna-init` is a standalone early-userspace binary and is intentionally outside the normal Cargo workspace. It is built explicitly for `x86_64-unknown-linux-musl` and must be statically linked for PC/QEMU images.
+
 ## Current implementation sequence
 
 1. Validate the complete PC image in QEMU/OVMF and on real UEFI hardware.
@@ -168,5 +187,5 @@ docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
 docs/decisions/2026-09-01-BOOT-DISCOVERY.md
 docs/decisions/2026-09-01-GIT-WORKFLOW.md
 docs/decisions/2026-09-01-MAIN-PROTECTION.md
-docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
+docs/decisions/2026-09-01-LIBC-INIT.md
 ```
