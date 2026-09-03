@@ -1,51 +1,100 @@
-# Project Luna — Rust Learning Rules
+# Project Luna — правила изучения Rust
 
-The project is being developed in Rust by a developer who already has some Python experience but is learning Rust.
+Project Luna разрабатывается на Rust. Эти правила нужны для того, чтобы код одновременно двигал проект вперёд и помогал понимать Rust.
 
-## Rule 1 — Explain the code
+## Правило 1 — объяснять код
 
-When providing or creating Rust code for Luna, explain the important parts instead of treating the code as a black box.
+При создании или изменении Rust-кода нужно объяснять существенные части:
 
-At minimum, explain:
+- что представляет каждый важный тип;
+- где важны ownership и borrowing;
+- почему выбран `struct` или `enum`;
+- зачем используются `Result` и `Option`;
+- где применяются traits;
+- где lifetimes действительно влияют на дизайн;
+- как разделены modules и crate boundaries;
+- почему выбран конкретный механизм Rust.
 
-- what each important type represents;
-- ownership and borrowing where relevant;
-- `struct` / `enum` choices;
-- `Result` / `Option`;
-- traits when they are used;
-- lifetimes when they materially affect the design;
-- modules and crate boundaries;
-- why a particular Rust mechanism was chosen.
+Не следует скрывать существенную механику за сложными абстракциями без необходимости.
 
-## Rule 2 — Prefer learning over magic
+## Правило 2 — обучение важнее магии
 
-Do not hide important Rust concepts behind unnecessarily clever abstractions.
+Если есть простой и понятный вариант реализации и более хитрый, но короткий вариант с тем же качеством, во время изучения Rust предпочтителен понятный вариант.
 
-If a concise but advanced implementation and a slightly longer educational implementation are both reasonable, prefer the educational one while the project is still being learned.
+## Правило 3 — сравнение с Python
 
-## Rule 3 — Relate Rust to Python when useful
+Когда это действительно помогает понять концепцию, можно сравнить её с ближайшим понятием Python. Такое сравнение только объясняет идею; семантика Rust остаётся основной.
 
-When it clarifies a concept, compare it to the closest Python concept. The comparison is explanatory only; Rust's semantics remain primary.
+## Правило 4 — архитектура прежде реализации
 
-## Rule 4 — Architecture before implementation
+Не следует писать большой объём Rust-кода до согласования соответствующей архитектуры и интерфейса.
 
-Do not write large amounts of implementation code before the corresponding Luna architecture and interface are agreed.
+Приоритет:
 
-The existing Source of Truth explicitly prioritizes:
+```text
+Architecture
+  ↓
+RFC / ADR
+  ↓
+Format
+  ↓
+Interfaces
+  ↓
+Prototype
+  ↓
+Implementation
+  ↓
+Integration
+```
 
-Architecture → RFC → Format → Interfaces → Prototype → Implementation → Integration
+## Правило 5 — сохранять ответственность crate
 
-## Rule 5 — Preserve crate responsibility
+Каждый crate должен иметь ясную причину существования и собственную ответственность.
 
-Every Rust crate must have a clear reason to exist.
+Текущие архитектурные границы перечислены в `docs/architecture/COMPONENT-STATUS.md` и `docs/architecture/CRATE-MAP.md`.
 
-Existing workspace components include:
+Новый crate добавляется только тогда, когда он создаёт реальную границу ответственности. Нельзя добавлять crate лишь для удобства структуры кода или как место для случайно связанных функций.
 
-- `luna`
-- `luna-common`
-- `luna-log`
-- `luna-fs`
-- `luna-bundle`
-- `luna-config`
+## Правило 6 — не обходить владельца
 
-New crates should be introduced only when they establish a real architectural boundary.
+Если функция уже принадлежит существующему компоненту, реализация должна оставаться внутри его границы. Linux helper, daemon или library не становятся новым Luna-компонентом автоматически.
+
+Отдельного `luna-session`, `luna-runtime` или `luna-run-session` нет.
+
+## Правило 7 — честно разделять статусы
+
+Нужно различать:
+
+- принятое архитектурное решение;
+- реализованную границу;
+- интеграцию;
+- запланированную работу;
+- открытый вопрос.
+
+Placeholder, wrapper или установленный пакет не доказывают интеграцию.
+
+## Правило 8 — проверять код
+
+Перед завершением изменения:
+
+```text
+format
+  ↓
+check
+  ↓
+test
+  ↓
+clippy
+  ↓
+target-specific build
+  ↓
+архитектурная проверка diff
+```
+
+При падении CI нужно смотреть конкретный шаг и лог, воспроизводить проблему по возможности и исправлять минимально необходимым изменением.
+
+## Правило 9 — язык документации
+
+Текущая документация Project Luna пишется на русском языке.
+
+Без перевода допускаются имена файлов, crate, функций, типов, программ, команд и официальные названия внешних проектов.
