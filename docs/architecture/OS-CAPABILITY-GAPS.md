@@ -1,24 +1,24 @@
-# Project Luna — OS Capability Gap Map
+# Project Luna — карта недостающих возможностей ОС
 
-**Status:** planning baseline
-**Authority:** current architecture and accepted decisions
+**Статус:** актуальная planning baseline.  
+**Источник:** текущая архитектура и принятые решения.
 
-This document answers a different question from the component contracts: which capabilities are still needed before Luna can reasonably be called a complete daily-use PC operating system.
+Этот документ отвечает на вопрос: какие возможности ещё необходимы, прежде чем Luna можно будет назвать полноценной ежедневной PC-операционной системой. Наличие архитектурной границы не означает, что её реализация завершена.
 
-## 1. Already represented architectural boundaries
+## 1. Уже определённые границы
 
-The current architecture already has explicit boundaries for:
+Архитектура уже имеет отдельные границы для:
 
-- boot (`luna-boot.efi`);
+- `luna-boot.efi`;
 - System Images;
-- logical root and mapping;
+- logical root и Root Mapping;
 - filesystem primitives;
 - namespaces;
 - security;
 - durable state;
 - events/operations;
 - Bundles;
-- application/system/update/kernel/device management;
+- managers приложений, системы, updates, kernels и устройств;
 - system runtime;
 - UserSession;
 - application runtime;
@@ -27,76 +27,61 @@ The current architecture already has explicit boundaries for:
 - file manager;
 - audio/network/Bluetooth domains.
 
-Having a boundary does not mean that its implementation is complete.
+## 2. Что ещё необходимо
 
-## 2. Missing or incomplete capabilities
+### A. Boot и handoff
 
-### A. End-to-end boot and handoff
+- реальное обнаружение System Images в SYSTEM;
+- проверка manifest;
+- выбор совместимого kernel;
+- полная fallback state machine;
+- окончательный kernel → logical root → system-runtime handoff;
+- QEMU/OVMF и затем hardware smoke coverage.
 
-Needed:
+### B. System Image
 
-- real System Image discovery from SYSTEM;
-- manifest validation and kernel compatibility selection;
-- complete fallback state machine;
-- final kernel → logical-root → system-runtime handoff;
-- QEMU/OVMF and eventually real-hardware smoke coverage.
-
-### B. System Image specification
-
-Needed:
-
-- final manifest schema;
-- image identity/integrity rules;
-- exact boot metadata;
+- окончательная схема manifest;
+- identity и integrity rules;
+- boot metadata;
 - compatibility semantics;
-- retention metadata and factory representation.
+- retention и представление factory.
 
-The payload itself remains SquashFS.
+Payload остаётся непосредственно SquashFS.
 
-### C. Logical root implementation
+### C. Logical root
 
-Needed:
+- production-grade lazy/hybrid доступ к System Image;
+- полный mapping SYSTEM/DATA/user/system;
+- lifetime/materialization semantics;
+- интеграция с application namespaces.
 
-- production-grade lazy/hybrid System Image access;
-- complete DATA/user/system mapping;
-- robust lifetime/materialization semantics;
-- integration with per-application namespaces.
-
-### D. Security enforcement
-
-Needed:
+### D. Security
 
 - durable policy representation;
-- actual kernel enforcement of grants/denies;
+- реальное kernel enforcement grants/denies;
 - user-mediated permission UI/IPC;
-- trust store and publisher/repository trust flow;
-- device/volume authorization enforcement.
+- trust store и publisher/repository trust flow;
+- enforcement для devices/volumes.
 
 ### E. Application management/runtime
 
-Needed:
-
-- complete Bundle install transaction;
+- полный Bundle install transaction;
 - dependency resolution;
-- package import (`.deb`/`.rpm`) hardening;
-- ApplicationInstance supervision integrated with real namespaces and security;
-- application data cleanup/retention UX.
+- hardening import `.deb`/`.rpm`;
+- supervision `ApplicationInstance` вместе с security/namespace;
+- cleanup/retention application data.
 
-### F. UserSession and graphical login
-
-Needed:
+### F. UserSession и graphical login
 
 - production authentication IPC/security integration;
-- complete graphical-session environment construction;
-- real session lifecycle for multiple concurrent users;
-- user switching/restricted-session policy;
-- logout/restart/re-authentication handling.
+- полное формирование graphical-session environment;
+- lifecycle нескольких concurrent UserSessions;
+- user switching и restricted-session policy;
+- logout/restart/re-authentication.
 
-No separate session-manager component is required by the accepted architecture.
+Отдельный session-manager компонент не нужен.
 
-### G. Device and storage management
-
-Needed:
+### G. Devices/storage
 
 - real device discovery;
 - automount lifecycle;
@@ -108,107 +93,89 @@ Needed:
 
 ### H. Networking
 
-Needed:
+- provider integration;
+- state/events для Luna clients;
+- connection UI;
+- security/policy integration.
 
-- NetworkManager/D-Bus provider integration;
-- real state/events exposed to Luna clients;
-- connection management UI;
-- policy/security integration.
+Текущий implementation direction использует NetworkManager как provider.
 
 ### I. Audio
 
-Needed:
-
-- PipeWire/WirePlumber provider integration;
+- PipeWire/WirePlumber integration;
 - device/profile/volume routing;
-- session/user policy integration;
-- desktop control integration.
+- session/user policy;
+- desktop controls.
 
 ### J. Bluetooth
 
-Needed:
-
-- BlueZ provider integration;
+- BlueZ integration;
 - pairing/trust state;
-- device lifecycle and authorization;
-- desktop control integration.
+- lifecycle и authorization;
+- desktop controls.
 
-### K. Desktop shell
+### K. Desktop
 
-Needed:
-
-- reliable niri session startup;
+- надёжный niri startup;
 - Noctalia integration;
-- icon/theme completeness;
+- themes/icons;
 - notifications/power/session controls;
 - application launch integration.
 
-### L. File manager
+### L. Files
 
-Needed:
-
-- same-window navigation;
-- real file operations;
-- volume integration;
+- полноценные file operations;
+- volumes;
 - permissions/error presentation;
-- eventual direct use of the accepted filesystem backend model.
+- интеграция с filesystem backend;
+- file access/portal model для приложений.
 
-Packaging Yazi is not evidence that Luna Files already uses `yazi-core` directly.
+Установка Yazi или другого file manager не доказывает наличие прямой integration с его internal API.
 
-### M. Updates and rollback
+### M. Updates/rollback
 
-Needed:
-
-- durable operation reconciliation;
-- complete System Image update transaction;
+- durable reconciliation;
+- complete System Image transaction;
 - independent kernel update path;
-- checkpoint creation/rollback integration;
+- checkpoint/rollback integration;
 - health-gated automatic rollback;
-- recovery/factory integration.
+- Recovery/Factory integration.
 
 ### N. Diagnostics
 
-Needed:
-
 - structured health collection;
-- DiagnosticReport generation;
-- bounded automatic repair coordination;
+- `DiagnosticReport`;
+- bounded repair coordination;
 - export to external media;
 - privacy-aware filtering.
 
-### O. Installer / first boot
-
-Needed:
+### O. Installer/first boot
 
 - installation media;
 - disk/partition provisioning;
-- initial administrator/user creation;
+- initial user/admin creation;
 - secure credential setup;
 - factory-state creation;
-- initial System Image/kernel registration.
+- initial image/kernel registration.
 
-### P. Power and hardware lifecycle
-
-Needed:
+### P. Power/hardware lifecycle
 
 - suspend/resume;
 - shutdown/reboot orchestration;
-- battery/AC state where applicable;
+- battery/AC state;
 - thermal/power policy;
 - display hotplug.
 
-### Q. Compatibility and hardware enablement
+### Q. Hardware enablement
 
-Needed:
-
-- broad GPU/input/storage/network/audio hardware coverage;
+- широкое покрытие GPU/input/storage/network/audio;
 - kernel module/driver lifecycle contract;
 - firmware handling;
-- hardware capability discovery.
+- capability discovery.
 
-## 3. Completion criterion
+## 3. Критерий завершения
 
-Luna should not be considered a complete PC OS merely because an image builds. A credible completion gate is:
+Luna не считается полноценной PC ОС только потому, что собирается image.
 
 ```text
 install
@@ -216,6 +183,8 @@ install
 UEFI boot
  ↓
 System Image + compatible kernel
+ ↓
+luna-init
  ↓
 logical /
  ↓
@@ -229,15 +198,15 @@ niri + Noctalia
  ↓
 applications
  ↓
-files / network / audio / bluetooth / removable media
+files / network / audio / Bluetooth / removable media
  ↓
 update + rollback + recovery
  ↓
 shutdown / reboot / resume
 ```
 
-Each arrow needs executable integration evidence, not only a configuration file or placeholder.
+Каждая стрелка должна иметь исполняемое integration evidence.
 
-## 4. Important distinction
+## 4. Важное правило
 
-This list is a gap map, not permission to create one component per bullet. Many capabilities belong inside existing boundaries or can be provided by Linux/third-party daemons under Luna ownership. New Luna components require the AI development rules and an explicit architectural decision.
+Это gap map, а не разрешение создавать отдельный crate для каждого пункта. Возможность должна принадлежать существующей границе или использовать Linux/upstream provider, если это соответствует архитектуре. Новый Luna component требует отдельного архитектурного решения.

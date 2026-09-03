@@ -1,17 +1,16 @@
-# Project Luna x86_64 PC development build
+# Project Luna — сборка PC-образа
 
-This is the current reproducible bare-metal development image for Project Luna.
-It produces one UEFI/GPT disk image and does not modify the build host disk.
+Это текущий воспроизводимый development image для Project Luna. Он создаёт один UEFI/GPT-образ и не изменяет диск хоста.
 
-## Result
+## Результат
 
-`tools/build-pc-image.sh` creates:
+`tools/build-pc-image.sh` создаёт:
 
 ```text
 dist/luna-pc.img
 ```
 
-The disk contains:
+Разметка:
 
 ```text
 EFI     128 MiB
@@ -19,7 +18,7 @@ SYSTEM  384 MiB
 DATA    512 MiB
 ```
 
-The image uses the accepted Luna physical storage model:
+Development image использует принятую физическую модель Luna:
 
 ```text
 EFI
@@ -27,10 +26,9 @@ SYSTEM
 DATA
 ```
 
-SWAP is intentionally omitted from the development image. A real installation
-may add optional SWAP/ZRAM later.
+SWAP в development image намеренно отсутствует.
 
-## Boot chain
+## Цепочка загрузки
 
 ```text
 UEFI
@@ -39,31 +37,30 @@ luna-boot.efi
   ↓
 Linux kernel
   ↓
-early initramfs
+ранний initramfs
   ↓
 SYSTEM (read-only)
   ↓
-versioned SquashFS System Image
+выбранный versioned SquashFS System Image
   ↓
 DATA (read-write)
   ↓
-switch_root
+luna-init
+  ↓
+logical /
   ↓
 luna-system-runtime
   ↓
 UserSession
   ↓
-/usr/bin/luna-session
+Wayland → niri → Noctalia
 ```
 
-The default development session falls back to `/bin/sh` when a graphical
-`niri-session` is not present. This means the image is currently usable as a
-console development OS even before the complete graphical desktop payload is
-packaged.
+Здесь нет отдельного `luna-session` компонента и нет штатного TTY login path.
 
-## Host prerequisites
+## Требования к хосту
 
-On a Debian/Ubuntu-like build host install:
+На Debian/Ubuntu-подобном хосте нужны:
 
 ```bash
 sudo apt install \
@@ -78,10 +75,9 @@ sudo apt install \
   squashfs-tools
 ```
 
-Rust stable and `rustup` are required. The builder installs the
-`x86_64-unknown-linux-musl` and UEFI targets when needed.
+Также нужны Rust stable и `rustup`. Сборщик при необходимости устанавливает targets `x86_64-unknown-linux-musl` и `x86_64-unknown-uefi`.
 
-The builder automatically looks for:
+Автоматически используются:
 
 ```text
 /boot/vmlinuz-*
@@ -89,67 +85,62 @@ The builder automatically looks for:
 /bin/busybox
 ```
 
-Explicit paths may be provided with `LUNA_TEST_KERNEL` and `BUSYBOX`.
+Явные пути задаются через `LUNA_TEST_KERNEL` и `BUSYBOX`.
 
-## Build
+Для OVMF нужны QEMU и отдельный writable variables-файл.
 
-From the repository root:
+## Сборка
+
+Основной development flow:
 
 ```bash
 tools/build-pc-image.sh
 ```
 
-Optional version override:
+Не следует запускать полный build для исправления локальной ошибки crate. Сначала проверяется затронутый слой, затем интеграционный слой, затем полный image.
 
-```bash
-LUNA_VERSION=0.1.0 tools/build-pc-image.sh
-```
+## Установка на реальный диск
 
-Optional prepared desktop root:
-
-```bash
-LUNA_DESKTOP_ROOT=/path/to/prepared-root tools/build-pc-image.sh
-```
-
-A prepared desktop root should contain the required Wayland/niri/Noctalia
-payload. When `/usr/bin/niri-session` exists the Luna session launcher uses it.
-The prepared root may also provide `/etc/luna/mode` containing `graphical` to
-select the graphical `UserSession` launch boundary.
-
-## Install to a real PC disk
-
-The installer is deliberately destructive and requires both `--yes` and a
-second textual confirmation. It refuses a target disk that has mounted
-filesystems.
+Установка выполняется отдельно от сборки:
 
 ```bash
 sudo tools/install-pc-image.sh dist/luna-pc.img /dev/nvme0n1 --yes
 ```
 
-Replace the target with the actual whole-disk device. Do not use a partition
-such as `/dev/nvme0n1p1`.
+Команда работает только с целым block device. Перед destructive write installer дополнительно требует подтверждение `ERASE-LUNA` и отказывается от target с mounted filesystems.
 
-Then reboot the PC in UEFI mode and select the Luna disk. The normal boot target
-is the quiet PC path. Press `B` during boot for the existing Luna boot menu;
-the serial development target remains available there.
+Не указывайте раздел вроде `/dev/nvme0n1p1`.
 
-## Current limitations
+Репозиторий автоматически не записывает образ на физический диск.
 
-This is a development build, not a production installer.
+## Проверка результата
 
-The image still depends on a Linux kernel supplied by the build host or by the
-CI image toolchain. The final production kernel inventory/compatibility and
-persistent boot-success state remain separate architecture work.
+Минимальная проверка:
 
-The Linux application launcher still uses the development `pre_exec` child
-setup path. Production hardening requires a dedicated child-creation primitive.
+```bash
+file dist/luna-pc.img
+test -f dist/BUILD-INFO
+test -f dist/SHA256SUMS
+```
 
-The full graphical payload is intentionally pluggable at this stage. The Luna
-runtime/session architecture is present, but packaging the final niri + Noctalia
-runtime tree and device/portal integration is still a later integration step.
+Для UEFI-проверки используйте OVMF test path. Успешная сборка image сама по себе не доказывает полный end-to-end graphical boot.
 
-## CI artifact
+## Текущие ограничения
 
-The repository CI contains a dedicated `Luna PC image` workflow. It builds the
-same development disk on Ubuntu, verifies the generated files, prints their
-SHA-256 values, and uploads `luna-pc-x86_64` as a workflow artifact.
+Это development image, а не production installer.
+
+Финальные inventory и compatibility rules для kernel/System Image, persistent boot-success state, полноценная графическая интеграция, production child-creation primitive и полная device/portal integration ещё требуют отдельной разработки.
+
+Графическая граница остаётся:
+
+```text
+luna-system-runtime
+  ↓
+UserSession
+  ↓
+Wayland
+  ↓
+niri
+  ↓
+Noctalia
+```

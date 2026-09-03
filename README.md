@@ -2,31 +2,32 @@
 
 **Design first. Code second.**
 
-> A modern immutable operating system built on the Linux kernel.
+> Современная неизменяемая операционная система поверх Linux kernel.
 
-Project Luna is an open-source operating system project focused on a small immutable system foundation, predictable architecture, self-contained applications, and a clean user-facing filesystem model.
+Project Luna — открытый проект ОС с небольшой неизменяемой системной основой, предсказуемой архитектурой, самостоятельными приложениями и чистой пользовательской файловой моделью.
 
-## Current status
+## Текущее состояние
 
-Project Luna has completed the architecture decision cycle through **Phase 1.6-HZ** and is now in **Phase 2 runtime/boot integration and hardening**.
+Архитектурный цикл завершён до **Phase 1.6-HZ**, после чего проект перешёл в **Phase 2: интеграция runtime/boot, PC bring-up, desktop integration и hardening**.
 
-- Phases **1.1–1.6-HZ** are accepted and consolidated.
-- The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); accepted post-1.6 decisions are consolidated there as well.
-- Linux namespace/materialization primitives are implemented in `luna-namespace`.
-- Durable system state is implemented in `luna-state` with `redb`.
-- Checkpointed update/rollback orchestration exists in `luna-update-manager`.
-- `luna-bundle` contains the LBP1 reader/writer implementation for the accepted RFC-0002 format.
-- `luna-system-runtime` supervises real Linux child processes and owns the system-wide UserSession/process lifecycle.
-- `luna-app-runtime` owns `ApplicationInstance` lifecycle and execution setup.
-- `RuntimeKind`/`RuntimeSpec` are typed execution-environment values used by application runtime; there is no separate generic runtime subsystem/crate.
-- Native early userspace is provided by the standalone musl `luna-init` binary and hands off to `luna-system-runtime` after `switch_root`.
-- The QEMU/OVMF bring-up path builds a real SquashFS System Image, early initramfs and separate DATA partition.
-- A reproducible x86_64 UEFI/GPT PC development image is produced by `tools/build-pc-image.sh` with native Luna initramfs and the graphical desktop payload.
-- The development PC image packages the native niri/Noctalia graphical stack, login, Ghostty, fish, Yazi, audio, network, Bluetooth and removable-media service payloads; final hardware seat/input/GPU validation remains.
+Текущий Source of Truth — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Принятые решения после Phase 1.6 консолидированы там и сохраняются в decision records.
 
-The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Уже реализованы важные части:
 
-## Core architectural model
+- Linux namespace/materialization primitives в `luna-namespace`;
+- durable system state на `redb` в `luna-state`;
+- checkpointed update/rollback orchestration в `luna-update-manager`;
+- RFC-0002/LBP1 codec в `luna-bundle`;
+- supervision реальных Linux child processes и UserSession lifecycle в `luna-system-runtime`;
+- lifecycle `ApplicationInstance` в `luna-app-runtime`;
+- standalone musl early userspace `luna-init`;
+- dynamic System Image/kernel discovery, manifest validation, compatible-kernel selection, soft fallback и ordered Boot Menu в `luna-boot.efi`;
+- воспроизводимый x86_64 UEFI/GPT development image с QEMU/OVMF bring-up path;
+- graphical payload с niri/Noctalia, login, Ghostty, fish, Yazi, audio, network, Bluetooth и removable-media infrastructure.
+
+Hardware seat/input/GPU и часть production integration ещё находятся в разработке.
+
+## Архитектурная модель
 
 ```text
 UEFI
@@ -37,9 +38,9 @@ SYSTEM
   ├── versioned System Images (direct SquashFS)
   └── versioned kernels
   ↓
-early userspace / luna-init
+luna-init
   ↓
-logical Linux-compatible root + DATA
+logical Linux root + DATA
   ↓
 luna-system-runtime
   ├── UserSession A
@@ -50,15 +51,13 @@ luna-system-runtime
           └── ApplicationInstance(s)
 ```
 
-The four physical areas are **EFI / SYSTEM / DATA / SWAP**.
+Физическая модель: **EFI / SYSTEM / DATA / SWAP**.
 
-`SYSTEM` contains immutable/versioned Luna System Images and kernels. A System Image is directly a `luna-X.Y.Z.squashfs` SquashFS filesystem image.
+System Image — непосредственно `luna-X.Y.Z.squashfs`. DATA содержит изменяемое системное, пользовательское, application и cache состояние.
 
-`DATA` contains mutable system, user and cache state.
+## Запуск приложения
 
-## Application execution flow
-
-The hierarchy above is ownership, not the security pipeline. A normal application launch conceptually proceeds as:
+Иерархия владения и security pipeline разделены:
 
 ```text
 luna-system-runtime
@@ -68,47 +67,29 @@ UserSession
 luna-app-runtime
     ↓
 ApplicationInstance
+```
+
+Путь запуска:
+
+```text
+Bundle declaration
     ↓
-Bundle/resource declarations
+ApplicationPlan
     ↓
-Mapping plan
+MappingPlan
     ↓
-Security authorization
+luna-security
     ↓
 luna-namespace materialization
     ↓
 process execution
-    ↓
-luna-system-runtime supervision
 ```
 
-`RuntimeKind` is only a typed property of the execution environment used by the application runtime, for example:
+`RuntimeKind`/`RuntimeSpec` являются типизированными свойствами execution environment. Отдельного generic `luna-runtime` компонента нет.
 
-```text
-Luna   → native Luna userspace / musl
-Glibc  → approved glibc compatibility runtime
-Bundle → Bundle-private runtime where permitted
-```
+## Boot и пользовательский интерфейс
 
-It is not a separate daemon, manager or layer in the runtime hierarchy.
-
-## Bundles
-
-Applications and installable components use immutable Luna Bundles.
-
-```text
-application.lbp
-    ↓
-Bundle Format v1
-```
-
-`.lbp` is the **transport/archive representation** of a Bundle. RFC-0002 — Bundle Format v1 is **Accepted**.
-
-Different versions of the same application are independent immutable Bundles and may coexist.
-
-## Boot and user experience
-
-Normal boot is graphical and quiet:
+Нормальная загрузка графическая и тихая:
 
 ```text
 Power
@@ -133,8 +114,6 @@ GUI login
  ↓
 authentication
  ↓
-Active UserSession
- ↓
 Wayland
  ↓
 niri
@@ -142,9 +121,7 @@ niri
 Noctalia Shell
 ```
 
-There is no normal TTY login, console-shell fallback or `luna-session` component.
-
-Pressing `B` opens the exceptional text Boot Menu. The accepted action order is:
+Обычный пользовательский вход не использует TTY. Клавиша `B` открывает исключительное текстовое Boot Menu:
 
 ```text
 1. Continue to Luna
@@ -155,28 +132,32 @@ Pressing `B` opens the exceptional text Boot Menu. The accepted action order is:
 6. Boot from USB / External Device
 ```
 
-Verbose Boot suppresses the graphical splash and enables full boot diagnostics for that boot. Recovery, Factory and external boot are separate boot modes; their concrete backends must never be emulated by a TTY fallback.
+## Bundles
 
-## PC development build
+Приложения используют Luna Bundle Format:
 
-The repository contains a reproducible x86_64 PC image builder:
+```text
+application.lbp
+    ↓
+RFC-0002 / LBP1
+```
+
+`.lbp` — транспортное/archive представление Bundle. Это не System Image.
+
+## Разработка
+
+Ключевой план находится в [`docs/architecture/DEVELOPMENT-ROADMAP.md`](docs/architecture/DEVELOPMENT-ROADMAP.md).
+
+Перед реализацией Phase 0 используются черновики контрактов в [`docs/contracts/`](docs/contracts/).
+
+PC image builder:
 
 ```bash
 tools/build-pc-image.sh
 ```
 
-It creates `dist/luna-pc.img` with EFI, SYSTEM and DATA partitions. SYSTEM contains the versioned SquashFS System Image, its manifest, initramfs and kernel. DATA contains persistent Luna state.
+Подробности: [`docs/development/PC-BUILD.md`](docs/development/PC-BUILD.md).
 
-See [`docs/development/PC-BUILD.md`](docs/development/PC-BUILD.md).
+## Правило проекта
 
-## Current crate map
-
-The current userspace workspace contains architecture-defined crates only; `luna-init` is the deliberate standalone early-userspace exception. There is no generic `luna-runtime` crate.
-
-See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md).
-
-## Development rule
-
-`docs/ARCHITECTURE.md` is the primary and current architectural Source of Truth. Historical phase records, ADRs and RFC documents preserve traceability; accepted current semantics are consolidated in the Source of Truth.
-
-Accepted architecture decisions must not be silently changed by implementation work. When code reveals a real architectural conflict, that conflict must be documented and resolved explicitly.
+`docs/ARCHITECTURE.md` — главный и текущий архитектурный Source of Truth. Реализация не должна молча менять принятые решения. При обнаружении конфликта сначала меняется архитектурный документ/решение, затем код.

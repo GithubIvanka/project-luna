@@ -1,32 +1,35 @@
 # `luna-files`
 
-**Status:** GUI boundary implemented; filesystem integration incomplete
+**Статус:** GTK4 GUI присутствует; filesystem/volume integration ещё неполная.
 
-## Purpose
-Provide Luna's graphical file-manager client and present the user-facing DATA/volume model.
+## Назначение
 
-## Owns
-- GTK4 file-manager UI;
-- navigation/presentation;
-- file/volume presentation;
-- invoking backend file operations through the approved filesystem/task model.
+Пользовательский file-manager client Luna. Он предоставляет удобный интерфейс к logical user files и подключённым volumes.
 
-## Does not own
-Raw filesystem policy, device discovery, authorization, Bundle management or namespace enforcement.
+## Владеет
 
-## File model
-The UI uses ordinary icon categories and readable metadata. Folders, images, audio, video, archives, PDF and source/configuration files have semantic presentation; the fallback is generic file presentation.
+- навигацией по доступному пользователю logical filesystem;
+- отображением файлов и каталогов;
+- стандартными file operations;
+- отображением volumes;
+- presentation ошибок и permissions.
 
-The home/up controls are UI affordances, not filesystem policy.
+## Не владеет
 
-## Yazi relationship
-Yazi 26.9.1 is packaged as the initial filesystem engine/tooling boundary. Packaging Yazi and configuring `backend_model=yazi-core` does **not** mean the current GUI has a direct `yazi-core` library integration. That integration remains future work.
+Raw device discovery, mount policy, application authorization, Bundle lifecycle или kernel/storage backend.
 
-## External volumes
-The file manager receives friendly volume representations from `luna-device-manager`; it must not require users to work with `/dev/sdX` or manual mount commands.
+## Внешние носители
 
-## Dependencies
-GTK4, Luna filesystem/task contracts, device/volume contracts and security-aware file access.
+File manager получает volume state от Luna device/volume boundary и не должен самостоятельно управлять `/dev` или изобретать mount policy.
 
-## Open
-Same-window directory navigation, complete file operations, volume events and direct shared backend integration remain.
+## Application file access
+
+Наличие file manager не является реализацией application portal. Доступ приложения к конкретному файлу должен быть отдельным security/portal contract.
+
+## Provider
+
+Yazi может поставляться как пользовательский инструмент, но факт его упаковки не доказывает прямую интеграцию `yazi-core` в Luna Files.
+
+## Открыто
+
+Полные file operations, navigation, volume integration, permissions/error UX и дальнейшая backend integration.

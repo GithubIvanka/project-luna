@@ -1,18 +1,22 @@
 # `luna-fs`
 
-**Status:** implemented foundation
+**Статус:** foundation реализован.
 
-## Purpose
-Provide low-level filesystem primitives and metadata without embedding Luna policy.
+## Назначение
 
-## Owns
+Предоставляет низкоуровневые filesystem primitives и metadata без внедрения Luna policy.
+
+## Владеет
+
 - filesystem handles/primitives;
-- metadata and filesystem errors;
-- host-backed/test implementations where needed.
+- metadata;
+- filesystem errors;
+- host-backed/test implementations там, где они нужны.
 
-Current API direction includes `FileSystem`, `open`, `create`, `remove` and `metadata` operations.
+Текущая API-направленность включает операции `FileSystem`, `open`, `create`, `remove`, `metadata`.
 
-## Does not own
+## Не владеет
+
 - logical path mapping;
 - authorization;
 - application lifecycle;
@@ -20,14 +24,18 @@ Current API direction includes `FileSystem`, `open`, `create`, `remove` and `met
 - configuration precedence;
 - namespace policy.
 
-## Dependencies
-May use standard OS/filesystem primitives and `luna-common` where required. It must not depend upward on managers or runtimes.
+## Контракт
 
-## Contract
-A successful filesystem operation means the underlying primitive succeeded. It does not imply that the caller was authorized in the Luna security model; callers must pass through the appropriate policy boundary.
+Успешная filesystem operation означает только успех underlying primitive. Она не означает, что вызывающая сторона имеет Luna authorization. Для policy-sensitive операций caller обязан пройти соответствующую security boundary.
 
-## Integration
-Used by higher-level mapping/storage components. Security and mapping decisions remain outside this crate.
+## Зависимости
 
-## Open
-Production backends, filesystem-specific optimizations and complete async integration remain implementation concerns unless separately accepted.
+Может использовать стандартные OS/filesystem mechanisms и `luna-common`, но не должен зависеть вверх от managers или runtimes.
+
+## Ошибки
+
+Операционные отказы должны возвращаться типизированным `Result`; filesystem absence и corruption не должны маскироваться panic.
+
+## Открыто
+
+Production backends, filesystem-specific optimizations и интеграция с остальными storage contracts.

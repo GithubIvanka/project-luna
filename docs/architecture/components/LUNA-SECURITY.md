@@ -1,41 +1,53 @@
 # `luna-security`
 
-**Status:** implemented policy foundation; enforcement integration incomplete
+**Статус:** policy foundation реализована; enforcement integration неполная.
 
-## Purpose
-Central Luna authorization, permission and trust-policy authority.
+## Назначение
 
-## Owns
-- principals and resources;
+Центральная authority Luna для authorization, permissions и trust policy.
+
+## Владеет
+
+- principals и resources;
 - permission dimensions: Visibility, Read, Write, Execute, Device Use, Manage;
-- authorization requests and decisions;
+- authorization requests и decisions;
 - policy revisions/snapshots;
-- trust decisions as distinct from cryptographic signature validity.
+- trust decisions, отдельно от cryptographic signature validity.
 
-## Does not own
-Filesystem mapping, namespace creation, raw I/O, GUI presentation, application execution or Bundle parsing.
+## Не владеет
 
-## Contract
-Bundle mappings/capabilities/access declarations are requests, never grants. `Ask` requires explicit confirmation. `Constrained` contains structured restrictions. A per-instance policy may tighten an application policy but cannot weaken an enforced deny.
+Filesystem mapping, namespace creation, raw I/O, GUI presentation, application execution или Bundle parsing.
 
-Trust binds content (including Bundle identity/content identity and trust scope). Signature validity, trust and authorization are separate decisions.
+## Основной контракт
 
-## Enforcement chain
+Bundle mappings, capabilities и access declarations — только requests, никогда не grants.
 
 ```text
-application declaration
+request ≠ grant
+```
+
+`Ask` требует явного подтверждения. `Constrained` должен содержать структурированные ограничения. Per-instance policy может ужесточать application policy, но не может ослабить уже enforced deny.
+
+Trust связывает content identity с trust scope. Signature validity, trust и authorization являются отдельными решениями.
+
+## Обязательная цепочка
+
+```text
+ApplicationPlan
  ↓
-luna-root-mapping
+MappingPlan
  ↓
 luna-security
  ↓
 luna-namespace / runtime enforcement
 ```
 
-Low-level kernel/filesystem mechanisms enforce the resulting decision.
+Security decision должен завершиться до materialization namespace. Ошибка policy — fail closed.
 
-## Dependencies
-Consumes shared identities and mapping/resource descriptions. Must remain independent of GUI/CLI and must not become a process supervisor.
+## Зависимости
 
-## Open
-Durable policy storage, user confirmation IPC/UI, trust store and complete kernel enforcement are integration work.
+Shared identities и mapping/resource descriptions. Не зависит от GUI/CLI и не является process supervisor.
+
+## Открыто
+
+Durable policy storage, user confirmation IPC/UI, trust store и полное kernel enforcement.

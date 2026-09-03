@@ -1,23 +1,25 @@
 # Project Luna — `luna-boot.efi`
 
-**Status:** accepted architecture; implementation in progress
-**Boundary:** UEFI boot component, outside ordinary userspace workspace
+**Статус:** принятая архитектурная граница; реализация и hardening продолжаются.  
+**Граница:** UEFI boot component, вне обычного userspace workspace.
 
-## 1. Responsibility
+## 1. Назначение
 
-`luna-boot.efi` owns functionality that belongs directly to the UEFI boot flow:
+`luna-boot.efi` отвечает только за то, что относится непосредственно к UEFI boot flow:
 
-- discovering Luna System Images and kernels on SYSTEM;
-- reading image manifests and boot metadata;
-- deciding which compatible kernel/image pair to attempt;
-- opening the boot menu only when the boot key is requested;
-- loading the selected Linux kernel and required boot parameters;
-- performing boot-time fallback according to persistent boot state;
-- handing control to the Linux kernel.
+- обнаружение SYSTEM;
+- обнаружение System Images и kernels;
+- чтение image manifests и boot metadata;
+- выбор совместимой пары image/kernel;
+- открытие Boot Menu только по запросу пользователя;
+- загрузку выбранного Linux kernel;
+- подготовку boot parameters;
+- обработку boot-time fallback;
+- передачу управления kernel.
 
-It does not own userspace application lifecycle, UserSessions, application authorization or update transactions.
+Он не владеет UserSession, application lifecycle, Bundle installation, desktop и обычными update transactions.
 
-## 2. Boot chain
+## 2. Цепочка загрузки
 
 ```text
 UEFI
@@ -26,90 +28,97 @@ luna-boot.efi
  ↓
 compatible Linux kernel
  ↓
-Luna System Image
+luna-init
  ↓
-minimal RAM logical-root environment
+logical root
  ↓
 luna-system-runtime
  ↓
 UserSession
 ```
 
-## 3. Normal boot
+`luna-boot.efi` не обязан монтировать SquashFS: это ответственность раннего userspace.
 
-Normal boot is immediate and quiet. There is no persistent menu delay.
+## 3. Нормальная загрузка
+
+Обычная загрузка выполняется сразу, без двухсекундной задержки из-за Boot Menu.
 
 ```text
-B pressed?
-├── no  → select default compatible pair → boot
-└── yes → show Boot Menu
+B/b уже ожидает ввод?
+├── нет → выбрать рабочую совместимую пару → boot
+└── да → Boot Menu
 ```
 
-The exact key-sampling window is an implementation detail of the UEFI loader; it must preserve the no-delay normal path.
+Выбор usable pair не равен простому выбору самого нового файла.
 
 ## 4. Boot Menu
 
-The accepted menu model contains:
+Принятая модель:
 
-1. **Continue to Luna** — boot the selected/default compatible image and kernel.
-2. **Verbose Boot** — boot while exposing diagnostic boot information.
-3. **System Image selection** — list available normal System Images and show only kernels compatible with the selected image.
-4. **Recovery Environment** — boot the dedicated recovery environment.
-5. **Factory Environment** — boot the immutable factory System Image + factory kernel pair.
-6. **Boot from USB / External Device** — hand boot selection to an external bootable device.
+1. **Продолжить загрузку Luna** — загрузить выбранную/default compatible pair.
+2. **Подробная загрузка** — отключить обычный splash и включить диагностику.
+3. **Выбор System Image** — показать доступные образы и только совместимые kernels.
+4. **Recovery Environment** — отдельный recovery mode.
+5. **Factory Environment** — factory System Image + factory kernel.
+6. **Загрузка с USB / внешнего устройства** — передать boot selection внешнему носителю.
 
-The menu is an exception path, not the normal UI.
+Boot Menu является исключительным путём.
 
-## 5. Image selection
+## 5. Выбор image/kernel
 
-`luna-boot` reads all discoverable System Images from SYSTEM and their adjacent manifests.
+`luna-boot` читает обнаруженные manifests и использует их для определения:
 
-Default selection is the highest usable version according to the System Image version policy, not merely the newest filename.
+- версии image;
+- архитектуры;
+- совместимых kernels;
+- boot metadata.
 
-For every image, the loader must filter kernels through explicit compatibility metadata. It must not present an arbitrary kernel/image pair simply because both files exist.
+Kernel без подтверждённой совместимости показывать или запускать нельзя.
 
 ## 6. Fallback
 
-Fallback is layered:
+Fallback зависит от класса отказа.
 
 ```text
 selected image/kernel
-      ↓ fail to start
-compatible previous choice
-      ↓ still unavailable
-Recovery / Factory according to failure class
+      ↓
+image failure
+      ↓
+previous compatible image where safe/possible
+      ↓
+other usable fallback
+      ↓
+Factory
+      ↓
+Recovery
 ```
 
-A System Image start failure should try a previous usable choice without reboot where technically possible. A kernel-level failure may require a reboot before another kernel/image pair can be selected.
+Для kernel-level failure, включая panic, может потребоваться reboot; после него выбирается следующая совместимая рабочая комбинация согласно Boot State.
 
-Factory is the final known-good pair and is never removed by ordinary lifecycle management.
+## 7. Boot State
 
-## 7. Boot state
+Boot state отделён от общего System State и Recovery State.
 
-Boot state is separate from System State and Recovery State.
+Обычная загрузка не должна переписывать его без необходимости. Изменения выполняются только по значимым событиям: новая активация, подтверждение, failure, rollback или переход в специальный режим.
 
-It must be changed only on relevant events such as a successful selection/commit or a confirmed failure. Ordinary successful boots must not rewrite persistent boot state unnecessarily.
+Точный формат описан в `docs/contracts/BOOT-STATE-CONTRACT.md` как черновик Phase 0.
 
-The accepted retention direction is to preserve the current usable choices and previous fallback choices; exact retention counts belong to the boot-state implementation contract, not this overview.
+## 8. Пост-`ExitBootServices`
 
-## 8. Responsibility boundary
+После `ExitBootServices` загрузчик не использует Boot Services, их allocator, console APIs или UEFI filesystem protocols.
 
-`luna-boot` stops being responsible for the system once the Linux kernel has been handed control with the selected boot parameters and System Image context.
+Всё необходимое для handoff должно быть подготовлено до выхода.
 
-After that boundary:
+## 9. Граница ответственности
 
-```text
-kernel / root mapping / system runtime
-```
+После передачи управления kernel ответственность `luna-boot` заканчивается. Logical root, `luna-init`, system runtime и userspace выполняют последующую инициализацию.
 
-own normal userspace initialization.
+`luna-boot` не превращается в второй init system и не становится общим recovery manager.
 
-`luna-boot` must not become a second init system or a general recovery manager.
+## 10. Проверка
 
-## 9. Security and integrity
+Загрузчик должен отклонять malformed metadata, несовместимые пары и небезопасные boot structures. Trust policy, требующая сложной userspace логики, не должна самовольно переноситься в UEFI component.
 
-The loader must validate image/kernel metadata and reject malformed paths, incompatible metadata and invalid boot structures. Trust/signature semantics that require userspace policy must not be invented inside the loader.
+## 11. Текущий статус реализации
 
-## 10. Implementation status
-
-The dedicated boot project already has UEFI/Linux boot protocol handling and has demonstrated kernel loading through a test init to `sh`. The remaining work is to harden the real System Image/kernel discovery, compatibility, fallback and final handoff against the accepted contract.
+В проекте уже присутствует отдельный UEFI implementation с Linux boot protocol handling, включая загрузку kernel через тестовый init. Следующий приоритет — привести discovery, compatibility, fallback и конечный handoff к единым Phase 0 contracts.

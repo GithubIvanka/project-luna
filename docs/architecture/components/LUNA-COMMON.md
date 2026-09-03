@@ -1,33 +1,29 @@
 # `luna-common`
 
-**Status:** implemented foundation
+**Статус:** реализован; граница намеренно минимальна.
 
-## Purpose
-Minimal shared value types used across Luna boundaries.
+## Назначение
 
-## Owns
-- `BundleId`
-- `ComponentId`
-- `RuntimeKind`
-- `RuntimeSpec`
-- `UserId`
-- `Version`
+Содержит только действительно общие value types, идентификаторы и небольшие фундаментальные структуры, которые используются несколькими независимыми компонентами.
 
-These are values/identities, not subsystem services.
+## Владеет
 
-## Must not own
-Filesystem operations, authorization policy, runtime state, configuration storage, IPC transport, Bundle lifecycle, update logic or generic catch-all errors.
+- стабильными идентификаторами сущностей;
+- общими типами версий/архитектуры там, где они действительно общие;
+- минимальными общими error/value abstractions.
 
-## Dependencies
-Intentionally minimal. It is the bottom of the domain dependency graph.
+## Не владеет
 
-## Contracts
-Types crossing multiple architectural boundaries must remain implementation-neutral. Subsystem-specific validation and policy belongs to the owning subsystem.
+Bundle semantics, System Image semantics, boot state, filesystem policy, security policy, application lifecycle или GUI models.
 
-`RuntimeKind` is a property of an application runtime specification. It does not define a new runtime component.
+## Правило границы
 
-## Consumers
-Foundation, mapping, security, state/event, Bundle, session, manager and runtime crates may depend on the shared values they actually require.
+Если тип нужен только одному домену, он должен жить в соответствующем crate. `luna-common` не является местом для удобного хранения всего, что неудобно разместить в правильной границе.
 
-## Open
-Any proposed addition must demonstrate genuine cross-component ownership before being added.
+## Зависимости
+
+Предпочтительно минимальные или отсутствующие зависимости на верхние компоненты.
+
+## Открыто
+
+Только поддержание небольшого API surface и проверка, что новые типы действительно разделяются несколькими boundaries.

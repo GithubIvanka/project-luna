@@ -1,36 +1,51 @@
 # `luna-namespace`
 
-**Status:** implemented initial Linux backend; integration hardening required
+**Статус:** initial Linux materialization backend реализован; production security integration продолжается.
 
-## Purpose
-Materialize the controlled execution environment described by mapping/security contracts using Linux primitives.
+## Назначение
 
-## Owns
-- mount/filesystem namespace creation;
-- controlled bind/mount composition;
-- OverlayFS/idmapped-mount use where accepted and useful;
-- controlled `/dev` exposure;
-- namespace-specific materialization mechanics.
+Материализует уже разрешённый execution namespace приложения через Linux kernel primitives.
 
-## Does not own
-- authorization policy;
-- Bundle install/update;
-- UserSession lifecycle;
-- ApplicationInstance lifecycle;
-- logical mapping semantics.
+## Владеет
 
-## Required isolation
-Every ApplicationInstance receives an isolated filesystem/mount namespace. Other Linux namespaces (user, PID, network, IPC/UTS/time) are policy-driven rather than blindly enabled for every process.
+- создание и настройкой mount namespace;
+- controlled bind mounts;
+- подготовкой namespace filesystem view;
+- cleanup materialized resources;
+- низкоуровневой materialization части Root Mapping.
 
-`cgroups v2` is the accepted resource-control primitive but its policy is not owned by this crate.
+## Обязательный порядок
 
-## Contract
-This layer enforces the plan it is given. It must not turn an arbitrary DATA path into a visible logical path, and it must not grant capabilities simply because a process is being launched.
+```text
+Bundle declaration
+ ↓
+ApplicationPlan
+ ↓
+MappingPlan
+ ↓
+luna-security
+ ↓
+luna-namespace
+```
 
-No application receives `CAP_SYS_ADMIN` or equivalent host-level privilege by default.
+`luna-namespace` не должен обходить `luna-security` и сам выдавать приложению разрешения.
 
-## Dependencies
-Consumes `luna-root-mapping`, `luna-fs`, security-derived decisions and Linux kernel primitives. It must not become the security authority.
+## Не владеет
 
-## Open
-Complete namespace profiles, user/PID/network isolation policy and production mount materialization are still being hardened.
+Authorization policy, Bundle parsing, UserSession lifecycle, process supervision, UEFI или пользовательским UI.
+
+## Linux mechanisms
+
+В основе используются существующие kernel primitives, прежде всего mount namespaces и bind mounts. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
+
+## Ошибки
+
+Если любой обязательный mount/materialization шаг не выполнен, namespace не считается готовым. Частично созданное окружение должно быть очищено.
+
+## Зависимости
+
+`luna-root-mapping`, `luna-security`, `luna-fs` и Linux namespace APIs.
+
+## Открыто
+
+Полная integration security enforcement, resource isolation, cleanup guarantees и production handling ошибок mount.

@@ -1,37 +1,41 @@
 # `luna-config`
 
-**Status:** implemented foundation
+**Статус:** foundation реализован; финальная persistence/serialization integration продолжается.
 
-## Purpose
-Represent and resolve scoped Luna configuration without owning authorization.
+## Назначение
 
-## Owns
-- configuration keys/values;
-- configuration scopes;
-- layered lookup;
-- configuration-store abstraction.
+Отвечает за модель конфигурации Luna и правила области действия настроек.
 
-## Precedence
-For application settings where the class supports layering:
+## Владеет
+
+- типизированными configuration values;
+- scoped configuration;
+- загрузкой/сохранением человекочитаемой конфигурации там, где это предусмотрено;
+- правилами precedence между уровнями конфигурации.
+
+TOML является предпочтительным форматом для человекочитаемой конфигурации и metadata там, где это уместно.
+
+## Не владеет
+
+Durable system state, Bundle Format, System Image payload, kernel metadata или application authorization.
+
+## Граница config/state
 
 ```text
-User/Application override
-        ↓
-Application default
-        ↓
-System default
+config → что настроено
+state  → какое устойчивое состояние имеет система
 ```
 
-Machine-wide mutable configuration belongs under `DATA/system/config`; user-scoped configuration belongs under `DATA/users/<user>/config`. Exact file layout is owned by each subsystem's contract.
+`luna-config` не должен использоваться как универсальное хранилище operational state.
 
-## Does not own
-Security decisions, filesystem permissions, application lifecycle, update transactions or IPC transport.
+## Ошибки
 
-## Dependencies
-Shared value types and low-level storage primitives as required. It must not depend upward on managers/runtimes.
+Malformed configuration должна приводить к понятной ошибке загрузки/валидации. Безопасные значения по умолчанию могут применяться только там, где это заранее определено policy.
 
-## Contract
-Reading configuration never implies authorization. Writing configuration must be authorized by the caller through `luna-security` where applicable.
+## Зависимости
 
-## Open
-Final TOML serialization API and complete per-subsystem file layout remain implementation work.
+TOML/serialization primitives и минимальные shared types.
+
+## Открыто
+
+Финальная schema registry, persistence integration, precedence policy и миграции.

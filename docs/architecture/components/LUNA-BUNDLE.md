@@ -1,38 +1,46 @@
 # `luna-bundle`
 
-**Status:** implemented domain + RFC-0002/LBP1 codec
+**Статус:** domain и RFC-0002/LBP1 codec реализованы; дальнейшая интеграция продолжается.
 
-## Purpose
-Represent, validate, read and write Luna Bundles and the accepted `.lbp` transport format.
+## Назначение
 
-## Owns
-- Bundle identity and metadata;
-- manifest model/validation;
+Представляет, валидирует, читает и записывает Luna Bundles и их принятую транспортную форму `.lbp`.
+
+## Владеет
+
+- Bundle identity и metadata;
+- manifest model и validation;
 - Bundle resource representation;
-- LBP1 container reader/writer;
-- deterministic payload encoding;
+- LBP1 reader/writer;
+- детерминированным payload encoding;
 - BLAKE3 content identity;
-- optional Ed25519 signature codec/verification boundary;
-- format hardening and path validation.
+- codec/verification boundary для Ed25519;
+- hardening и path validation.
 
-## Format invariant
-`.lbp` is transport/archive representation. It is not a System Image and not the installed runtime representation.
+## Форматный инвариант
 
-System Images remain `luna-X.Y.Z.squashfs` plus manifest.
+`.lbp` — транспортное/archive представление Bundle. Это не System Image и не установленная runtime representation.
 
-## Manifest rules
-Mappings are logical Bundle-relative declarations. A manifest must never encode physical `DATA/system/apps/...` or `DATA/users/...` paths as mapping targets.
+System Image остаётся `luna-X.Y.Z.squashfs` плюс соседний manifest.
 
-Capabilities/access fields are requests, not grants. Authorization is owned by `luna-security`.
+## Manifest
 
-## Does not own
-Installation/update/removal policy, trust policy, namespace creation or process lifecycle.
+Mappings являются логическими Bundle-relative declarations. Manifest не должен кодировать физические пути `DATA/system/apps/...` или `DATA/users/...` как mapping targets.
 
-## Dependencies
-Shared IDs/version types and format/serialization primitives. It may expose validated data to `luna-app-manager` and runtime/mapping layers without depending upward on them.
+Capabilities и access fields являются запросами. Grant выдаёт `luna-security`.
 
-## Integration
-`luna-app-manager` owns installation transactions. Runtime consumes installed Bundle semantics. External Bundles must be inspected/integrity-checked before install/launch.
+## Не владеет
 
-## Open
-Broader repository/supply-chain trust and delta update mechanisms are outside RFC-0002.
+Install/update/removal policy, trust policy, namespace creation, process lifecycle или UEFI boot.
+
+## Зависимости
+
+Только необходимые shared identifiers/version types и format/serialization primitives. `luna-bundle` не должен зависеть вверх от manager/runtime компонентов.
+
+## Интеграция
+
+`luna-app-manager` отвечает за install transaction. Runtime потребляет валидированные Bundle semantics. Внешний Bundle должен быть проверен до install/launch.
+
+## Открыто
+
+Supply-chain/repository trust и delta update механизмы находятся вне RFC-0002.

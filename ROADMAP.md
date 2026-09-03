@@ -1,73 +1,59 @@
-# Project Luna — Roadmap
+# Project Luna — дорожная карта
 
-The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). This roadmap describes implementation sequence and dependencies, not deadlines.
+Архитектурным источником истины является [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Эта дорожная карта описывает порядок реализации и зависимости, но не устанавливает сроки.
 
-## Current position
+## Текущее положение
 
-Phases **1.1–1.6-HZ** are accepted/consolidated. RFC-0002 Bundle Format v1 was accepted on **2026-08-30**. The project is now in **Phase 2 runtime integration, PC bring-up, desktop integration and hardening**.
+Архитектурные фазы **1.1–1.6-HZ** приняты и консолидированы. RFC-0002 Bundle Format v1 принят 2026-08-30. Проект находится в **Phase 2: интеграция runtime/boot, PC bring-up, desktop integration и hardening**.
 
-## Completed foundation
+## Уже реализованная основа
 
 ```text
-Architecture / SoT                ← COMPLETED
-Repository / Cargo audit          ← COMPLETED
-Domain + manager API baseline     ← COMPLETED
-Logical mapping backend           ← IMPLEMENTED
-Linux namespace backend           ← IMPLEMENTED
-Persistent redb state             ← IMPLEMENTED
-Update/checkpoint engine          ← IMPLEMENTED
-RFC-0002 / LBP1                   ← ACCEPTED / HARDENING
-System runtime supervisor         ← IMPLEMENTED
-UserSession graphical lifecycle   ← IMPLEMENTED
-Typed runtime contract            ← IMPLEMENTED VALUE TYPE
-Runtime ↔ mapping ↔ Security      ← IMPLEMENTED CONTRACT
-QEMU userspace bring-up           ← IMPLEMENTED DEVELOPMENT PATH
-x86_64 PC image builder           ← IMPLEMENTED DEVELOPMENT PATH
-Guarded PC installer              ← IMPLEMENTED DEVELOPMENT PATH
-PC image CI workflow              ← IMPLEMENTED
-Graphical boot splash             ← IMPLEMENTED DEVELOPMENT PATH
-System Image discovery            ← IMPLEMENTED DEVELOPMENT PATH
-Compatible kernel selection       ← IMPLEMENTED DEVELOPMENT PATH
-Boot Menu full action set         ← IMPLEMENTED DEVELOPMENT PATH
-USB/External UEFI chainload       ← IMPLEMENTED DEVELOPMENT PATH
+Architecture / SoT                ← ЗАВЕРШЕНО
+Repository / Cargo audit          ← ЗАВЕРШЕНО
+Domain + manager API baseline     ← ЗАВЕРШЕНО
+Logical mapping backend           ← РЕАЛИЗОВАНО
+Linux namespace backend           ← РЕАЛИЗОВАНО
+Persistent redb state             ← РЕАЛИЗОВАНО
+Update/checkpoint engine          ← РЕАЛИЗОВАНО
+RFC-0002 / LBP1                   ← ПРИНЯТО / HARDENING
+System runtime supervisor         ← РЕАЛИЗОВАНО
+UserSession graphical lifecycle   ← РЕАЛИЗОВАНО
+Typed runtime contract            ← РЕАЛИЗОВАНО КАК VALUE TYPE
+Runtime ↔ mapping ↔ Security      ← КОНТРАКТ РЕАЛИЗОВАН
+QEMU userspace bring-up           ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+x86_64 PC image builder            ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+Guarded PC installer              ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+PC image CI workflow              ← РЕАЛИЗОВАНО
+Graphical boot splash             ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+System Image discovery            ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+Compatible kernel selection       ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+Boot Menu full action set         ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
+USB/External UEFI chainload       ← РЕАЛИЗОВАН РАЗРАБОТЧЕСКИЙ ПУТЬ
 ```
 
-## Phase 2 sequence
+## Последовательность Phase 2
 
-### 1. Make the graphical development PC image boot reliably
+### 1. Надёжная загрузка графического PC-образа
 
-Current artifact:
+Основной артефакт:
 
 ```text
 dist/luna-pc.img
 ```
 
-with:
+В нём присутствуют EFI, SYSTEM и DATA. SYSTEM содержит versioned SquashFS System Image, manifest, initramfs и kernel. DATA хранит постоянное состояние Luna.
 
-```text
-EFI     128 MiB
-SYSTEM  384 MiB
-DATA    512 MiB
-```
+Следующие действия:
 
-The image uses a musl-native `luna-system-runtime`, early initramfs,
-versioned SquashFS System Image, versioned kernel directory and persistent
-DATA, with a standard UEFI fallback at `EFI/BOOT/BOOTX64.EFI`.
+- проверить полный boot path в QEMU/OVMF;
+- проверить реальный UEFI hardware;
+- сохранить label-based discovery SYSTEM/DATA;
+- завершить persistent boot-success state.
 
-Normal boot is graphical; the image builder requires a prepared graphical root
-containing the login surface and `niri-session` rather than producing a TTY or
-shell fallback.
+### 2. Materialization runtime
 
-Next:
-
-- validate the complete image in QEMU/OVMF;
-- validate a real UEFI machine;
-- keep SYSTEM/DATA discovery label based;
-- add persistent boot-success state.
-
-### 2. Runtime materialization
-
-The typed runtime value is:
+Типизированный runtime:
 
 ```text
 RuntimeKind::Luna   → native Luna userspace / musl
@@ -75,8 +61,7 @@ RuntimeKind::Glibc  → approved glibc compatibility runtime
 RuntimeKind::Bundle → Bundle-private runtime
 ```
 
-`RuntimeKind` is an application execution-environment property, not a
-runtime manager or hierarchy layer. The ownership hierarchy remains:
+`RuntimeKind` — свойство `ApplicationInstance`, а не менеджер или уровень иерархии.
 
 ```text
 luna-system-runtime
@@ -88,46 +73,19 @@ luna-app-runtime
 ApplicationInstance { RuntimeSpec }
 ```
 
-The application execution pipeline remains:
+### 3. Security и device boundary
 
-```text
-ApplicationInstance
-    ↓
-resource/declaration request
-    ↓
-luna-root-mapping
-    ↓
-luna-security
-    ↓
-luna-namespace
-    ↓
-process execution
-    ↓
-luna-system-runtime supervision
-```
-
-There is no generic `luna-runtime` component.
-
-Next:
-
-- resolve runtime-specific loader/library mappings inside `luna-app-runtime`;
-- version and manage glibc compatibility trees through the existing application/runtime boundaries;
-- reject libc mixing within one process;
-- keep physical runtime paths hidden behind mapping.
-
-### 3. Security and device boundary
-
-Complete the enforcement layer around the existing runtime path:
+Завершить:
 
 - fine-grained mapping authorization;
 - filtered `/dev` population;
-- secure physical-path and symlink validation;
+- secure physical-path и symlink validation;
 - resource enforcement before execution;
-- device authorization and volume integration.
+- device authorization и volume integration.
 
-### 4. Real graphical System Image
+### 4. Полноценный графический System Image
 
-The user-facing boot/session contract is:
+Цепочка:
 
 ```text
 UEFI
@@ -159,8 +117,7 @@ niri
 Noctalia Shell
 ```
 
-There is no normal TTY login and no shell fallback. Pressing `B` enters the
-exceptional Boot Menu with this exact action order:
+Нет штатного TTY login или shell fallback. `B` открывает исключительное Boot Menu:
 
 ```text
 1. Continue to Luna
@@ -171,16 +128,9 @@ exceptional Boot Menu with this exact action order:
 6. Boot from USB / External Device
 ```
 
-Verbose Boot suppresses the graphical splash and exposes full kernel
-diagnostics for that boot.
+### 5. Boot discovery и recovery
 
-Next, package the final desktop runtime tree into the immutable System Image,
-including the login surface, niri, Noctalia and required device/portal support,
-while keeping mutable session/config/state data in DATA.
-
-### 5. Boot discovery and recovery/external paths
-
-`luna-boot.efi` now discovers normal boot targets from the actual SYSTEM tree:
+`luna-boot.efi` уже работает с реальным деревом SYSTEM:
 
 ```text
 SYSTEM/images/*.squashfs
@@ -198,13 +148,11 @@ version ordering
 BootTarget catalog
 ```
 
-Recovery and Factory are special System Image roles and remain outside the
-normal image list. External Boot is a UEFI-only chainload operation that seeks
-a standard `EFI/BOOT/BOOTX64.EFI` on another filesystem device.
+Recovery и Factory являются специальными System Image roles. External Boot — отдельный UEFI chainload path.
 
-### 6. Bundle installation → execution
+### 6. Bundle install → application execution
 
-Extend the current LBP1 implementation into a complete development loop:
+Завершить development loop:
 
 ```text
 .lbp
@@ -213,57 +161,64 @@ verify
  ↓
 install into DATA
  ↓
+ApplicationPlan
+ ↓
+MappingPlan
+ ↓
+Security
+ ↓
+Namespace
+ ↓
 ApplicationInstance
- ↓
-RuntimeSpec
- ↓
-security + mapping
- ↓
-namespace
  ↓
 process supervision
 ```
 
-The final runtime field in RFC-0002 remains a separate Bundle/schema decision;
-existing Rust callers continue to use `RuntimeKind::Luna` as the compatibility
-default.
+`.lbp` остаётся отдельным Bundle format; System Image остаётся SquashFS.
 
 ### 7. Durable update / boot state
 
-Connect `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` and
-`luna-update-manager` to concrete mutation backends while preserving independent
-System Image/kernel updates and revision-checked durable state.
+Связать `luna-system-manager`, `luna-kernel-manager`, `luna-app-manager` и `luna-update-manager` с конкретными mutation backends, сохранив независимость обновлений System Image и kernel и revision-checked durable state.
 
 ### 8. Production hardening
 
-- complete LBP1 conformance and Ed25519 trust binding;
-- final IPC/event transport;
+- полная LBP1 conformance и Ed25519 trust binding;
+- итоговый IPC/event transport;
 - resource controls;
-- production-safe child creation instead of complex `pre_exec` namespace setup;
-- Secure Boot and release-image signing;
-- recovery and interrupted-update validation.
+- production-safe child creation вместо сложного `pre_exec` namespace setup;
+- Secure Boot и release-image signing;
+- recovery и interrupted-update validation.
 
-## Git workflow
+## Phase 0 — архитектурные контракты
 
-`main` is the canonical integration branch and is protected by the repository
-ruleset. Normal implementation work uses one short-lived development branch
-from current `main` and one PR against `main`. Stacked `integration/*` PR chains
-are not the normal workflow. See `docs/decisions/2026-09-01-GIT-WORKFLOW.md` and
-`docs/decisions/2026-09-01-MAIN-PROTECTION.md`.
+Перед следующим крупным implementation cycle нужно отдельно рассмотреть пять draft contracts:
 
-## Non-negotiable constraints
+```text
+docs/contracts/SYSTEM-IMAGE-CONTRACT.md
+docs/contracts/KERNEL-CONTRACT.md
+docs/contracts/BOOT-STATE-CONTRACT.md
+docs/contracts/BOOT-HANDOFF-CONTRACT.md
+docs/contracts/FAILURE-RECOVERY-CONTRACT.md
+```
 
-- System Image = direct SquashFS.
+Они находятся в `develop` как черновики и не меняют SoT до явного принятия.
+
+## Правила Git
+
+`main` — каноническая интеграционная ветка. Обычная работа ведётся в короткоживущей ветке от актуального `main` с PR в `main`. Текущая рабочая ветка документационной консолидации — `develop`.
+
+## Неподлежащие пересмотру ограничения
+
+- System Image = непосредственно SquashFS.
 - `.lbp` = Bundle transport/archive format.
-- SYSTEM is immutable/versioned; DATA is mutable.
-- `luna-security` remains the central policy authority.
-- `luna-root-mapping` remains the mapping layer.
-- `luna-namespace` remains the Linux namespace/materialization layer.
-- `luna-system-runtime` is the sole owner of process supervision.
-- `UserSession` is the combined user/session entity.
-- TTY/serial is development, diagnostic or recovery-only; it is never the normal user path.
-- Normal boot uses a GUI splash, graphical login and the Wayland → niri → Noctalia desktop path.
-- Boot Menu is entered only on explicit request and uses the fixed order: Continue, Verbose Boot, System Image selection, Recovery, Factory, External/USB.
-- Verbose Boot suppresses the splash and enables full diagnostics for that boot.
-- `RuntimeKind` is only an ApplicationInstance execution-environment value; no generic `luna-runtime` component exists.
-- Accepted decisions are recorded under `docs/decisions/` and consolidated into the SoT.
+- SYSTEM immutable/versioned; DATA mutable.
+- `luna-security` — центральная policy authority.
+- `luna-root-mapping` — mapping layer.
+- `luna-namespace` — namespace/materialization layer.
+- `luna-system-runtime` — единственный system-wide supervisor.
+- `UserSession` — объединённая user/session entity.
+- TTY/serial — только development, diagnostics или recovery.
+- Нормальный boot — GUI splash → graphical login → Wayland → niri → Noctalia.
+- Boot Menu открывается только по явному запросу `B` и имеет фиксированный порядок Continue, Verbose, Image, Recovery, Factory, External/USB.
+- `RuntimeKind` — только execution-environment value; generic `luna-runtime` отсутствует.
+- Принятые решения находятся в `docs/decisions/` и консолидируются в SoT.

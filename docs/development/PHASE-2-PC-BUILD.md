@@ -1,8 +1,8 @@
-# Phase 2 — PC Build Handoff
+# Phase 2 — передача PC build
 
-This file is the current continuation note for the `story2` development line.
+Это текущая заметка по линии Phase 2.
 
-## Current implemented chain
+## Реализованная цепочка
 
 ```text
 UEFI
@@ -11,7 +11,7 @@ luna-boot.efi
  ↓
 Linux x86_64 kernel
  ↓
-small early initramfs
+ранний initramfs
  ↓
 SYSTEM
  └── versioned SquashFS System Image
@@ -23,54 +23,57 @@ luna-system-runtime
  ↓
 UserSession
  ↓
-/usr/bin/luna-session
+Wayland → niri → Noctalia
 ```
 
-The system userspace runtime is built with musl. Runtime choice for applications
-is typed independently as `luna`, `glibc` or `bundle`, and is already connected
-to mapping and Security contracts.
+Системный userspace runtime собирается с musl. Выбор runtime приложения является типизированным свойством execution environment: `luna`, `glibc` или `bundle`.
 
-## What the PC build does
+## Что делает PC build
 
-`tools/build-pc-image.sh` creates an x86_64 UEFI/GPT image with EFI, SYSTEM and
-DATA partitions, packages `luna-boot.efi`, a versioned SquashFS System Image,
-initramfs and a Linux kernel, and creates a persistent DATA filesystem.
+`tools/build-pc-image.sh` создаёт x86_64 UEFI/GPT image с EFI, SYSTEM и DATA, упаковывает `luna-boot.efi`, versioned SquashFS System Image, initramfs и Linux kernel, а также создаёт persistent DATA filesystem.
 
-The builder never writes to a physical disk. `tools/install-pc-image.sh` is the
-separate guarded destructive installation action.
+Сборщик никогда не пишет на физический диск. `tools/install-pc-image.sh` — отдельное явно подтверждаемое destructive действие.
 
-## Current user experience
+## Пользовательский путь
 
-The default development target is quiet and boots a normal PC display console.
-The system starts a `UserSession` and `/usr/bin/luna-session`. Until the final
-graphical payload is packaged, the session falls back to `/bin/sh`, keeping the
-build useful for development and recovery.
+Development image сохраняет обычный тихий boot path. После раннего userspace управление передаётся `luna-system-runtime`, который создаёт `UserSession`.
 
-When a prepared desktop root supplies `niri-session` and `/etc/luna/mode`
-contains `graphical`, the existing graphical UserSession boundary is used.
-The final Wayland/niri/Noctalia integration still requires its own runtime
-payload, seat and device/portal wiring.
+Отдельного `luna-session` компонента нет и не должно появляться. Графическая граница принадлежит `UserSession`:
 
-## Invariants to keep
+```text
+luna-system-runtime
+  ↓
+UserSession
+  ↓
+Wayland
+  ↓
+niri
+  ↓
+Noctalia
+```
 
-- SYSTEM is immutable/versioned; DATA is mutable.
-- System Image is directly SquashFS.
-- `.lbp` remains Bundle transport/archive format.
-- `luna-system-runtime` is the sole process supervisor.
-- `luna-security` remains the policy authority.
-- `luna-root-mapping` remains the mapping layer.
-- `luna-namespace` remains the Linux namespace/materialization layer.
-- `UserSession` remains the combined user/session entity.
-- System Image and kernel remain independently updateable.
-- TTY/serial is not the final normal desktop entry path.
+Наличие development fallback-инструментов не превращает shell или serial console в архитектурную границу Luna.
 
-## Next large passes
+## Инварианты
 
-1. Validate the PC image on QEMU and a real UEFI machine.
-2. Finish runtime materialization for glibc/Bundle-private runtimes.
-3. Add fine-grained device authorization and filtered `/dev`.
-4. Integrate the real graphical niri + Noctalia payload.
-5. Implement Bundle installation and end-to-end ApplicationInstance launch.
-6. Replace development `pre_exec` namespace setup with a production-safe child-creation primitive.
+- SYSTEM неизменяем и версионирован; DATA изменяем.
+- System Image — непосредственно SquashFS.
+- `.lbp` остаётся Bundle transport/archive format.
+- `luna-system-runtime` — единственный системный runtime/supervisor.
+- `luna-security` — authority политики.
+- `luna-root-mapping` — слой mapping.
+- `luna-namespace` — Linux namespace/materialization layer.
+- `UserSession` — совмещённая пользовательская/сессионная сущность.
+- System Image и kernel обновляются независимо.
+- TTY/serial не является штатным desktop entry path.
 
-This continuation note supplements `docs/ARCHITECTURE.md` and dated decision records; it does not override accepted architecture decisions.
+## Следующие крупные проходы
+
+1. Проверить PC image в QEMU и на реальном UEFI hardware.
+2. Завершить runtime materialization для `glibc` и Bundle-private runtimes.
+3. Добавить тонкую авторизацию устройств и фильтрованный `/dev`.
+4. Завершить реальный graphical payload niri + Noctalia.
+5. Довести установку Bundle до end-to-end `ApplicationInstance` launch.
+6. Заменить development `pre_exec` setup на production-safe child-creation primitive.
+
+Эта заметка дополняет `docs/ARCHITECTURE.md` и не переопределяет принятые архитектурные решения.

@@ -1,26 +1,46 @@
 # `luna-event`
 
-**Status:** implemented event-domain boundary
+**Статус:** domain boundary реализована; транспортная и durable integration продолжаются.
 
-## Purpose
-Define Luna event and subscription contracts independently of the final broker/transport.
+## Назначение
 
-## Owns
-- `EventType`;
-- `Event`;
-- publisher/subscriber contracts;
-- subscriptions and delivery semantics.
+Типизированный домен событий Luna и контракты подписки/доставки.
 
-## Contract
-Events and Operations are different concepts. Events may be Ephemeral, Persistent or Audit. Persistent/Audit events support history/replay where required. Delivery is bounded and backpressure-aware; Audit events must not be silently dropped.
+## Владеет
 
-Operation sequence is monotonic within an operation when one exists; timestamps are metadata and not ordering authority.
+- event identities/types;
+- subscriptions;
+- delivery contracts;
+- правилами lifecycle подписки.
 
-## Does not own
-A specific broker, GUI notification system, persistence database, authorization policy or operation execution.
+## Правило
 
-## Dependencies
-Minimal shared values. Tokio is an accepted higher-level async direction for components that need it, but this domain crate need not depend on Tokio merely to define its contract.
+Событие описывает факт, а не скрытую команду. Нельзя помещать в event payload произвольный mutable global state.
 
-## Open
-Final transport/broker and durable event persistence are integration decisions.
+Примеры:
+
+```text
+DeviceAdded
+DeviceRemoved
+VolumeMounted
+UserLoggedIn
+UserLoggedOut
+ApplicationStarted
+ApplicationExited
+SystemUpdated
+KernelChanged
+```
+
+Разные domain events должны иметь отдельные типизированные payloads, а не один универсальный JSON/string payload.
+
+## Не владеет
+
+IPC transport, durable state storage, authorization, device discovery или process supervision.
+
+## Зависимости
+
+Минимальные shared identifiers и выбранный transport layer.
+
+## Открыто
+
+IPC backend, durability/replay semantics и интеграция с desktop/system runtime.
