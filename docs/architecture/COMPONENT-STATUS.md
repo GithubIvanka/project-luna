@@ -6,7 +6,7 @@
 
 | Граница | Текущее состояние | Контракт | Основная оставшаяся работа |
 |---|---|---|---|
-| `luna-boot.efi` | частично реализован, тестовый boot path доказан | `LUNA-BOOT.md` | реальный image/kernel selection, fallback, final handoff |
+| `luna-boot.efi` | реализован development boot path; hardening продолжается | `LUNA-BOOT.md` | production handoff/fallback state/integration |
 | System Image | payload собирается | `SYSTEM-IMAGE.md` + Phase 0 contract | финальная manifest/compatibility specification |
 | Recovery/Factory | архитектура определена | `RECOVERY-FACTORY.md` + Phase 0 contract | полноценные среды и repair flow |
 | `luna-common` | реализован | `LUNA-COMMON.md` | сохранить минимальным |
