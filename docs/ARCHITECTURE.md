@@ -268,6 +268,8 @@ Boot State не является заменой `luna-state` и не долже�
 - обычный system service management;
 - GUI session management.
 
+Текущая реализация уже содержит dynamic SYSTEM image/kernel discovery, manifest validation, compatible-kernel selection, графический splash, ordered Boot Menu и soft fallback; дальнейшая работа относится к hardening и конечной интеграции.
+
 ---
 
 # 12. Обычная загрузка
@@ -280,6 +282,8 @@ Power
 UEFI
   ↓
 luna-boot.efi
+  ↓
+GUI boot splash
   ↓
 совместимый kernel + System Image
   ↓
@@ -300,7 +304,7 @@ niri
 Noctalia Shell
 ```
 
-При входе `luna-boot.efi` делает неблокирующее чтение доступного UEFI input buffer. Если `B`/`b` уже нажата, открывается Boot Menu. Иначе обычная загрузка продолжается без искусственной задержки.
+При входе `luna-boot.efi` делает неблокирующее чтение доступного UEFI input buffer. Если `B`/`b` нажата, открывается Boot Menu. Иначе обычная загрузка продолжается без искусственной задержки.
 
 ---
 
@@ -746,7 +750,7 @@ inspect
   ↓
 validate
   ↓
-integrity/trust checks
+integrity / trust checks
   ↓
 security decision
   ↓
@@ -1367,18 +1371,19 @@ shutdown / reboot / resume
 
 - архитектурный цикл Phase 1.1–1.6-HZ завершён и решения консолидированы;
 - проект находится в Phase 2: runtime/boot integration, PC bring-up, desktop integration и hardening;
+- `luna-boot.efi` уже имеет GUI boot splash, dynamic SYSTEM image/kernel discovery, manifest validation, compatible kernel selection, ordered Boot Menu и soft fallback;
 - `luna-namespace` содержит рабочие Linux namespace/materialization primitives;
-- `luna-state` использует `redb` как первый durable backend;
+- `luna-state` использует `redb` как durable backend;
 - `luna-update-manager` содержит checkpointed update/rollback orchestration;
 - `luna-bundle` содержит LBP1 implementation для RFC-0002;
 - `luna-system-runtime` уже работает с реальными Linux child processes и UserSession/process lifecycle;
 - `luna-app-runtime` владеет ApplicationInstance lifecycle и execution setup;
-- `luna-init` реализован как standalone musl early-userspace binary;
+- `luna-init` реализован как standalone musl early-userspace binary и используется как `/init` в initramfs;
 - существует reproducible x86_64 UEFI/GPT PC development image и QEMU/OVMF bring-up path;
 - desktop payload уже включает native niri/Noctalia stack, graphical login, Ghostty, fish, Yazi, audio, network, Bluetooth и removable-media service payload;
-- hardware validation seat/input/GPU и часть production integration ещё остаются работой.
+- hardware seat/input/GPU validation и часть production integration остаются работой.
 
-Этот статус не меняет архитектурных контрактов и не означает, что перечисленный компонент полностью завершён.
+Этот статус отражает фактическое состояние mainline на момент редакции и не означает завершение соответствующей capability целиком.
 
 ---
 
@@ -1404,7 +1409,7 @@ docs/contracts/BOOT-HANDOFF-CONTRACT.md
 docs/contracts/FAILURE-RECOVERY-CONTRACT.md
 ```
 
-Их нельзя считать принятыми архитектурными решениями до отдельного рассмотрения.
+Они не считаются принятыми архитектурными решениями до отдельного рассмотрения.
 
 ---
 
@@ -1420,8 +1425,8 @@ docs/architecture/DEVELOPMENT-ROADMAP.md
 
 ```text
 Phase 0  → контракты
-Phase 1  → UEFI / luna-boot
-Phase 2  → luna-init / logical root
+Phase 1  → UEFI / luna-boot hardening
+Phase 2  → luna-init / logical root integration
 Phase 3  → system runtime / state / events
 Phase 4  → devices / storage
 Phase 5  → user / authentication / graphical session
