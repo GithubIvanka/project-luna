@@ -1,7 +1,7 @@
 # Project Luna — Current Crate Map
 
-**Status:** current implementation map
-**Authority:** `docs/ARCHITECTURE.md`
+**Status:** current implementation map  
+**Authority:** `docs/ARCHITECTURE.md`  
 **Component contracts:** `docs/architecture/components/`
 
 This document describes repository package boundaries. It does not independently redefine architecture.
@@ -43,6 +43,9 @@ This document describes repository package boundaries. It does not independently
 | `luna-user-session` | UserSession domain and lifecycle contract | lib |
 | `luna-app-runtime` | ApplicationInstance execution/lifecycle and execution-environment preparation | lib + bin where required |
 | `luna-login` | Graphical login integration for the UserSession authentication phase | lib + bin where required |
+| `luna-init` | Native musl early-userspace bootstrap; prepares SYSTEM/DATA and enters final root | standalone bin |
+
+`luna-init` is intentionally outside the ordinary userspace workspace: it must remain a minimal early-userspace binary and is built explicitly by the image builders.
 
 There is no separate `luna-session`, `luna-runtime` or `luna-run-session` architecture component.
 
@@ -114,7 +117,7 @@ They may implement parts of an accepted boundary but must not cause a new Luna c
 
 ## Current status
 
-All workspace crates above correspond to current repository boundaries. Their implementation maturity differs; see the individual component contracts and `docs/architecture/OS-CAPABILITY-GAPS.md`.
+All workspace crates above correspond to current repository boundaries. `luna-init` is the deliberate standalone early-userspace exception. Their implementation maturity differs; see the individual component contracts and `docs/architecture/OS-CAPABILITY-GAPS.md`.
 
 RFC-0002 Bundle Format v1 is accepted and `luna-bundle` contains the LBP1 implementation.
 
