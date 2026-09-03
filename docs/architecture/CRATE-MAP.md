@@ -1,91 +1,89 @@
-# Project Luna — Current Crate Map
+# Project Luna — карта текущих crate
 
-**Status:** current implementation map  
-**Authority:** `docs/ARCHITECTURE.md`  
-**Component contracts:** `docs/architecture/components/`
+**Статус:** текущая карта реализации.  
+**Источник архитектуры:** `docs/ARCHITECTURE.md`.  
+**Контракты компонентов:** `docs/architecture/components/`.
 
-This document describes repository package boundaries. It does not independently redefine architecture.
+Документ описывает реальные границы репозитория и не переопределяет архитектуру.
 
-## Foundation
+## Основа
 
-| Crate | Responsibility | Form |
+| Crate | Ответственность | Форма |
 |---|---|---|
-| `luna-common` | Small shared value types and identifiers | lib |
-| `luna-fs` | Low-level filesystem primitives and metadata | lib |
-| `luna-root-mapping` | Logical path and mapping semantics | lib |
+| `luna-common` | небольшие общие типы и идентификаторы | lib |
+| `luna-fs` | низкоуровневые filesystem primitives и metadata | lib |
+| `luna-root-mapping` | логические пути и semantics mapping | lib |
 | `luna-namespace` | Linux namespace/materialization primitives | lib |
-| `luna-config` | Configuration model and scoped configuration | lib |
+| `luna-config` | модель конфигурации и области её применения | lib |
 
-## Policy and state
+## Policy и state
 
-| Crate | Responsibility | Form |
+| Crate | Ответственность | Форма |
 |---|---|---|
-| `luna-security` | Policy, authorization, grants and trust | lib |
-| `luna-state` | Persistent state domain, storage abstraction and transactions | lib |
-| `luna-event` | Event domain, subscriptions and delivery contracts | lib |
+| `luna-security` | policy, authorization, grants и trust | lib |
+| `luna-state` | durable state, storage abstraction и transactions | lib |
+| `luna-event` | события, подписки и delivery contracts | lib |
 
-## Bundle and management
+## Bundles и managers
 
-| Crate | Responsibility | Form |
+| Crate | Ответственность | Форма |
 |---|---|---|
-| `luna-bundle` | Bundle domain, manifest, validation and RFC-0002/LBP1 codec | lib |
-| `luna-app-manager` | Application install/import/update/removal/verification/migration | lib + bin where required |
-| `luna-system-manager` | System state model and queries | lib + bin where required |
-| `luna-update-manager` | State-changing update execution, checkpoints and rollback coordination | lib + bin where required |
-| `luna-kernel-manager` | Kernel inventory, metadata and compatibility queries | lib + bin where required |
-| `luna-device-manager` | Device and volume discovery/lifecycle | lib + bin where required |
+| `luna-bundle` | Bundle domain, manifest, validation и RFC-0002/LBP1 codec | lib |
+| `luna-app-manager` | install/import/update/removal/verification/migration | lib + bin при необходимости |
+| `luna-system-manager` | модель состояния системы и запросы | lib + bin при необходимости |
+| `luna-update-manager` | state-changing updates, checkpoints и rollback | lib + bin при необходимости |
+| `luna-kernel-manager` | kernel inventory, metadata и compatibility | lib + bin при необходимости |
+| `luna-device-manager` | device/volume discovery и lifecycle | lib + bin при необходимости |
 
-## Runtime / session / login
+## Runtime, session и login
 
-| Crate | Responsibility | Form |
+| Crate | Ответственность | Форма |
 |---|---|---|
-| `luna-system-runtime` | Single system-wide runtime/supervision and UserSession orchestration | lib + bin |
-| `luna-user-session` | UserSession domain and lifecycle contract | lib |
-| `luna-app-runtime` | ApplicationInstance execution/lifecycle and execution-environment preparation | lib + bin where required |
-| `luna-login` | Graphical login integration for the UserSession authentication phase | lib + bin where required |
-| `luna-init` | Native musl early-userspace bootstrap; prepares SYSTEM/DATA and enters final root | standalone bin |
+| `luna-system-runtime` | единственный system-wide runtime/supervisor и orchestration UserSession | lib + bin |
+| `luna-user-session` | domain и lifecycle `UserSession` | lib |
+| `luna-app-runtime` | execution/lifecycle `ApplicationInstance` | lib + bin при необходимости |
+| `luna-login` | graphical login boundary и authentication phase | lib + bin при необходимости |
+| `luna-init` | standalone musl early userspace | standalone bin |
 
-`luna-init` is intentionally outside the ordinary userspace workspace: it must remain a minimal early-userspace binary and is built explicitly by the image builders.
+`luna-init` сознательно остаётся вне обычного userspace workspace.
 
-There is no separate `luna-session`, `luna-runtime` or `luna-run-session` architecture component.
+## Пользовательские и domain-клиенты
 
-## User-facing / service-domain clients
-
-| Crate | Responsibility | Form |
+| Crate | Ответственность | Форма |
 |---|---|---|
-| `luna-cli` | Thin user-facing CLI client | lib + bin |
-| `luna-files` | GTK4 file-manager client/boundary | lib + bin |
-| `luna-audio` | Audio domain/provider boundary | lib |
-| `luna-network` | Network domain/provider boundary | lib |
+| `luna-cli` | тонкий пользовательский CLI | lib + bin |
+| `luna-files` | file-manager client/boundary | lib + bin |
+| `luna-audio` | audio domain/provider boundary | lib |
+| `luna-network` | network domain/provider boundary | lib |
 | `luna-bluetooth` | Bluetooth domain/provider boundary | lib |
 
-These domain crates do not automatically imply separate daemons. Linux services such as PipeWire, NetworkManager and BlueZ are implementation infrastructure unless an explicit Luna boundary says otherwise.
+Наличие domain crate не означает автоматически отдельный daemon. Например, NetworkManager, PipeWire, BlueZ и D-Bus — implementation infrastructure, если только отдельное решение не создаёт Luna boundary поверх них.
 
 ## Boot
 
-`luna-boot.efi` is a separate UEFI project under `boot/luna-boot/` and is outside the ordinary userspace workspace.
+`luna-boot.efi` находится в `boot/luna-boot/` и является отдельным UEFI-проектом.
 
-It owns the UEFI boot boundary, image/kernel selection and boot-time fallback/handoff. It does not own UserSessions or application lifecycle.
+Он владеет UEFI boot boundary, image/kernel selection и boot-time fallback/handoff, но не владеет UserSession или application lifecycle.
 
-## Dependency direction
+## Направление зависимостей
 
 ```text
 luna-common
-   ↑
+    ↑
 foundation crates
-   ↑
-policy/state/bundle/domain crates
-   ↑
+    ↑
+policy/state/bundle/domain
+    ↑
 managers
-   ↑
+    ↑
 runtime
-   ↑
+    ↑
 CLI / GUI clients
 ```
 
-Higher-level components consume lower-level contracts. Lower layers must not depend upward merely for convenience.
+Нижний слой не должен зависеть от верхнего только ради удобства.
 
-## Architectural hierarchy
+## Runtime hierarchy
 
 ```text
 luna-system-runtime
@@ -99,28 +97,19 @@ luna-system-runtime
     └── GUI/Desktop session
 ```
 
-## Important non-boundaries
+## Не-Luna boundaries
 
-The following are implementation mechanisms, not Luna architecture components by themselves:
+Следующие вещи являются механизмами реализации, а не новыми архитектурными компонентами сами по себе:
 
-- `setpriv` or similar identity-transition helpers;
-- greetd;
-- Noctalia Greeter;
-- niri-session shell/environment wrapper;
+- `setpriv` и аналогичные identity helpers;
+- greetd/greeter;
+- niri-session wrappers;
 - PipeWire/WirePlumber;
 - NetworkManager;
 - BlueZ;
 - D-Bus;
 - Yazi.
 
-They may implement parts of an accepted boundary but must not cause a new Luna component to appear without an accepted architectural decision.
+## Правило развития
 
-## Current status
-
-All workspace crates above correspond to current repository boundaries. `luna-init` is the deliberate standalone early-userspace exception. Their implementation maturity differs; see the individual component contracts and `docs/architecture/OS-CAPABILITY-GAPS.md`.
-
-RFC-0002 Bundle Format v1 is accepted and `luna-bundle` contains the LBP1 implementation.
-
-The first durable `luna-state` backend is `redb`.
-
-`luna-namespace` contains the first Linux namespace/materialization backend.
+Архитектурная подсистема не становится новым crate автоматически. Crate появляется при начале реальной разработки границы и после проверки зависимости с текущей архитектурой.
