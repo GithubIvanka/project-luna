@@ -1,27 +1,10 @@
-# Project Luna — Recovery and Factory
+# Project Luna — Recovery и Factory
 
-**Status:** accepted architecture
+**Статус:** принятая архитектурная модель; детали recovery state machine ещё уточняются.
 
-## Recovery
+## 1. Factory
 
-Recovery is a functional Luna environment used when the normal system cannot safely operate.
-
-Recovery must be able to:
-
-- diagnose system failures;
-- repair installed DATA components where supported;
-- disable/remove a broken driver;
-- recover user data;
-- access external media;
-- restore a usable normal boot state.
-
-Recovery does not depend on normal persistent DATA being available. Its recovery identity/state is temporary and lives in RAM unless a future explicit design says otherwise.
-
-Recovery is not merely a diagnostic shell. TTY/serial access may exist for development/diagnostics/recovery, but is not the normal user login path.
-
-## Factory
-
-Factory is the original known-good installation state:
+Factory — сохранённая известная рабочая комбинация:
 
 ```text
 Factory System Image
@@ -29,16 +12,63 @@ Factory System Image
 Factory Kernel
 ```
 
-Factory remains preserved and immutable. Normal update/removal/retention operations must never destroy it.
+Она создаётся при первоначальной установке и не уничтожается обычными update/retention операциями.
 
-Factory is distinct from Recovery: Factory boots the preserved original system state, while Recovery is the repair environment.
+## 2. Normal fallback
 
-## Failure policy
+```text
+current image/kernel
+        ↓ failure
+previous compatible choice
+        ↓ failure
+next usable fallback
+        ↓
+Factory
+```
 
-The system should diagnose and repair failures where possible before reaching an unrecoverable emergency state.
+При отказе System Image допускается soft fallback без полного reboot, если ошибка обнаружена в userspace и новая попытка безопасна. Kernel-level failure может требовать reboot.
 
-Boot fallback is owned by `luna-boot`; recovery functionality is provided by the recovery system environment and relevant Luna management components.
+## 3. Recovery
 
-## Boundaries
+Если обычная и Factory загрузка недоступны, `luna-boot.efi` должен перейти в Recovery Environment.
 
-Recovery must not become a second ordinary system runtime, application manager or bootloader. It uses the same architectural contracts where possible while operating with reduced/temporary persistent state.
+Recovery — отдельный boot mode, а не обычный TTY.
+
+## 4. Recovery capabilities
+
+Минимальный набор будущего recovery:
+
+- просмотр image/kernel inventory;
+- проверка metadata и состояния;
+- rollback;
+- выбор Factory;
+- отключение проблемного компонента;
+- диагностика;
+- экспорт диагностических данных.
+
+Recovery не должен зависеть от работоспособности обычного desktop userspace.
+
+## 5. DATA
+
+Recovery должен быть способен стартовать без обязательного доступа ко всему DATA. Доступ к DATA определяется конкретной диагностической или восстановительной операцией и должен быть ограниченным.
+
+## 6. Failure classes
+
+Нужно различать:
+
+- malformed boot artifact;
+- incompatible image/kernel;
+- System Image startup failure;
+- kernel failure;
+- early-userspace failure;
+- исчерпание usable fallback.
+
+Одна причина не должна автоматически считаться другой.
+
+## 7. Rollback
+
+Rollback возвращает последнюю подтверждённую рабочую комбинацию либо другую валидную fallback choice. Пользовательские данные не должны удаляться как побочный эффект обычного rollback.
+
+## 8. Открыто
+
+До отдельного контракта остаются: точная state machine, health confirmation, счётчик попыток, формат recovery state и безопасные операции над driver/application state.
