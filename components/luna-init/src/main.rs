@@ -95,7 +95,7 @@ fn system_image_from_cmdline(content: &str) -> Result<String, String> {
 
     if !value.starts_with("/images/")
         || !value.ends_with(".squashfs")
-        || value.contains("/⸮/")
+        || value.contains("../")
         || value.contains("//")
     {
         return Err(format!("invalid System Image path: {value}"));
@@ -168,11 +168,14 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{system_image_from_cmdline, cmdline_value};
+    use super::{cmdline_value, system_image_from_cmdline};
 
     #[test]
     fn parses_boot_device_from_cmdline() {
-        let value = cmdline_value("quiet luna.system_device=/dev/vda2 luna.data_device=/dev/vda3", "luna.system_device");
+        let value = cmdline_value(
+            "quiet luna.system_device=/dev/vda2 luna.data_device=/dev/vda3",
+            "luna.system_device",
+        );
         assert_eq!(value.as_deref(), Some("/dev/vda2"));
     }
 
