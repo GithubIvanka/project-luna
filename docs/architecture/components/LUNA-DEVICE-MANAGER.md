@@ -1,41 +1,52 @@
 # `luna-device-manager`
 
-**Status:** accepted boundary; integration incomplete
+**Статус:** архитектурная граница/scaffold; реальное discovery и automount ещё в разработке.
 
-## Purpose
-Discover devices and manage volume lifecycle, including Luna's automatic external-volume behavior.
+## Назначение
 
-## Owns
-- device discovery/lifecycle;
-- filesystem/volume discovery;
-- automount orchestration;
-- friendly volume identity exposed to clients;
-- safe unmount/eject lifecycle;
-- managed volume state under `DATA/system/volumes`.
+Управляет обнаружением и жизненным циклом аппаратных устройств и томов, которые должны быть представлены системе и desktop.
 
-## Does not own
-Raw kernel driver implementation, filesystem primitives, application permissions, file-manager UI or application execution.
+## Владеет
 
-## External-media contract
+- discovery устройств;
+- device identity/state;
+- volume lifecycle;
+- hotplug/hot-unplug;
+- safe mount/unmount/eject orchestration на системной границе;
+- публикацией device/volume events.
+
+## Не владеет
+
+Низкоуровневым filesystem API, Bundle mapping, application authorization, desktop widgets или UEFI boot.
+
+## Внешние носители
+
+Целевой сценарий:
 
 ```text
 USB inserted
  ↓
-device detected
+discovery
  ↓
-filesystem detected
+filesystem detection
  ↓
-automount
+volume mount
  ↓
-volume appears to file manager
+event
+ ↓
+file manager
 ```
 
-No manual `/dev/...` or `/mnt/...` workflow is required for normal use.
+Ручной `mount` не должен быть обязательным пользовательским сценарием.
 
-Connecting media must not silently execute an application. Autorun is disabled or confirmation-based according to policy.
+## Безопасность
 
-## Dependencies
-`luna-fs`, `luna-security`, device/kernel facilities, and event/state contracts.
+Доступ приложения к volume не следует считать разрешённым только из факта его монтирования. Policy для конкретного приложения проходит через `luna-security`.
 
-## Open
-Concrete device backend, filesystem probing, automount implementation and network-volume extension remain.
+## Зависимости
+
+`luna-fs`, `luna-event`, `luna-security` и Linux device/filesystem mechanisms.
+
+## Открыто
+
+Реальный discovery backend, automount/eject lifecycle, removable-media policy и полная интеграция с desktop.
