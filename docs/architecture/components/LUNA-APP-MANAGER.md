@@ -1,35 +1,52 @@
 # `luna-app-manager`
 
-**Status:** accepted boundary; implementation/integration in progress
+**Статус:** принятая граница; интеграция и hardening продолжаются.
 
-## Purpose
-Manage application Bundle lifecycle and mutable application-data lifecycle.
+## Назначение
 
-## Owns
-- install/import;
-- verification and registration;
+Управляет жизненным циклом установленных Luna Bundles и связанной с ними изменяемой application data. Компонент отвечает за состояние установленного приложения, но не за выполнение его процессов.
+
+## Владеет
+
+- install/import Bundle;
+- verification и registration;
 - update/removal;
 - migration;
-- application-data discovery/cleanup policy;
-- ingestion of supported Linux packages such as `.deb`/`.rpm` into Luna Bundle form.
+- policy очистки application data;
+- импорт поддерживаемых `.deb`/`.rpm` в Luna Bundle form.
 
-## Does not own
-Normal process execution, UserSessions, namespace enforcement, authorization policy, low-level filesystem primitives or system update transaction orchestration.
+## Не владеет
 
-## Install boundary
-The safe Bundle flow is:
+`UserSession`, запуском `ApplicationInstance`, созданием namespace, authorization policy, низкоуровневым filesystem backend или транзакциями обновления System Image.
+
+## Установка
+
+Безопасный поток:
 
 ```text
-inspect → validate → integrity/trust checks → security decision → stage → atomic commit
+inspect
+  ↓
+validate
+  ↓
+integrity / trust checks
+  ↓
+security decision
+  ↓
+stage
+  ↓
+atomic commit
 ```
 
-A failed install must not leave a partially registered Bundle.
+Ошибка должна приводить к откату незавершённой операции: частично зарегистрированный Bundle недопустим.
 
-## Storage
-Installed immutable Bundles live under `DATA/system/apps`. User data/config remain under the corresponding user DATA tree.
+## Хранилище
 
-## Dependencies
-`luna-bundle`, `luna-fs`, `luna-config`, `luna-security`, `luna-state` and update contracts as required. It must not become the app runtime.
+Установленные immutable Bundles находятся в `DATA/system/apps`. Пользовательские данные и настройки хранятся в соответствующем `DATA/users/<user>/`.
 
-## Open
-Complete dependency resolution, transaction/reconciliation behavior and package-import hardening remain.
+## Зависимости
+
+Использует `luna-bundle`, `luna-fs`, `luna-config`, `luna-security`, `luna-state` и update contracts при необходимости.
+
+## Открыто
+
+Полная dependency resolution, reconciliation транзакций, миграции данных и hardening импорта сторонних пакетов.
