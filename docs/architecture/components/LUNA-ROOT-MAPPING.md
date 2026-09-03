@@ -1,36 +1,57 @@
 # `luna-root-mapping`
 
-**Status:** implemented contract; production integration incomplete
+**Статус:** foundation реализован; integration с logical root/materialization продолжается.
 
-## Purpose
-Construct validated logical filesystem mappings for a namespace.
+## Назначение
 
-## Owns
-- `LogicalPath` / `PhysicalPath` semantics;
-- mapping declarations and validated plans;
-- conflict detection;
-- mapping state for an application/security context.
+Определяет логическую модель filesystem mapping и строит проверяемый `MappingPlan` для конкретной execution environment.
 
-## Does not own
-- authorization;
-- raw filesystem I/O;
-- Linux namespace creation;
-- application lifecycle;
-- user/session management.
+## Владеет
 
-## Mapping model
+- logical paths;
+- mapping declarations;
+- Root Mapping semantics;
+- построением и валидацией `MappingPlan`;
+- связыванием Bundle/resource declarations с runtime/user/system context.
 
-Mappings are semantic and policy-controlled. File mappings are the default granularity; explicit subtree mappings are allowed for semantic classes such as shared library/resource trees.
+## Не владеет
 
-The usual resource lookup layering is user → application → system where that resource class supports those layers. There is no universal filesystem precedence rule.
+Authorization policy, namespace creation, raw filesystem I/O, Bundle container codec или process lifecycle.
 
-## Contract
-A mapping declaration is not a security grant. An active ApplicationInstance cannot mutate its accepted mapping table in place; a change creates a new validated mapping state and may require security revalidation.
+## Принцип
 
-Physical DATA/SYSTEM paths remain implementation details and must not leak into Bundle mapping declarations.
+Физические пути DATA не являются публичной семантикой Bundle. Приложение получает логический view:
 
-## Dependencies
-Consumes filesystem/path primitives and shared values. Security may consume mapping plans, but this crate must not depend upward on the security authority merely to validate permissions.
+```text
+/
+├── app
+├── lib
+├── data
+└── tmp
+```
 
-## Open
-Final mapping classes, materialization strategy and complete System Image lazy-access implementation require further integration work.
+а реальное physical mapping остаётся внутренней реализацией.
+
+## Security boundary
+
+`MappingPlan` описывает требуемое отображение, но не выдаёт право на его materialization.
+
+```text
+MappingPlan
+    ↓
+luna-security
+    ↓
+luna-namespace
+```
+
+## Ошибки
+
+Неполный, неоднозначный или внутренне противоречивый mapping должен отклоняться до security decision.
+
+## Зависимости
+
+`luna-common`, `luna-fs` и domain resource descriptions.
+
+## Открыто
+
+Полная logical-root contract, lazy materialization и mapping rules для user files/external volumes.
