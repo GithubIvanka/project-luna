@@ -1,25 +1,42 @@
 # `luna-cli`
 
-**Status:** client boundary implemented at foundation level
+**Статус:** тонкая клиентская граница реализована; полный command/IPC surface в разработке.
 
-## Purpose
-Provide the user-facing `luna` command as a thin client over Luna backend operations.
+## Назначение
 
-## Owns
-- command parsing and presentation;
-- user-facing invocation of backend contracts;
-- human-readable/structured output selection.
+`luna-cli` предоставляет пользователю единый интерфейс управления Luna. CLI не должен дублировать внутреннюю бизнес-логику managers.
 
-## Does not own
-Domain state, update execution, application process lifecycle, authorization policy or direct mutation of lower-level storage that bypasses the owning backend.
+## Владеет
 
-## Contract
-CLI commands must call the component that owns the operation. A CLI shortcut is not a new ownership boundary.
+- разбором команд и аргументов;
+- формированием запросов к соответствующим Luna services/clients;
+- человекочитаемым и машинным выводом;
+- кодами ошибок CLI.
 
-Long-running operations belong to backend Operation context and must survive CLI disconnect according to the operation contract.
+## Не владеет
 
-## Dependencies
-Backend manager/runtime contracts and shared domain values. The CLI may depend upward; lower-level components must not depend on it.
+System Image transactions, Bundle parsing, authorization policy, namespace creation, UserSession supervision или raw filesystem implementation.
 
-## Open
-Complete command taxonomy, IPC transport and full operation presentation remain to be implemented.
+## Направление
+
+Команда должна быть тонкой:
+
+```text
+luna <command>
+   ↓
+IPC / domain client
+   ↓
+ответ соответствующего компонента
+```
+
+## Возможные области
+
+Конкретная CLI surface формализуется постепенно. Ожидаются домены `system`, `kernel`, `app`, `device`, `update`, `recovery`, но окончательные команды не считаются утверждёнными этим документом.
+
+## Ошибки
+
+Ошибки нижних компонентов должны сохранять семантику до пользовательского слоя, а не превращаться в generic «operation failed».
+
+## Открыто
+
+Полная команда/IPC surface, machine-readable output contract и окончательная UX-модель.
