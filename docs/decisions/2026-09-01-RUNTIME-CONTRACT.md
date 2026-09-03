@@ -142,6 +142,10 @@ The final RFC-0002 TOML field for runtime selection is not defined by this decis
 - libc environments must not be mixed arbitrarily inside one process.
 - Runtime isolation is implemented using the existing mapping/security/namespace architecture, not a new generic runtime manager.
 
-## 9. Implementation boundary
+## 9. Early userspace
+
+The native early-userspace boundary is specified separately in `docs/decisions/2026-09-01-LIBC-INIT.md`. `luna-init` is the `/init` bootstrap program for the development PC/QEMU image and hands off to `/sbin/init = luna-system-runtime`.
+
+## 10. Implementation boundary
 
 The current Linux application launcher may still use its development namespace child-setup mechanism. That is an implementation-hardening issue, not a reason to introduce another architectural component.
