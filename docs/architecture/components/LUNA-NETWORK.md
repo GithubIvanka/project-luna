@@ -1,25 +1,31 @@
 # `luna-network`
 
-**Status:** domain boundary implemented; provider integration incomplete
+**Статус:** domain boundary реализована; provider integration продолжается.
 
-## Purpose
-Expose network connection/device state through a Luna-owned domain boundary.
+## Назначение
 
-## Owns
-- network state;
-- network-device domain model;
-- connection/provider abstraction.
+Предоставляет Luna network domain независимо от конкретного network daemon.
 
-Current domain includes `NetworkState` and `NetworkDevice` concepts.
+## Владеет
 
-## Does not own
-NetworkManager internals, raw device discovery, authorization policy, GUI presentation or application namespace policy.
+- model network interfaces/connections;
+- connection state;
+- профильными настройками на границе Luna;
+- запросами connect/disconnect;
+- provider abstraction и событиями сети.
 
-## Provider direction
-The PC image packages NetworkManager and `nmcli`. This is infrastructure packaging, not complete Luna provider integration.
+## Не владеет
 
-## Dependencies
-Device/security/session/event contracts and the selected Linux network service.
+Низкоуровневым kernel networking, общей device discovery, GUI widgets, authorization policy или UserSession lifecycle.
 
-## Open
-D-Bus provider integration, connection management API/events, UI integration and policy enforcement remain.
+## Provider
+
+Текущий PC image использует NetworkManager как Linux provider infrastructure. Это не означает, что его внутренний API становится частью Luna architecture.
+
+## Security
+
+Policy доступа приложения к сети задаётся через `luna-security`; наличие network interface не означает автоматический доступ каждого приложения.
+
+## Открыто
+
+NetworkManager/D-Bus integration, network state events, connection UI и policy enforcement.
