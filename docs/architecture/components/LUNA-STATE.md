@@ -1,32 +1,37 @@
 # `luna-state`
 
-**Status:** implemented durable state boundary
+**Статус:** durable boundary реализована; первый backend — `redb`.
 
-## Purpose
-Provide durable logical state with atomic transactions and revision-based concurrency control.
+## Назначение
 
-## Owns
-- `StateKey`, `StateValue`;
-- `Revision`;
-- `StateMutation`;
-- transaction semantics;
-- `StateStore` and `StateError`.
+Хранит долговечное состояние Luna транзакционно и отделяет его от конфигурации и disposable cache.
 
-The first durable backend is `redb`.
+## Владеет
 
-## Contract
-A store exposes a monotonically increasing global revision. A transaction uses the revision observed by its caller. A mismatch returns `RevisionConflict` and applies nothing. A successful non-empty transaction advances the revision exactly once; an empty transaction does not advance it.
+- model durable system state;
+- transactions;
+- persistence abstraction;
+- recovery/reconciliation state для долгих операций;
+- schema/migration boundary.
 
-The store is synchronous; higher layers own async orchestration.
+Примеры состояния: зарегистрированные сущности, update operation state, activation metadata, durable system facts.
 
-## Does not own
-Boot state, security policy, configuration semantics, system-domain model, checkpoint implementation or update transaction orchestration.
+## Не владеет
 
-## Storage
-Persistent system state is stored under `DATA/system/state`. This database/state layer is distinct from Btrfs checkpoints and rollback snapshots.
+Bundle payload, System Image filesystem, пользовательскими файлами или ephemeral cache.
 
-## Dependencies
-Shared value types and the selected durable backend. It must not depend upward on managers/runtimes.
+## Backend
 
-## Open
-Schema/version migration policy and broader reconciliation integration remain to be completed.
+Первый принятый backend — синхронный `redb`. Backend является detail реализации storage boundary и не должен просачиваться во все верхние компоненты.
+
+## Надёжность
+
+Операция, признанная успешно записанной, должна сохраняться при штатном завершении процесса и корректно восстанавливаться после перезапуска. Частичная запись не должна оставлять неоднозначный lifecycle state.
+
+## Связь с update
+
+`luna-update-manager` оркестрирует checkpoint/rollback, а `luna-state` хранит durable operation/state data.
+
+## Открыто
+
+Миграции схемы, reconciliation после crash и окончательная граница между boot state, system state и recovery state.
