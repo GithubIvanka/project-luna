@@ -1,42 +1,38 @@
-# Project Luna — Status
+# Project Luna — текущее состояние
 
-Last updated: 2026-09-03
+**Последнее обновление:** 2026-09-03
 
-> `docs/ARCHITECTURE.md` is the architectural Source of Truth. Accepted architecture decisions through Phase 1.6-HZ and subsequent accepted decisions are consolidated there. Dated decision records under `docs/decisions/` preserve implementation history and boundaries.
+> `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
 
-## Overall state
+## Общее состояние
 
-Project Luna has completed the architecture decision cycle through **Phase 1.1–1.6-HZ** and is in **Phase 2 runtime/boot integration, PC bring-up, desktop integration and hardening**.
+Архитектурный цикл завершён через **Phase 1.1–1.6-HZ**. Сейчас Project Luna находится в **Phase 2: runtime/boot integration, PC bring-up, desktop integration и hardening**.
 
-The Phase 2 integration baseline is consolidated in `main`; current native-init work is now part of the mainline boot path.
+## Состояние областей
 
-### Phase status
-
-| Area | Status |
+| Область | Состояние |
 |---|---|
-| Architecture 1.1–1.6-HZ | Accepted and consolidated |
-| Post-1.6 accepted architecture decisions | Consolidated into the Source of Truth and decision records |
-| Foundation/domain APIs | Implemented baseline |
+| Architecture 1.1–1.6-HZ | принято и консолидировано |
+| Post-1.6 architecture decisions | консолидированы в SoT и decision records |
+| Foundation/domain APIs | baseline реализован |
 | Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
-| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` implemented as ApplicationInstance execution properties |
-| Generic `luna-runtime` crate | Explicitly rejected and removed |
-| Runtime ↔ mapping ↔ security | Contract implemented; authorization precedes namespace materialization |
-| Linux namespace/materialization | Development mount namespace backend implemented; production child-creation hardening remains |
-| Persistent state | Durable redb backend implemented under `DATA/system/state` |
-| Update/checkpoint/rollback | Durable orchestration implemented; concrete mutation backends remain |
-| Bundle Format v1 | **RFC-0002 Accepted (2026-08-30); LBP1 codec under conformance/security hardening** |
-| `luna-system-runtime` | Real child supervision and UserSession lifecycle ownership implemented |
-| `luna-app-runtime` | ApplicationInstance lifecycle and execution setup implemented |
-| `luna-init` | Native musl early-userspace bootstrap implemented; packaged as `/init` in initramfs |
-| `luna-boot.efi` | GUI splash; dynamic SYSTEM image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
-| Recovery / Factory boot | Metadata-role discovery and target execution implemented; final recovery tooling/repair UX remains |
-| External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend implemented |
-| x86_64 PC image | Reproducible GPT/UEFI development image builder implemented; native initramfs uses `luna-init` |
-| Graphical desktop | UserSession login boundary exists; final niri + Noctalia payload/seat/device integration remains |
+| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` реализованы как properties execution environment |
+| Generic `luna-runtime` | явно отклонён и удалён |
+| Runtime ↔ mapping ↔ Security | contract реализован; authorization предшествует namespace materialization |
+| Linux namespace/materialization | development backend реализован; production child-creation hardening продолжается |
+| Persistent state | durable `redb` backend в `DATA/system/state` реализован |
+| Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
+| Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
+| `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
+| `luna-app-runtime` | ApplicationInstance lifecycle и execution setup реализованы |
+| `luna-init` | native musl early-userspace реализован и упаковывается как `/init` |
+| `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
+| Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
+| External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
+| x86_64 PC image | воспроизводимый GPT/UEFI development image builder реализован |
+| Graphical desktop | login boundary существует; финальная niri + Noctalia + seat/device integration продолжается |
 
-## Boot and user experience
-
-Normal boot is graphical and quiet:
+## Нормальная загрузка
 
 ```text
 Power
@@ -70,9 +66,9 @@ niri
 Noctalia Shell
 ```
 
-There is no normal TTY login, console shell fallback, or `luna-session` component.
+Обычный вход не использует TTY, console shell или `luna-session`.
 
-Pressing `B` opens the exceptional text Boot Menu. The fixed action order is:
+`B` открывает исключительное текстовое Boot Menu:
 
 ```text
 1. Continue to Luna
@@ -83,11 +79,9 @@ Pressing `B` opens the exceptional text Boot Menu. The fixed action order is:
 6. Boot from USB / External Device
 ```
 
-Verbose Boot suppresses the GUI splash and enables full kernel diagnostics for that boot. TTY/serial remains a development, diagnostic or recovery mechanism only.
+## Обнаружение boot targets
 
-## Boot discovery
-
-`luna-boot.efi` discovers normal boot targets from SYSTEM instead of using a hardcoded release list:
+`luna-boot.efi` использует реальное содержимое SYSTEM:
 
 ```text
 SYSTEM/images/*.squashfs + adjacent *.toml
@@ -103,49 +97,34 @@ SYSTEM/kernels/<version>/bzImage
        BootTarget catalog
 ```
 
-Recovery and Factory images are special System Image roles and remain outside the normal selection list. External boot is a UEFI-only chainload path and does not depend on Linux or the internal System Image being healthy.
+Recovery и Factory являются специальными ролями System Image и не входят в обычный список выбора. External boot — отдельный UEFI chainload path.
 
-## Runtime architecture
+## Runtime
 
-The ownership hierarchy is:
+Владение:
 
 ```text
 luna-system-runtime
-├── UserSession A
+├── UserSession
 │   └── luna-app-runtime
-│       └── ApplicationInstance(s)
-└── UserSession B
-    └── luna-app-runtime
-        └── ApplicationInstance(s)
+│       └── ApplicationInstance
 ```
 
-The execution pipeline is separate:
+Execution pipeline:
 
 ```text
-ApplicationInstance
+ApplicationPlan
     ↓
-resource/declaration request
-    ↓
-luna-root-mapping
+MappingPlan
     ↓
 luna-security
     ↓
 luna-namespace
     ↓
 process execution
-    ↓
-luna-system-runtime supervision
 ```
 
-`RuntimeKind` is only a typed property of the ApplicationInstance execution environment:
-
-```text
-RuntimeKind::Luna   → native Luna userspace / musl
-RuntimeKind::Glibc  → approved glibc compatibility runtime
-RuntimeKind::Bundle → Bundle-private runtime
-```
-
-There is no generic `luna-runtime` crate or daemon.
+`RuntimeKind` — только тип execution environment; generic `luna-runtime` отсутствует.
 
 ## System initialization
 
@@ -163,29 +142,28 @@ switch_root
 /sbin/init = luna-system-runtime
 ```
 
-`luna-init` is a standalone early-userspace binary and is intentionally outside the normal Cargo workspace. It is built explicitly for `x86_64-unknown-linux-musl` and must be statically linked for PC/QEMU images.
+## Ближайшие технические приоритеты
 
-## Current implementation sequence
+1. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
+2. Завершить graphical login + niri + Noctalia integration.
+3. Расширить `luna-app-runtime` runtime-specific loader/library mapping без нарушения security/mapping boundaries.
+4. Закончить fine-grained security и filtered `/dev` population.
+5. Завершить durable boot/update success/failure state.
+6. Завершить LBP1 conformance и Ed25519 trust binding.
+7. Реализовать IPC/event transport, resource enforcement и device/volume integration.
+8. Завершить `.lbp` install → ApplicationInstance launch/recovery loop.
+9. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
 
-1. Validate the complete PC image in QEMU/OVMF and on real UEFI hardware.
-2. Package the final graphical `luna-login` + niri + Noctalia desktop runtime tree.
-3. Extend `luna-app-runtime` with runtime-specific loader/library mappings while preserving security and mapping ownership.
-4. Finish fine-grained Security-to-mapping/device authorization and filtered `/dev` population.
-5. Complete durable boot/update state integration and persistent boot-success state.
-6. Finish LBP1 conformance and Ed25519 verification/trust binding.
-7. Implement IPC/event transport, resource enforcement and device/volume integration.
-8. Complete real `.lbp` installation and ApplicationInstance launch/recovery.
-9. Replace prototype `pre_exec` namespace setup with a production-safe child-creation primitive.
+## Phase 0 documentation
 
-## Decision records
+Черновики новых архитектурных контрактов находятся в `docs/contracts/`:
 
 ```text
-docs/decisions/2026-09-01-RUNTIME-INTEGRATION.md
-docs/decisions/2026-09-01-RUNTIME-CONTRACT.md
-docs/decisions/2026-09-01-PC-BUILD.md
-docs/decisions/2026-09-01-GRAPHICAL-BOOT-SESSION.md
-docs/decisions/2026-09-01-BOOT-DISCOVERY.md
-docs/decisions/2026-09-01-GIT-WORKFLOW.md
-docs/decisions/2026-09-01-MAIN-PROTECTION.md
-docs/decisions/2026-09-01-LIBC-INIT.md
+SYSTEM-IMAGE-CONTRACT.md
+KERNEL-CONTRACT.md
+BOOT-STATE-CONTRACT.md
+BOOT-HANDOFF-CONTRACT.md
+FAILURE-RECOVERY-CONTRACT.md
 ```
+
+Они уточняют существующие архитектурные границы и не считаются принятыми до отдельного решения.
