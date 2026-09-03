@@ -1,43 +1,51 @@
 # `luna-app-runtime`
 
-**Status:** implemented ApplicationInstance boundary; integration in progress
+**Статус:** граница `ApplicationInstance` реализована; интеграция продолжается.
 
-## Purpose
-Own execution and lifecycle of running application instances.
+## Назначение
 
-## Owns
-- `ApplicationInstance` identity/state;
-- application process lifecycle;
-- execution-environment preparation;
-- association of an instance with a `UserSession`;
-- runtime selection from `RuntimeSpec`.
+Владеет выполнением и жизненным циклом запущенных приложений.
 
-`RuntimeKind` is a property of `RuntimeSpec`, not a new architecture component. Current kinds include Luna, Glibc and Bundle runtime semantics.
+## Владеет
 
-## Launch boundary
+- identity и state `ApplicationInstance`;
+- lifecycle процессов приложения;
+- подготовкой execution environment;
+- связью экземпляра с `UserSession`;
+- выбором runtime по `RuntimeSpec`.
+
+`RuntimeKind` является свойством `RuntimeSpec`, а не самостоятельным компонентом. Принятые semantics включают Luna, Glibc и Bundle runtime.
+
+## Поток запуска
 
 ```text
+ApplicationPlan
+  ↓
+MappingPlan
+  ↓
+luna-security
+  ↓
+luna-namespace
+  ↓
+exec
+  ↓
 ApplicationInstance
- ↓ declaration/resources
- ↓ luna-root-mapping
- ↓ luna-security
- ↓ luna-namespace
- ↓ exec
- ↓ luna-system-runtime supervision
 ```
 
-A launch requires an active `UserSession` and must use the validated security/mapping context.
+Запуск требует активной `UserSession` и использует только проверенный security/mapping context.
 
-## Does not own
-Bundle installation/removal, UserSession creation, system-wide supervision, authorization policy, raw filesystem primitives or UEFI boot.
+## Не владеет
 
-## Dependencies
-`luna-common`, `luna-user-session`, mapping, security, namespace and system-runtime contracts.
+Bundle install/remove, созданием UserSession, system-wide supervision, authorization policy, raw filesystem primitives или UEFI boot.
 
-## Failure behavior
-Application-runtime failure must not automatically destroy unrelated UserSessions. System-runtime may restart runtime activity according to policy.
+## Ошибки
 
-Recovered runtime metadata does not imply restoration of in-memory application process state.
+Ошибка одного ApplicationInstance не должна автоматически завершать другие UserSessions. Cleanup namespace, mounts, processes и ресурсов является обязательной частью lifecycle.
 
-## Open
-Production namespace/security integration, resource limits, restart policy and complete application lifecycle IPC remain.
+## Зависимости
+
+`luna-common`, `luna-user-session`, root-mapping, security, namespace и system-runtime contracts.
+
+## Открыто
+
+Production integration с namespace/security, resource limits, restart policy и полноценный lifecycle IPC.
