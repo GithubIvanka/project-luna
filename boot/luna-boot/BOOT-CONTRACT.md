@@ -1,39 +1,89 @@
-# luna-boot boot contract
+# Контракт `luna-boot`
 
-This document is the implementation contract for the Project Luna UEFI bootloader.
+**Статус:** принятые границы загрузчика; детали Phase 0 уточняются контрактами.  
+**Компонент:** UEFI-загрузчик Project Luna, вне обычного userspace workspace.
 
-## Firmware boundary
+## 1. Граница firmware
 
-`luna-boot.efi` starts in UEFI Boot Services. It receives the image handle and system table from firmware. The bootloader must identify its own device and must not select an arbitrary `SimpleFileSystem` handle.
+`luna-boot.efi` начинается в UEFI Boot Services. Firmware передаёт image handle и system table. Загрузчик обязан определить собственное устройство и не должен выбирать произвольный `SimpleFileSystem` handle.
 
-The production Luna system partition is ext4. `luna-boot` therefore uses UEFI Block I/O for the system device and a read-only ext4 reader. UEFI's Simple File System protocol is used only where the firmware exposes the ESP filesystem containing the bootloader itself.
+Производственный System partition использует ext4. Поэтому `luna-boot` работает с системным устройством через UEFI Block I/O и использует read-only ext4 reader. UEFI Simple File System применяется только там, где firmware предоставляет ESP filesystem самого загрузчика.
 
-## Boot key
+## 2. Boot key
 
-There is no two-second boot delay. On entry, `luna-boot` performs a non-blocking read of the UEFI console input buffer. If `B`/`b` is already pending, Boot Menu is entered. Otherwise normal boot proceeds immediately.
+Нет двухсекундной задержки.
 
-## Target resolution
+На входе `luna-boot` выполняет неблокирующее чтение доступного UEFI console input buffer. Если `B`/`b` уже ожидает обработки, открывается Boot Menu. Иначе нормальная загрузка продолжается сразу.
 
-The selected target is a pair:
+## 3. Целевая пара
 
-`System Image manifest + compatible Linux bzImage`
+Boot target — это:
 
-The manifest is authoritative for image version and kernel compatibility. `current` is the normal target. Factory is an immutable fallback pair.
+```text
+System Image manifest
+        +
+compatible Linux kernel
+```
 
-## Kernel format
+`current` является обычной целью. Factory — сохранённой известной рабочей fallback-парой.
 
-Linux is built as the normal x86_64 `arch/x86/boot/bzImage`. `luna-boot` implements the Linux x86 64-bit boot protocol rather than invoking the EFI stub.
+Manifest является источником image version и kernel compatibility metadata. Наличие kernel и image на диске само по себе не означает совместимость.
 
-The loader prepares `boot_params`, command line, initrd, and memory information, exits UEFI Boot Services, and transfers control to the 64-bit kernel entry point.
+## 4. Kernel format
 
-## System Image handoff
+Для x86_64 используется стандартный Linux `arch/x86/boot/bzImage`.
 
-`luna-boot` does not mount SquashFS. The kernel receives the system-image selection through the kernel command line and an initramfs containing the Luna early userspace (`luna-init`). `luna-init` is responsible for finding the ext4 system partition, opening the selected `.squashfs`, constructing the logical root, and attaching DATA.
+`luna-boot` реализует Linux x86_64 boot protocol и не обязан запускать EFI stub.
 
-## Failure policy
+Загрузчик подготавливает `boot_params`, command line, initrd и memory information, выходит из UEFI Boot Services и передаёт управление 64-bit kernel entry point.
 
-Normal target failure causes selection of the immutable Factory System Image + Factory Kernel pair. Failure of both normal and Factory paths enters Recovery. Recovery must remain usable without DATA.
+## 5. System Image handoff
 
-## Post-ExitBootServices rule
+`luna-boot` не монтирует SquashFS.
 
-After `ExitBootServices`, no UEFI Boot Services protocol, allocator operation, console operation, logger requiring Boot Services, or UEFI filesystem access may occur. All boot data needed by Linux must already reside in memory owned by the loader/kernel handoff.
+Выбранный System Image передаётся через boot context/kernel command line и initramfs, содержащий `luna-init`. Затем `luna-init` находит SYSTEM, открывает выбранный `.squashfs`, строит logical root и подключает DATA.
+
+## 6. Fallback
+
+Failure policy зависит от класса ошибки.
+
+Для отказа System Image после успешного запуска совместимого kernel следует, если это технически и безопасно возможно, попробовать предыдущий совместимый System Image без полного перезапуска.
+
+Для kernel-level failure, включая panic, может потребоваться reboot. После reboot загрузчик применяет Boot State и выбирает другую совместимую рабочую комбинацию.
+
+После исчерпания usable вариантов применяется Factory. Если Factory также недоступна, выбирается Recovery.
+
+Это не означает, что `luna-boot` становится полноценным recovery manager.
+
+## 7. Post-ExitBootServices
+
+После `ExitBootServices` запрещены обращения к UEFI Boot Services, их allocator, console APIs и UEFI filesystem protocols.
+
+Все данные, необходимые для Linux handoff, должны быть подготовлены заранее и находиться в памяти, которая остаётся доступной kernel.
+
+## 8. Ответственность загрузчика
+
+`luna-boot` владеет только UEFI boot boundary, selection, fallback и handoff.
+
+Он не владеет:
+
+- UserSession;
+- application lifecycle;
+- Bundle management;
+- graphical desktop;
+- обычным service management;
+- пользователями и их данными.
+
+## 9. Связанные контракты
+
+Подробные draft contracts находятся в:
+
+```text
+docs/contracts/SYSTEM-IMAGE-CONTRACT.md
+docs/contracts/KERNEL-CONTRACT.md
+docs/contracts/BOOT-STATE-CONTRACT.md
+docs/contracts/BOOT-HANDOFF-CONTRACT.md
+docs/contracts/FAILURE-RECOVERY-CONTRACT.md
+```
+
+Они уточняют детали и до отдельного утверждения имеют статус черновиков.
