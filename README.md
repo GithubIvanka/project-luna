@@ -19,9 +19,10 @@ Project Luna has completed the architecture decision cycle through **Phase 1.6-H
 - `luna-system-runtime` supervises real Linux child processes and owns the system-wide UserSession/process lifecycle.
 - `luna-app-runtime` owns `ApplicationInstance` lifecycle and execution setup.
 - `RuntimeKind`/`RuntimeSpec` are typed execution-environment values used by application runtime; there is no separate generic runtime subsystem/crate.
+- Native early userspace is provided by the standalone musl `luna-init` binary and hands off to `luna-system-runtime` after `switch_root`.
 - The QEMU/OVMF bring-up path builds a real SquashFS System Image, early initramfs and separate DATA partition.
-- A reproducible x86_64 UEFI/GPT PC development image is produced by `tools/build-pc-image.sh`.
-- The final production graphical payload is not yet packaged; no normal boot path falls back to a TTY or shell.
+- A reproducible x86_64 UEFI/GPT PC development image is produced by `tools/build-pc-image.sh` with native Luna initramfs and the graphical desktop payload.
+- The development PC image packages the native niri/Noctalia graphical stack, login, Ghostty, fish, Yazi, audio, network, Bluetooth and removable-media service payloads; final hardware seat/input/GPU validation remains.
 
 The architectural Source of Truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -170,7 +171,7 @@ See [`docs/development/PC-BUILD.md`](docs/development/PC-BUILD.md).
 
 ## Current crate map
 
-The current userspace workspace contains architecture-defined crates only; there is no generic `luna-runtime` crate.
+The current userspace workspace contains architecture-defined crates only; `luna-init` is the deliberate standalone early-userspace exception. There is no generic `luna-runtime` crate.
 
 See [`docs/architecture/CRATE-MAP.md`](docs/architecture/CRATE-MAP.md).
 
