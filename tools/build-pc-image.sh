@@ -120,7 +120,7 @@ cat > "$SYSTEM_ROOT/etc/luna/graphical-login" <<'EOF'
 /usr/bin/luna-login
 EOF
 cat > "$SYSTEM_ROOT/etc/luna/graphical-session" <<'EOF'
-/usr/bin/luna-run-session
+/usr/bin/niri-session
 EOF
 printf 'graphical\n' > "$SYSTEM_ROOT/etc/luna/mode"
 
@@ -144,8 +144,6 @@ chmod 0700 "$DATA_ROOT/users/luna/home"
 truncate -s "${DATA_SIZE_MIB}M" "$OUT/luna-data.img"
 mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" >/dev/null
 
-# Keep enough room in SYSTEM for the immutable graphical stack and its bundled
-# shared libraries while retaining a full writable DATA partition.
 SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
 DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
 SYSTEM_START=264192
