@@ -107,6 +107,8 @@ export SHELL=/usr/bin/fish
 EOF
 
 cp -a "$DESKTOP_ROOT"/. "$SYSTEM_ROOT"/
+# Старый wrapper не является частью принятой архитектуры UserSession.
+rm -f "$SYSTEM_ROOT/usr/bin/luna-run-session"
 
 rm -rf "$SYSTEM_ROOT/home"
 mkdir -p "$SYSTEM_ROOT/data/users/luna/home" "$SYSTEM_ROOT/data/users/luna/data" "$SYSTEM_ROOT/data/users/luna/config" "$SYSTEM_ROOT/data/cache"
