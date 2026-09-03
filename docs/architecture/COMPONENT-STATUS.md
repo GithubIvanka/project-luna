@@ -1,39 +1,41 @@
-# Project Luna — Component Status Matrix
+# Project Luna — матрица состояния компонентов
 
-**Status:** canonical navigation aid; detailed contracts live beside this file
-**Authority:** `docs/ARCHITECTURE.md`
+**Статус:** канонический навигационный документ.  
+**Источник истины:** `docs/ARCHITECTURE.md`.  
+**Подробные контракты:** `docs/architecture/components/`.
 
-| Boundary | Current implementation | Contract | Main remaining work |
+| Граница | Текущее состояние | Контракт | Основная оставшаяся работа |
 |---|---|---|---|
-| `luna-boot.efi` | Partial / proven test boot path | `LUNA-BOOT.md` | real image/kernel selection, fallback, final handoff |
-| System Image | Build payload exists | `SYSTEM-IMAGE.md` | final manifest/compatibility specification |
-| Recovery/Factory | Architecture defined | `RECOVERY-FACTORY.md` | complete environments and repair flow |
-| `luna-common` | Implemented | `LUNA-COMMON.md` | keep minimal |
-| `luna-fs` | Implemented foundation | `LUNA-FS.md` | production backend integration |
-| `luna-root-mapping` | Implemented foundation | `LUNA-ROOT-MAPPING.md` | materialization/lazy-root integration |
-| `luna-namespace` | Initial Linux backend | `LUNA-NAMESPACE.md` | production isolation/security integration |
-| `luna-config` | Implemented foundation | `LUNA-CONFIG.md` | final persistence/serialization integration |
-| `luna-security` | Policy foundation | `LUNA-SECURITY.md` | enforcement, trust, confirmation IPC |
-| `luna-state` | Durable boundary + redb | `LUNA-STATE.md` | migrations/reconciliation |
-| `luna-event` | Domain boundary | `LUNA-EVENT.md` | transport/durability integration |
-| `luna-bundle` | LBP1 implementation | `LUNA-BUNDLE.md` | conformance/hardening/integration |
-| `luna-app-manager` | Boundary/scaffold | `LUNA-APP-MANAGER.md` | complete install/dependency/data lifecycle |
-| `luna-system-manager` | Boundary/scaffold | `LUNA-SYSTEM-MANAGER.md` | durable system model |
-| `luna-update-manager` | Transaction foundation | `LUNA-UPDATE-MANAGER.md` | domain mutation/reconciliation/rollback |
-| `luna-kernel-manager` | Inventory/build direction | `LUNA-KERNEL-MANAGER.md` | boot/update integration |
-| `luna-device-manager` | Boundary/scaffold | `LUNA-DEVICE-MANAGER.md` | real discovery/automount/eject |
-| `luna-system-runtime` | Core supervision/session orchestration | `LUNA-SYSTEM-RUNTIME.md` | production session/privilege/reconciliation |
-| `UserSession` | Domain lifecycle implemented | `USER-SESSION.md` | switching/restriction/logout/auth IPC |
-| `luna-app-runtime` | ApplicationInstance boundary implemented | `LUNA-APP-RUNTIME.md` | real namespace/security/resource integration |
+| `luna-boot.efi` | частично реализован, тестовый boot path доказан | `LUNA-BOOT.md` | реальный image/kernel selection, fallback, final handoff |
+| System Image | payload собирается | `SYSTEM-IMAGE.md` + Phase 0 contract | финальная manifest/compatibility specification |
+| Recovery/Factory | архитектура определена | `RECOVERY-FACTORY.md` + Phase 0 contract | полноценные среды и repair flow |
+| `luna-common` | реализован | `LUNA-COMMON.md` | сохранить минимальным |
+| `luna-fs` | foundation реализован | `LUNA-FS.md` | production backend integration |
+| `luna-root-mapping` | foundation реализован | `LUNA-ROOT-MAPPING.md` | lazy-root и materialization integration |
+| `luna-namespace` | initial Linux backend | `LUNA-NAMESPACE.md` | production isolation/security integration |
+| `luna-config` | foundation реализован | `LUNA-CONFIG.md` | final persistence/serialization integration |
+| `luna-security` | policy foundation | `LUNA-SECURITY.md` | enforcement, trust, confirmation IPC |
+| `luna-state` | durable boundary + redb | `LUNA-STATE.md` | migrations/reconciliation |
+| `luna-event` | domain boundary | `LUNA-EVENT.md` | transport/durability integration |
+| `luna-bundle` | LBP1 implementation | `LUNA-BUNDLE.md` | conformance, hardening, integration |
+| `luna-app-manager` | boundary/scaffold | `LUNA-APP-MANAGER.md` | install/dependency/data lifecycle |
+| `luna-system-manager` | boundary/scaffold | `LUNA-SYSTEM-MANAGER.md` | durable system model |
+| `luna-update-manager` | transaction foundation | `LUNA-UPDATE-MANAGER.md` | mutation/reconciliation/rollback |
+| `luna-kernel-manager` | inventory/build direction | `LUNA-KERNEL-MANAGER.md` | boot/update integration |
+| `luna-device-manager` | boundary/scaffold | `LUNA-DEVICE-MANAGER.md` | discovery/automount/eject |
+| `luna-system-runtime` | core supervision/session orchestration | `LUNA-SYSTEM-RUNTIME.md` | production session/privilege/reconciliation |
+| `UserSession` | domain lifecycle implemented | `USER-SESSION.md` | switching/restriction/logout/auth IPC |
+| `luna-app-runtime` | ApplicationInstance boundary implemented | `LUNA-APP-RUNTIME.md` | namespace/security/resource integration |
 | `luna-login` | greetd/Noctalia integration | `LUNA-LOGIN.md` | final Luna authentication IPC |
-| `luna-cli` | Thin client boundary | `LUNA-CLI.md` | complete command/IPC surface |
+| `luna-cli` | thin client boundary | `LUNA-CLI.md` | command/IPC surface |
 | `luna-files` | GTK4 GUI | `LUNA-FILES.md` | operations/navigation/backend integration |
-| `luna-audio` | Domain boundary | `LUNA-AUDIO.md` | PipeWire/WirePlumber provider |
-| `luna-network` | Domain boundary | `LUNA-NETWORK.md` | NetworkManager/D-Bus provider |
-| `luna-bluetooth` | Domain boundary | `LUNA-BLUETOOTH.md` | BlueZ/D-Bus provider |
+| `luna-audio` | domain boundary | `LUNA-AUDIO.md` | PipeWire/WirePlumber provider |
+| `luna-network` | domain boundary | `LUNA-NETWORK.md` | NetworkManager/D-Bus provider |
+| `luna-bluetooth` | domain boundary | `LUNA-BLUETOOTH.md` | BlueZ/D-Bus provider |
+| `luna-init` | standalone musl early userspace | `docs/ARCHITECTURE.md` | hardening and complete logical-root handoff |
 
-## Reading rule
+## Как читать матрицу
 
-This matrix is not an implementation checklist by itself. Before changing a boundary, read its component contract and the accepted decisions it references.
+Матрица не является самостоятельным implementation checklist. Перед изменением границы нужно читать её contract и решения, на которые он ссылается.
 
-A row marked implemented does not mean the whole OS capability is complete; it means the architectural boundary has meaningful code.
+«Реализован» здесь означает наличие осмысленного кода на границе, а не завершённость соответствующей возможности всей ОС.
