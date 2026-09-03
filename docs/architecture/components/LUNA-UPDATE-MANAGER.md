@@ -1,41 +1,54 @@
 # `luna-update-manager`
 
-**Status:** accepted boundary; implementation/integration in progress
+**Статус:** transaction foundation реализован; полноценная mutation/reconciliation/rollback integration продолжается.
 
-## Purpose
-Execute state-changing update transactions across system, application and kernel domains.
+## Назначение
 
-## Owns
-- update operation execution;
-- prepare/checkpoint/apply/verify/commit sequencing;
-- interrupted-operation reconciliation;
-- rollback coordination;
-- retention/removal decisions after health/commit confirmation.
+Оркестрирует state-changing обновления Luna и согласует их с `luna-state`, System Image, kernel и checkpoint/rollback semantics.
 
-## Transaction model
+## Владеет
+
+- update transaction lifecycle;
+- staging;
+- activation coordination;
+- checkpoint/rollback orchestration;
+- reconciliation после незавершённых операций;
+- безопасным retention после подтверждения здоровья.
+
+## Не владеет
+
+Самим Bundle codec, low-level kernel inventory, UEFI loader, GUI или process supervision.
+
+## System Image update
 
 ```text
-prepare
-  ↓
-checkpoint
-  ↓
-apply
+obtain
   ↓
 verify
   ↓
-commit
+stage
+  ↓
+leave current intact
+  ↓
+activate
+  ↓
+reboot
+  ↓
+health confirmation
+  ↓
+commit / rollback
 ```
 
-The previous authoritative state remains available until commit is confirmed where possible.
+Неуспешное обновление не должно уничтожать последнюю подтверждённую рабочую версию.
 
-## Does not own
-The system-domain model (`luna-system-manager`), kernel metadata queries (`luna-kernel-manager`), application process execution, security policy, or raw bootloader logic.
+## Независимость
 
-## Dependencies
-Consumes `luna-state`, system/app/kernel managers, Bundle/Image metadata, security and checkpoint facilities.
+Обновление System Image не должно требовать обновления kernel, если старое kernel совместимо. И наоборот.
 
-## Rollback
-Rollback is explicit/user-visible. Automatic rollback may be policy-triggered by boot/health contracts. Btrfs snapshots are the accepted checkpoint direction where applicable, but checkpoints are not the same thing as the state database or System Image rollback.
+## State
 
-## Open
-Complete multi-domain transaction journal/reconciliation and end-to-end image/kernel update integration remain.
+Долгоживущие transaction facts хранятся через `luna-state`. После crash менеджер должен уметь определить незавершённую операцию и безопасно её reconciliate.
+
+## Открыто
+
+Health gating, финальная transaction state machine, independent kernel update path, automatic rollback и Recovery/Factory integration.
