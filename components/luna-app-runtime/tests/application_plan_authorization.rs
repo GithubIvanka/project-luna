@@ -5,8 +5,7 @@ use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource};
 use luna_common::{BundleId, RuntimeSpec, UserId, Version};
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
 use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-    SecurityError,
+    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
 };
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -82,7 +81,10 @@ fn runtime_authorization_precedes_explicit_resource_requests() {
     assert_eq!(authorized.application().as_str(), "example.app");
     let seen = policy.seen.borrow();
     assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].resource, Resource::Runtime(luna_common::RuntimeKind::Luna));
+    assert_eq!(
+        seen[0].resource,
+        Resource::Runtime(luna_common::RuntimeKind::Luna)
+    );
     assert_eq!(seen[0].permission, Permission::Use);
     assert_eq!(seen[1], explicit);
 }
@@ -109,6 +111,9 @@ fn explicit_denial_stops_authorization_pipeline() {
     assert!(matches!(result, Err(PlanError::Security(_))));
     let seen = policy.seen.borrow();
     assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].resource, Resource::Runtime(luna_common::RuntimeKind::Luna));
+    assert_eq!(
+        seen[0].resource,
+        Resource::Runtime(luna_common::RuntimeKind::Luna)
+    );
     assert_eq!(seen[1].resource, Resource::UserData(UserId::from("alice")));
 }
