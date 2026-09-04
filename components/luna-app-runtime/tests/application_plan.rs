@@ -1,7 +1,7 @@
 #[cfg(unix)]
 mod unix {
-    use luna_app_runtime::application_plan_runtime::ApplicationPlanLauncher;
     use luna_app_runtime::LinuxApplicationRuntime;
+    use luna_app_runtime::application_plan_runtime::ApplicationPlanLauncher;
 
     #[test]
     fn linux_runtime_exposes_authorized_plan_launcher() {
