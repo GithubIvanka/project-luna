@@ -5,7 +5,7 @@
 //! logical root in the child, and registers the supervised process.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use luna_namespace::LinuxMountNamespace;
 use luna_system_runtime::SystemRuntimeService;
@@ -55,12 +55,18 @@ impl ApplicationLaunchContext {
     /// Validate filesystem roots before any staging directory or child process
     /// is created.
     ///
-    /// Both roots must be absolute. Runtime staging must live outside the
-    /// immutable System Image tree and must never target the host root.
+    /// Both roots must be absolute and lexically normalized. Runtime staging
+    /// must live outside the immutable System Image tree and must never target
+    /// the host root.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
             return Err(RuntimeError::Staging(
                 "launch context roots must be absolute paths".into(),
+            ));
+        }
+        if self.has_navigation_components() {
+            return Err(RuntimeError::Staging(
+                "launch context roots must not contain '.' or '..' components".into(),
             ));
         }
         if self.base_root == Path::new("/") {
@@ -81,6 +87,13 @@ impl ApplicationLaunchContext {
             ));
         }
         Ok(())
+    }
+
+    fn has_navigation_components(&self) -> bool {
+        self.base_root
+            .components()
+            .chain(self.staging_parent.components())
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
     }
 }
 
@@ -201,6 +214,23 @@ mod tests {
             LinuxMountNamespace,
             Path::new("system"),
             Path::new("/luna/data/runtime"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_navigation_components() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/./system"),
+            Path::new("/luna/data/runtime"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/data/../runtime"),
         );
         assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
     }
