@@ -92,10 +92,8 @@ jobs:
           test -x dist/desktop-root/usr/bin/luna-login
           test -x dist/desktop-root/usr/bin/niri
           test -x dist/desktop-root/usr/bin/niri-session
-          test -x dist/desktop-root/usr/bin/luna-run-session
           sh -n dist/desktop-root/usr/bin/niri-session
-          sh -n dist/desktop-root/usr/bin/luna-run-session
-          test "$(cat dist/desktop-root/etc/luna/graphical-session)" = "/usr/bin/luna-run-session"
+          test "$(cat dist/desktop-root/etc/luna/graphical-session)" = "/usr/bin/niri-session"
           test -x dist/desktop-root/usr/bin/noctalia
           test -x dist/desktop-root/usr/bin/noctalia-greeter
           test -x dist/desktop-root/usr/bin/noctalia-greeter-compositor
