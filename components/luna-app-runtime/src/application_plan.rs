@@ -12,8 +12,7 @@ use luna_bundle::{BundleKind, BundleManifest, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
 use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-    SecurityError,
+    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
 };
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -103,9 +102,7 @@ impl ApplicationPlan {
         Self::validate_executable(&self.executable, &self.mapping)?;
         for resource in self.manifest.resources() {
             let logical = LogicalPath::new(resource.logical_path()).map_err(PlanError::Mapping)?;
-            self.mapping
-                .resolve(&logical)
-                .map_err(PlanError::Mapping)?;
+            self.mapping.resolve(&logical).map_err(PlanError::Mapping)?;
         }
         for request in &self.requests {
             if request.principal != Principal::Application(self.application.clone()) {
@@ -262,7 +259,10 @@ impl fmt::Display for PlanError {
             Self::InvalidExecutable(path) => write!(f, "invalid executable: {path}"),
             Self::ExecutableNotMapped(path) => write!(f, "executable is not mapped: {path}"),
             Self::RuntimeMismatch { mapping, requested } => {
-                write!(f, "runtime mismatch: mapping={mapping:?}, requested={requested}")
+                write!(
+                    f,
+                    "runtime mismatch: mapping={mapping:?}, requested={requested}"
+                )
             }
             Self::ForeignPrincipal { expected } => write!(
                 f,
@@ -351,20 +351,14 @@ mod tests {
 
     struct Deny;
     impl PolicyAuthority for Deny {
-        fn authorize(
-            &self,
-            _request: &AuthorizationRequest,
-        ) -> Result<Decision, SecurityError> {
+        fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
             Ok(Decision::Deny)
         }
     }
 
     struct Allow;
     impl PolicyAuthority for Allow {
-        fn authorize(
-            &self,
-            _request: &AuthorizationRequest,
-        ) -> Result<Decision, SecurityError> {
+        fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
             Ok(Decision::Allow)
         }
     }
@@ -402,7 +396,9 @@ mod tests {
     #[test]
     fn runtime_mismatch_is_rejected_before_authorization() {
         let mut mapping = valid_mapping();
-        mapping.bind_runtime(luna_common::RuntimeKind::Glibc).unwrap();
+        mapping
+            .bind_runtime(luna_common::RuntimeKind::Glibc)
+            .unwrap();
         let result = ApplicationPlan::new(
             valid_manifest(),
             mapping,
