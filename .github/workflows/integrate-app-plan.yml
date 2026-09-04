@@ -1,0 +1,57 @@
+name: Integrate Application Plan
+
+on:
+  push:
+    branches: ["feat/application-plan-contract"]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/application-plan-contract
+
+      - name: Wire application-plan modules into luna-app-runtime
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("components/luna-app-runtime/src/lib.rs")
+          text = path.read_text()
+          needle = "use luna_user_session::{SessionId, SessionState, UserSession};\n"
+          insert = needle + "\n" + "pub mod application_plan;\npub mod application_plan_runtime;\n\npub use application_plan::{ApplicationPlan, AuthorizedApplicationPlan, ExecutableSpec, PlanError};\npub use application_plan_runtime::ApplicationPlanLauncher;\n"
+          if "pub mod application_plan;" not in text:
+              if needle not in text:
+                  raise SystemExit("application-plan insertion point not found")
+              text = text.replace(needle, insert, 1)
+              path.write_text(text)
+          PY
+
+      - name: Format luna-app-runtime
+        run: cargo fmt --package luna-app-runtime
+
+      - name: Test luna-app-runtime
+        run: cargo test -p luna-app-runtime --all-targets
+
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/luna-app-runtime/src/lib.rs \
+                  components/luna-app-runtime/src/application_plan.rs \
+                  components/luna-app-runtime/src/application_plan_runtime.rs \
+                  components/luna-app-runtime/tests/application_plan.rs
+          rm -f .github/workflows/integrate-app-plan.yml
+          git add -u .github/workflows/integrate-app-plan.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "feat(app-runtime): integrate application execution plan"
+          git push origin HEAD:feat/application-plan-contract
