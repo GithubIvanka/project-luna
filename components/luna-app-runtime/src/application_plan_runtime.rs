@@ -56,11 +56,21 @@ impl ApplicationLaunchContext {
     /// is created.
     ///
     /// Both roots must be absolute. Runtime staging must live outside the
-    /// immutable System Image tree.
+    /// immutable System Image tree and must never target the host root.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
             return Err(RuntimeError::Staging(
                 "launch context roots must be absolute paths".into(),
+            ));
+        }
+        if self.base_root == Path::new("/") {
+            return Err(RuntimeError::Staging(
+                "base root must not be the host root".into(),
+            ));
+        }
+        if self.staging_parent == Path::new("/") {
+            return Err(RuntimeError::Staging(
+                "staging parent must not be the host root".into(),
             ));
         }
         if self.staging_parent == self.base_root
@@ -211,6 +221,26 @@ mod tests {
             LinuxMountNamespace,
             Path::new("/luna/system"),
             Path::new("/luna/system"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_host_root_as_base_root() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/"),
+            Path::new("/luna/data/runtime"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_host_root_as_staging_parent() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/"),
         );
         assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
     }
