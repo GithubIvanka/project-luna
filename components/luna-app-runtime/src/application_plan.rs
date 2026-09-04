@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use luna_bundle::{validate_manifest, BundleKind, BundleManifest};
+use luna_bundle::{BundleKind, BundleManifest, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
 use luna_security::{
@@ -50,7 +50,7 @@ impl ExecutableSpec {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ApplicationPlan {
     application: BundleId,
     version: Version,
@@ -105,7 +105,7 @@ impl ApplicationPlan {
             let logical = LogicalPath::new(resource.logical_path()).map_err(PlanError::Mapping)?;
             self.mapping
                 .resolve(&logical)
-                .map_err(|error| PlanError::Mapping(error))?;
+                .map_err(PlanError::Mapping)?;
         }
         for request in &self.requests {
             if request.principal != Principal::Application(self.application.clone()) {
@@ -126,9 +126,9 @@ impl ApplicationPlan {
     ) -> Result<(), PlanError> {
         let path = executable.path();
         if !path.is_absolute()
-            || path.components().any(|component| {
-                matches!(component, std::path::Component::ParentDir)
-            })
+            || path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
             || path.as_os_str().to_string_lossy().contains('\0')
         {
             return Err(PlanError::InvalidExecutable(path.display().to_string()));
@@ -189,7 +189,7 @@ impl ApplicationPlan {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct AuthorizedApplicationPlan {
     plan: ApplicationPlan,
 }
@@ -244,7 +244,9 @@ pub enum PlanError {
         mapping: Option<RuntimeKind>,
         requested: RuntimeKind,
     },
-    ForeignPrincipal { expected: BundleId },
+    ForeignPrincipal {
+        expected: BundleId,
+    },
     Security(String),
 }
 
@@ -252,7 +254,9 @@ impl fmt::Display for PlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBundle(error) => write!(f, "invalid bundle: {error}"),
-            Self::NotApplicationBundle => f.write_str("execution plan requires an application bundle"),
+            Self::NotApplicationBundle => {
+                f.write_str("execution plan requires an application bundle")
+            }
             Self::SessionNotActive(id) => write!(f, "session {} is not active", id.get()),
             Self::Mapping(error) => write!(f, "mapping error: {error}"),
             Self::InvalidExecutable(path) => write!(f, "invalid executable: {path}"),
@@ -260,9 +264,10 @@ impl fmt::Display for PlanError {
             Self::RuntimeMismatch { mapping, requested } => {
                 write!(f, "runtime mismatch: mapping={mapping:?}, requested={requested}")
             }
-            Self::ForeignPrincipal { expected } => {
-                write!(f, "authorization request principal does not match application {expected}")
-            }
+            Self::ForeignPrincipal { expected } => write!(
+                f,
+                "authorization request principal does not match application {expected}"
+            ),
             Self::Security(error) => write!(f, "authorization failed: {error}"),
         }
     }
