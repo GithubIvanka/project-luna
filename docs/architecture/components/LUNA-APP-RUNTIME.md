@@ -31,6 +31,8 @@ luna-security
   ↓
 AuthorizedApplicationPlan
   ↓
+ApplicationLaunchContext
+  ↓
 luna-namespace
   ↓
 process spawn / exec
@@ -53,6 +55,8 @@ luna-security
     ↓ Allow
 AuthorizedApplicationPlan
     ↓
+ApplicationLaunchContext
+    ↓
 luna-namespace / process launch
 ```
 
@@ -69,6 +73,16 @@ Executable path является частью plan и должен:
 Это предотвращает замену разрешённого logical executable произвольным physical path на launch boundary.
 
 Полная спецификация схемы executable declaration в Bundle остаётся отдельным design question; текущий plan получает уже выбранный executable от orchestration layer.
+
+## Launch context boundary
+
+`ApplicationLaunchContext` является типизированным execution context для одного запуска и содержит:
+
+- process-local Linux mount namespace;
+- immutable System Image base root;
+- отдельный staging parent для runtime state.
+
+До создания staging directory context проверяется. Оба filesystem roots должны быть абсолютными, а staging parent должен находиться вне System Image base-root tree. Runtime state не должен записываться в immutable lower layer.
 
 ## Namespace materialization
 
@@ -118,10 +132,14 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - foreign principal отклоняется;
 - `Deny` не создаёт authorized plan;
 - `Allow` создаёт typed `AuthorizedApplicationPlan`;
+- authorization ordering сохраняется;
+- отказ останавливает дальнейшую authorization pipeline;
+- invalid launch context отклоняет запуск до создания staging directory;
+- staging внутри System Image root отклоняется;
 - launcher принимает только authorized plan type.
 
 Linux integration дополнительно проверяет cleanup staging root и lifecycle процесса.
 
 ## Открыто
 
-Production integration с IPC, полноценным lifecycle reconciliation, resource limits/cgroups, restart policy, user confirmation IPC и полным kernel enforcement.
+Migration legacy `launch_authorized` path на typed `ApplicationPlan` boundary; production integration с IPC, полноценным lifecycle reconciliation, resource limits/cgroups, restart policy, user confirmation IPC и полным kernel enforcement.
