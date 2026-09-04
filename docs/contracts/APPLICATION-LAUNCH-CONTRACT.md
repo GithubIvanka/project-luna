@@ -31,15 +31,7 @@ No later stage may be used to grant authority that was not present in an earlier
 
 `ApplicationPlan` is the explicit execution decision produced from a validated Bundle declaration and an active `UserSession`.
 
-It describes:
-
-- application identity and version;
-- target `SessionId`;
-- selected `RuntimeSpec`;
-- executable identity and arguments;
-- requested resources;
-- resulting `MappingTable` context;
-- the authorization requests required before materialization.
+It describes application identity/version, session identity, `RuntimeSpec`, executable path and arguments, resource declarations, mapping context, and explicit authorization requests.
 
 The plan is an orchestration model of `luna-app-runtime`. It is not a Bundle codec or filesystem implementation.
 
@@ -47,12 +39,7 @@ The plan is an orchestration model of `luna-app-runtime`. It is not a Bundle cod
 
 `luna-root-mapping` owns mapping semantics and returns a deterministic mapping description. It does not authorize access and does not perform Linux namespace operations.
 
-The application plan validates:
-
-- runtime compatibility;
-- every declared logical resource;
-- executable reachability through the mapping;
-- mapping consistency.
+The application plan validates runtime compatibility, every declared logical resource, executable reachability through the mapping, and mapping consistency.
 
 Invalid, ambiguous, or contradictory mappings fail before security evaluation.
 
@@ -76,11 +63,9 @@ Physical paths in `DATA` remain implementation details. Applications operate thr
 
 ## 6. Process launch
 
-The launcher consumes only `AuthorizedApplicationPlan` and performs the process staging/materialization sequence.
+The plan launcher consumes only `AuthorizedApplicationPlan` and performs staging, logical-root materialization, and supervised process creation.
 
 The executable launched by the runtime must be the executable recorded in the plan and must resolve through the plan's mapping.
-
-The child process receives the materialized logical root and selected execution context.
 
 If process creation fails after staging begins, the temporary staging root is cleaned up before returning the error.
 
@@ -88,14 +73,7 @@ If process creation fails after staging begins, the temporary staging root is cl
 
 `ApplicationInstance` represents one concrete launched application execution.
 
-The runtime records at minimum:
-
-- instance identity;
-- application identity/version;
-- session identity;
-- runtime specification;
-- lifecycle state;
-- supervised process identity when one exists.
+The runtime records instance identity, application identity/version, session identity, runtime specification, lifecycle state, and supervised process identity when one exists.
 
 `Running` is reached only after the supervised process has been created and attached.
 
@@ -113,20 +91,11 @@ ApplicationInstance
 
 `luna-system-runtime` remains the system-wide supervisor. `luna-app-runtime` owns application execution lifecycle. There is no generic `luna-runtime` daemon.
 
-## 9. Required tests
+## 9. Implemented tests
 
-The implementation covers the planning and authorization boundary with tests for:
+The planning boundary covers inactive-session rejection, invalid executable rejection, executable-not-mapped rejection, runtime/mapping mismatch rejection, foreign-principal rejection, fail-closed denial, successful creation of typed `AuthorizedApplicationPlan`, and exposure of the authorized-plan launcher contract.
 
-1. inactive session rejection;
-2. invalid executable rejection;
-3. executable-not-mapped rejection;
-4. runtime/mapping mismatch rejection;
-5. foreign authorization-principal rejection;
-6. fail-closed denial;
-7. successful creation of typed `AuthorizedApplicationPlan`;
-8. exposure of the authorized-plan launcher contract.
-
-Linux namespace/process integration tests remain required for full mount, exec and cleanup validation.
+Linux namespace/process tests remain required for privileged mount/exec and cleanup validation.
 
 ## 10. Open design questions
 
