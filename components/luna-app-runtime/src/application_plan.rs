@@ -6,7 +6,7 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use luna_bundle::{BundleKind, BundleManifest, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
@@ -123,10 +123,11 @@ impl ApplicationPlan {
     ) -> Result<(), PlanError> {
         let path = executable.path();
         if !path.is_absolute()
-            || path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
+            || path.components().any(|component| {
+                matches!(component, Component::ParentDir | Component::CurDir)
+            })
             || path.as_os_str().to_string_lossy().contains('\0')
+            || path.to_str().is_none()
         {
             return Err(PlanError::InvalidExecutable(path.display().to_string()));
         }
@@ -389,6 +390,29 @@ mod tests {
             result,
             Err(PlanError::ExecutableNotMapped(path)) if path == "/bin/not-mapped"
         ));
+    }
+
+    #[test]
+    fn executable_must_be_normalized() {
+        let result = ApplicationPlan::new(
+            valid_manifest(),
+            valid_mapping(),
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/./app"),
+            vec![],
+        );
+        assert!(matches!(result, Err(PlanError::InvalidExecutable(_))));
+
+        let result = ApplicationPlan::new(
+            valid_manifest(),
+            valid_mapping(),
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/../bin/app"),
+            vec![],
+        );
+        assert!(matches!(result, Err(PlanError::InvalidExecutable(_))));
     }
 
     #[test]
