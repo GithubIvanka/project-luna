@@ -55,18 +55,19 @@ impl ApplicationLaunchContext {
     /// Validate filesystem roots before any staging directory or child process
     /// is created.
     ///
-    /// Both roots must be absolute. The staging parent must not be the System
-    /// Image root itself, preventing a launch from creating instance state in
-    /// the immutable lower filesystem.
+    /// Both roots must be absolute. Runtime staging must live outside the
+    /// immutable System Image tree.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
             return Err(RuntimeError::Staging(
                 "launch context roots must be absolute paths".into(),
             ));
         }
-        if self.base_root == self.staging_parent {
+        if self.staging_parent == self.base_root
+            || self.staging_parent.starts_with(&self.base_root)
+        {
             return Err(RuntimeError::Staging(
-                "staging parent must differ from base root".into(),
+                "staging parent must be outside base root".into(),
             ));
         }
         Ok(())
@@ -196,6 +197,16 @@ mod tests {
 
     #[test]
     fn launch_context_rejects_staging_inside_base_root_boundary() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/system/runtime"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_staging_equal_to_base_root() {
         let context = ApplicationLaunchContext::new(
             LinuxMountNamespace,
             Path::new("/luna/system"),
