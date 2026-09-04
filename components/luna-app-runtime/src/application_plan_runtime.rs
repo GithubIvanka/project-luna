@@ -5,7 +5,7 @@
 //! logical root in the child, and registers the supervised process.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use luna_namespace::LinuxMountNamespace;
 use luna_system_runtime::SystemRuntimeService;
@@ -46,9 +46,12 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             .executable()
             .path()
             .to_str()
-            .ok_or_else(|| RuntimeError::InvalidExecutable(plan.executable().path().display().to_string()))?;
+            .ok_or_else(|| {
+                RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
+            })?;
 
-        fs::create_dir_all(staging_parent).map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        fs::create_dir_all(staging_parent)
+            .map_err(|error| RuntimeError::Staging(error.to_string()))?;
 
         let id = ApplicationInstanceId::new(self.model.next_id);
         let root = staging_parent.join(format!("instance-{}", id.get()));
@@ -94,7 +97,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         instance.transition(InstanceState::Running)?;
         self.model.instances.insert(id, instance);
         self.processes.insert(process, id);
-        self.roots.insert(process, PathBuf::from(root));
+        self.roots.insert(process, root);
         Ok(id)
     }
 }
