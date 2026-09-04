@@ -63,7 +63,7 @@ Physical paths in `DATA` remain implementation details. Applications operate thr
 
 ## 6. Process launch
 
-The plan launcher consumes only `AuthorizedApplicationPlan` and performs staging, logical-root materialization, and supervised process creation.
+The plan launcher consumes only `AuthorizedApplicationPlan` and performs staging, logical-root materialization in the child, and supervised process creation.
 
 The executable launched by the runtime must be the executable recorded in the plan and must resolve through the plan's mapping.
 
@@ -93,9 +93,9 @@ ApplicationInstance
 
 ## 9. Implemented tests
 
-The planning boundary covers inactive-session rejection, invalid executable rejection, executable-not-mapped rejection, runtime/mapping mismatch rejection, foreign-principal rejection, fail-closed denial, successful creation of typed `AuthorizedApplicationPlan`, and exposure of the authorized-plan launcher contract.
+The planning boundary covers inactive-session rejection, executable-path validation, executable-not-mapped rejection, runtime/mapping mismatch rejection, foreign-principal rejection, fail-closed denial, successful creation of typed `AuthorizedApplicationPlan`, and compile-time exposure of the authorized-plan launcher contract.
 
-Linux namespace/process tests remain required for privileged mount/exec and cleanup validation.
+Linux namespace/process integration tests remain required for privileged mount/exec and full cleanup validation.
 
 ## 10. Open design questions
 
