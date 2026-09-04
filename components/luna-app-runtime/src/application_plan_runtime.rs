@@ -93,8 +93,19 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             plan.session(),
             plan.runtime(),
         );
-        instance.attach_process(process)?;
-        instance.transition(InstanceState::Running)?;
+
+        if let Err(error) = instance.attach_process(process) {
+            let _ = runtime.terminate_supervised_process(process);
+            let _ = fs::remove_dir_all(&root);
+            return Err(error);
+        }
+
+        if let Err(error) = instance.transition(InstanceState::Running) {
+            let _ = runtime.terminate_supervised_process(process);
+            let _ = fs::remove_dir_all(&root);
+            return Err(error);
+        }
+
         self.model.instances.insert(id, instance);
         self.processes.insert(process, id);
         self.roots.insert(process, root);
