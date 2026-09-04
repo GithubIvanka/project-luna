@@ -24,7 +24,26 @@ jobs:
         with:
           components: rustfmt
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: |
+          set -o pipefail
+          cargo fmt --all -- --check 2>&1 | tee /tmp/rustfmt.log
+      - name: Capture rustfmt patch
+        if: failure()
+        run: |
+          cargo fmt --all
+          git diff -- '*.rs' > /tmp/rustfmt.patch
+          echo '--- Rustfmt diagnostics ---'
+          cat /tmp/rustfmt.log
+          echo '--- Rustfmt patch ---'
+          cat /tmp/rustfmt.patch
+      - name: Upload rustfmt diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-diagnostics
+          path: |
+            /tmp/rustfmt.log
+            /tmp/rustfmt.patch
       - name: Explain advisory status
         if: failure()
         run: echo "Rustfmt currently reports pre-existing formatting debt; compilation, tests and clippy remain required gates."
