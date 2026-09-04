@@ -5,20 +5,57 @@
 //! logical root in the child, and registers the supervised process.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use luna_namespace::LinuxMountNamespace;
 use luna_system_runtime::SystemRuntimeService;
 
 use crate::application_plan::AuthorizedApplicationPlan;
 use crate::{
-    ApplicationInstance, ApplicationInstanceId, InstanceState, LinuxApplicationRuntime,
-    RuntimeError,
+    ApplicationInstance, ApplicationInstanceId, InstanceState, LinuxApplicationRuntime, RuntimeError,
 };
+
+/// Immutable execution environment selected by the system runtime for one
+/// application launch.
+///
+/// Keeping these inputs together makes the namespace/root handoff explicit and
+/// prevents callers from accidentally mixing the roots of different launches.
+#[derive(Clone, Debug)]
+pub struct ApplicationLaunchContext {
+    namespace: LinuxMountNamespace,
+    base_root: PathBuf,
+    staging_parent: PathBuf,
+}
+
+impl ApplicationLaunchContext {
+    pub fn new(
+        namespace: LinuxMountNamespace,
+        base_root: impl Into<PathBuf>,
+        staging_parent: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            namespace,
+            base_root: base_root.into(),
+            staging_parent: staging_parent.into(),
+        }
+    }
+
+    pub fn namespace(&self) -> LinuxMountNamespace {
+        self.namespace
+    }
+
+    pub fn base_root(&self) -> &Path {
+        &self.base_root
+    }
+
+    pub fn staging_parent(&self) -> &Path {
+        &self.staging_parent
+    }
+}
 
 #[cfg(unix)]
 pub trait ApplicationPlanLauncher {
-    /// Launch an already-authorized plan.
+    /// Launch an already-authorized plan in an explicit execution context.
     ///
     /// No policy evaluation occurs here. The caller must obtain the
     /// `AuthorizedApplicationPlan` from `ApplicationPlan::authorize` first.
@@ -26,9 +63,7 @@ pub trait ApplicationPlanLauncher {
         &mut self,
         plan: AuthorizedApplicationPlan,
         runtime: &mut SystemRuntimeService,
-        namespace: LinuxMountNamespace,
-        base_root: &Path,
-        staging_parent: &Path,
+        context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError>;
 }
 
@@ -38,19 +73,19 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         &mut self,
         plan: AuthorizedApplicationPlan,
         runtime: &mut SystemRuntimeService,
-        namespace: LinuxMountNamespace,
-        base_root: &Path,
-        staging_parent: &Path,
+        context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
         let program = plan.executable().path().to_str().ok_or_else(|| {
             RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
         })?;
 
-        fs::create_dir_all(staging_parent)
+        fs::create_dir_all(context.staging_parent())
             .map_err(|error| RuntimeError::Staging(error.to_string()))?;
 
         let id = ApplicationInstanceId::new(self.model.next_id);
-        let root = staging_parent.join(format!("instance-{}", id.get()));
+        let root = context
+            .staging_parent()
+            .join(format!("instance-{}", id.get()));
         if root.exists() {
             return Err(RuntimeError::Staging(format!(
                 "staging root already exists: {}",
@@ -60,9 +95,10 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         fs::create_dir(&root).map_err(|error| RuntimeError::Staging(error.to_string()))?;
 
         let mapping = plan.mapping().clone();
-        let base_root = base_root.to_path_buf();
+        let base_root = context.base_root().to_path_buf();
         let root_for_child = root.clone();
         let args = plan.executable().args().to_vec();
+        let namespace = context.namespace();
         let process = runtime.spawn_process_with_pre_exec(program, args, move || {
             let logical = namespace
                 .materialize_logical_root(&root_for_child, &base_root, &mapping)
