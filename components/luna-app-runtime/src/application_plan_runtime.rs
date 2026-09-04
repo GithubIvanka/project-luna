@@ -12,7 +12,8 @@ use luna_system_runtime::SystemRuntimeService;
 
 use crate::application_plan::AuthorizedApplicationPlan;
 use crate::{
-    ApplicationInstance, ApplicationInstanceId, InstanceState, LinuxApplicationRuntime, RuntimeError,
+    ApplicationInstance, ApplicationInstanceId, InstanceState, LinuxApplicationRuntime,
+    RuntimeError,
 };
 
 /// Immutable execution environment selected by the system runtime for one
