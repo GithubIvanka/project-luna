@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             busybox-static build-essential clang cpio cmake curl dbus \
-            dosfstools e2fsprogs file fonts-dejavu-core gdisk git gzip \
+            dosfstools e2fsprogs file fonts-dejavu-core gdisk git graphviz gzip \
             libadwaita-1-dev libcairo2-dev libdbus-1-dev libdisplay-info-dev \
             libdrm-dev libegl1-mesa-dev libelf-dev libfontconfig1-dev libfreetype6-dev \
             libgbm-dev libgles2-mesa-dev libglib2.0-dev libgtk-4-dev \
