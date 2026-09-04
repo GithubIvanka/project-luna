@@ -19,11 +19,21 @@ pub struct NetworkDevice {
 
 impl NetworkDevice {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), address: None, state: NetworkState::Offline }
+        Self {
+            name: name.into(),
+            address: None,
+            state: NetworkState::Offline,
+        }
     }
-    pub fn name(&self) -> &str { &self.name }
-    pub fn address(&self) -> Option<&str> { self.address.as_deref() }
-    pub const fn state(&self) -> NetworkState { self.state }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn address(&self) -> Option<&str> {
+        self.address.as_deref()
+    }
+    pub const fn state(&self) -> NetworkState {
+        self.state
+    }
     pub fn connect(&mut self, address: impl Into<String>) {
         self.address = Some(address.into());
         self.state = NetworkState::Connected;

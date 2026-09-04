@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box, Button, Image, Label, ListBox, ListBoxRow,
-    Orientation, ScrolledWindow,
+    Application, ApplicationWindow, Box, Button, Image, Label, ListBox, ListBoxRow, Orientation,
+    ScrolledWindow,
 };
 use std::env;
 use std::fs;
@@ -35,7 +35,11 @@ fn entry_icon(path: &Path) -> &'static str {
     if path.is_dir() {
         "folder"
     } else {
-        match path.extension().and_then(|value| value.to_str()).unwrap_or_default() {
+        match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+        {
             "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg" => "image-x-generic",
             "mp3" | "wav" | "flac" | "ogg" => "audio-x-generic",
             "mp4" | "mkv" | "webm" | "mov" => "video-x-generic",
@@ -94,7 +98,9 @@ fn populate(list: &ListBox, path: &Path) {
         let open_path = item_path.clone();
         row.connect_activate(move |_| {
             if open_path.is_dir() {
-                let _ = Command::new("luna-files").arg(open_path.as_os_str()).spawn();
+                let _ = Command::new("luna-files")
+                    .arg(open_path.as_os_str())
+                    .spawn();
             } else {
                 let _ = Command::new("xdg-open").arg(open_path.as_os_str()).spawn();
             }
@@ -176,9 +182,7 @@ fn main() {
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(current_home);
-    let app = Application::builder()
-        .application_id(APP_ID)
-        .build();
+    let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| build_ui(app, start.clone()));
     app.run();
 }

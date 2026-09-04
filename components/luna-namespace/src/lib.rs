@@ -28,9 +28,7 @@ impl std::fmt::Display for NamespaceError {
                 f.write_str("path contains an interior NUL byte or unsafe component")
             }
             Self::MissingBaseRoot => f.write_str("logical root base directory does not exist"),
-            Self::RootNotEmpty => {
-                f.write_str("logical root staging directory must be empty")
-            }
+            Self::RootNotEmpty => f.write_str("logical root staging directory must be empty"),
         }
     }
 }
@@ -48,8 +46,8 @@ impl From<io::Error> for NamespaceError {
 pub struct LinuxMountNamespace;
 
 const STANDARD_ROOT_DIRS: &[&str] = &[
-    "bin", "boot", "dev", "etc", "home", "lib", "lib64", "media", "mnt", "opt", "proc",
-    "root", "run", "sbin", "srv", "sys", "tmp", "usr", "var",
+    "bin", "boot", "dev", "etc", "home", "lib", "lib64", "media", "mnt", "opt", "proc", "root",
+    "run", "sbin", "srv", "sys", "tmp", "usr", "var",
 ];
 
 impl LinuxMountNamespace {
@@ -92,7 +90,9 @@ impl LinuxMountNamespace {
         let support = parent.join(format!(
             ".luna-namespace-{}-{}",
             std::process::id(),
-            root.file_name().and_then(|value| value.to_str()).unwrap_or("root")
+            root.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("root")
         ));
         fs::create_dir_all(&support)?;
         let upper = support.join("upper");
@@ -213,11 +213,9 @@ impl LinuxMountNamespace {
         read_only: bool,
     ) -> Result<(), NamespaceError> {
         if !source.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "device source does not exist",
-            )
-            .into());
+            return Err(
+                io::Error::new(io::ErrorKind::NotFound, "device source does not exist").into(),
+            );
         }
         validate_relative_path(logical_name)?;
         let target = root.path.join("dev").join(logical_name);

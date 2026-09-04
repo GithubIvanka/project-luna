@@ -16,11 +16,21 @@ pub struct FileEntry {
 
 impl FileEntry {
     pub fn new(path: impl Into<PathBuf>, directory: bool, size: u64) -> Self {
-        Self { path: path.into(), directory, size }
+        Self {
+            path: path.into(),
+            directory,
+            size,
+        }
     }
-    pub fn path(&self) -> &Path { &self.path }
-    pub const fn is_directory(&self) -> bool { self.directory }
-    pub const fn size(&self) -> u64 { self.size }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+    pub const fn is_directory(&self) -> bool {
+        self.directory
+    }
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,5 +54,10 @@ pub enum FileOperationState {
 pub trait FileBackend {
     type Error;
     fn read_directory(&self, path: &Path) -> Result<Vec<FileEntry>, Self::Error>;
-    fn submit(&self, operation: FileOperation, source: &Path, target: Option<&Path>) -> Result<(), Self::Error>;
+    fn submit(
+        &self,
+        operation: FileOperation,
+        source: &Path,
+        target: Option<&Path>,
+    ) -> Result<(), Self::Error>;
 }

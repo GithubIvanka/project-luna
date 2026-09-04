@@ -2,7 +2,9 @@ use luna_app_runtime::{ApplicationInstance, ApplicationInstanceId, ApplicationRu
 use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource};
 use luna_common::{BundleId, Version};
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
-use luna_security::{AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource};
+use luna_security::{
+    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
+};
 use luna_user_session::SessionId;
 
 struct AllowAll;
@@ -71,5 +73,8 @@ fn runtime_boundary_composes_bundle_mapping_and_security_contracts() {
         resource: Resource::UserData(luna_common::UserId::from("alice")),
         permission: Permission::Read,
     };
-    assert_eq!(runtime.authorize(&AllowAll, &request).expect("authorize"), Decision::Allow);
+    assert_eq!(
+        runtime.authorize(&AllowAll, &request).expect("authorize"),
+        Decision::Allow
+    );
 }

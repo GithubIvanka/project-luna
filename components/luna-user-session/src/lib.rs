@@ -12,8 +12,12 @@ use luna_common::UserId;
 pub struct SessionId(u128);
 
 impl SessionId {
-    pub const fn new(value: u128) -> Self { Self(value) }
-    pub const fn get(self) -> u128 { self.0 }
+    pub const fn new(value: u128) -> Self {
+        Self(value)
+    }
+    pub const fn get(self) -> u128 {
+        self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,10 +57,18 @@ impl UserSession {
         }
     }
 
-    pub const fn id(&self) -> SessionId { self.id }
-    pub fn user(&self) -> &UserId { &self.user }
-    pub const fn state(&self) -> SessionState { self.state }
-    pub const fn login_state(&self) -> LoginState { self.login_state }
+    pub const fn id(&self) -> SessionId {
+        self.id
+    }
+    pub fn user(&self) -> &UserId {
+        &self.user
+    }
+    pub const fn state(&self) -> SessionState {
+        self.state
+    }
+    pub const fn login_state(&self) -> LoginState {
+        self.login_state
+    }
 
     pub fn login_succeeded(&mut self) -> Result<(), SessionError> {
         if self.state != SessionState::Authenticating {
@@ -90,7 +102,10 @@ impl UserSession {
                 | (SessionState::Ending, SessionState::Ended)
         );
         if !valid {
-            return Err(SessionError::InvalidTransition { from: self.state, to: next });
+            return Err(SessionError::InvalidTransition {
+                from: self.state,
+                to: next,
+            });
         }
         self.state = next;
         Ok(())
@@ -99,7 +114,10 @@ impl UserSession {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionError {
-    InvalidTransition { from: SessionState, to: SessionState },
+    InvalidTransition {
+        from: SessionState,
+        to: SessionState,
+    },
 }
 
 impl fmt::Display for SessionError {
@@ -123,7 +141,9 @@ mod tests {
     fn graphical_login_precedes_active_session() {
         let mut session = UserSession::new(SessionId::new(1), UserId::from("alice"));
         assert_eq!(session.login_state(), LoginState::Visible);
-        session.transition(SessionState::Authenticating).expect("enter login");
+        session
+            .transition(SessionState::Authenticating)
+            .expect("enter login");
         session.login_succeeded().expect("authenticate session");
         assert_eq!(session.state(), SessionState::Active);
         assert_eq!(session.login_state(), LoginState::Succeeded);
@@ -132,7 +152,9 @@ mod tests {
     #[test]
     fn login_failure_does_not_activate_session() {
         let mut session = UserSession::new(SessionId::new(2), UserId::from("alice"));
-        session.transition(SessionState::Authenticating).expect("enter login");
+        session
+            .transition(SessionState::Authenticating)
+            .expect("enter login");
         session.login_failed();
         assert_eq!(session.state(), SessionState::Authenticating);
         assert_eq!(session.login_state(), LoginState::Failed);

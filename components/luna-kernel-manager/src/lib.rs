@@ -11,8 +11,12 @@ pub struct KernelRef {
 }
 
 impl KernelRef {
-    pub const fn new(version: Version) -> Self { Self { version } }
-    pub const fn version(&self) -> Version { self.version }
+    pub const fn new(version: Version) -> Self {
+        Self { version }
+    }
+    pub const fn version(&self) -> Version {
+        self.version
+    }
 }
 
 /// Current, previous and factory kernel identities.
@@ -24,17 +28,23 @@ pub struct KernelSelection {
 }
 
 impl KernelSelection {
-    pub const fn new(
-        current: KernelRef,
-        previous: Option<KernelRef>,
-        factory: KernelRef,
-    ) -> Self {
-        Self { current, previous, factory }
+    pub const fn new(current: KernelRef, previous: Option<KernelRef>, factory: KernelRef) -> Self {
+        Self {
+            current,
+            previous,
+            factory,
+        }
     }
 
-    pub const fn current(&self) -> &KernelRef { &self.current }
-    pub const fn previous(&self) -> Option<&KernelRef> { self.previous.as_ref() }
-    pub const fn factory(&self) -> &KernelRef { &self.factory }
+    pub const fn current(&self) -> &KernelRef {
+        &self.current
+    }
+    pub const fn previous(&self) -> Option<&KernelRef> {
+        self.previous.as_ref()
+    }
+    pub const fn factory(&self) -> &KernelRef {
+        &self.factory
+    }
 }
 
 pub trait KernelQuery {
@@ -52,11 +62,8 @@ mod tests {
         let current = KernelRef::new(Version::new(9, 0, 0));
         let previous = KernelRef::new(Version::new(8, 2, 0));
         let factory = KernelRef::new(Version::new(7, 0, 0));
-        let selection = KernelSelection::new(
-            current.clone(),
-            Some(previous.clone()),
-            factory.clone(),
-        );
+        let selection =
+            KernelSelection::new(current.clone(), Some(previous.clone()), factory.clone());
         assert_eq!(selection.current(), &current);
         assert_eq!(selection.previous(), Some(&previous));
         assert_eq!(selection.factory(), &factory);

@@ -12,18 +12,31 @@ pub struct ApplicationRef {
 }
 
 impl ApplicationRef {
-    pub const fn new(id: BundleId, version: Version) -> Self { Self { id, version } }
-    pub const fn id(&self) -> &BundleId { &self.id }
-    pub const fn version(&self) -> Version { self.version }
+    pub const fn new(id: BundleId, version: Version) -> Self {
+        Self { id, version }
+    }
+    pub const fn id(&self) -> &BundleId {
+        &self.id
+    }
+    pub const fn version(&self) -> Version {
+        self.version
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplicationOperation {
     Install(ApplicationRef),
-    Update { from: ApplicationRef, to: ApplicationRef },
+    Update {
+        from: ApplicationRef,
+        to: ApplicationRef,
+    },
     Remove(ApplicationRef),
     Verify(ApplicationRef),
-    Migrate { from: Version, to: Version, id: BundleId },
+    Migrate {
+        from: Version,
+        to: Version,
+        id: BundleId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,19 +45,27 @@ pub struct ApplicationPlan {
 }
 
 impl ApplicationPlan {
-    pub const fn new(operation: ApplicationOperation) -> Self { Self { operation } }
-    pub const fn operation(&self) -> &ApplicationOperation { &self.operation }
+    pub const fn new(operation: ApplicationOperation) -> Self {
+        Self { operation }
+    }
+    pub const fn operation(&self) -> &ApplicationOperation {
+        &self.operation
+    }
 }
 
 #[derive(Debug)]
 pub struct AppManagerError(String);
 
 impl AppManagerError {
-    pub fn new(message: impl Into<String>) -> Self { Self(message.into()) }
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
 }
 
 impl std::fmt::Display for AppManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 impl std::error::Error for AppManagerError {}
 

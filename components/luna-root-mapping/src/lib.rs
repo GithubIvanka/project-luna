@@ -107,11 +107,19 @@ impl MappingRule {
     }
 
     pub fn file(logical: LogicalPath, physical: PhysicalPath) -> Self {
-        Self { logical, physical, kind: MappingKind::File }
+        Self {
+            logical,
+            physical,
+            kind: MappingKind::File,
+        }
     }
 
     pub fn subtree(logical: LogicalPath, physical: PhysicalPath) -> Self {
-        Self { logical, physical, kind: MappingKind::Subtree }
+        Self {
+            logical,
+            physical,
+            kind: MappingKind::Subtree,
+        }
     }
 
     pub fn logical(&self) -> &LogicalPath {
@@ -137,7 +145,10 @@ pub enum MappingError {
     DuplicateLogicalPath,
     NotMapped,
     ConflictingPhysicalPath,
-    RuntimeConflict { existing: RuntimeKind, requested: RuntimeKind },
+    RuntimeConflict {
+        existing: RuntimeKind,
+        requested: RuntimeKind,
+    },
 }
 
 impl fmt::Display for MappingError {
@@ -151,9 +162,10 @@ impl fmt::Display for MappingError {
             Self::DuplicateLogicalPath => "logical path is already mapped",
             Self::NotMapped => "logical path is not mapped",
             Self::ConflictingPhysicalPath => "logical path has conflicting physical mappings",
-            Self::RuntimeConflict { existing, requested } => {
-                return write!(f, "mapping runtime conflict: {existing} vs {requested}")
-            }
+            Self::RuntimeConflict {
+                existing,
+                requested,
+            } => return write!(f, "mapping runtime conflict: {existing} vs {requested}"),
         };
         f.write_str(message)
     }
@@ -173,7 +185,10 @@ impl MappingTable {
     }
 
     pub fn with_runtime(runtime: RuntimeKind) -> Self {
-        Self { rules: Vec::new(), runtime: Some(runtime) }
+        Self {
+            rules: Vec::new(),
+            runtime: Some(runtime),
+        }
     }
 
     /// Bind this mapping plan to exactly one execution runtime.
@@ -187,7 +202,10 @@ impl MappingTable {
                 Ok(())
             }
             Some(existing) if existing == runtime => Ok(()),
-            Some(existing) => Err(MappingError::RuntimeConflict { existing, requested: runtime }),
+            Some(existing) => Err(MappingError::RuntimeConflict {
+                existing,
+                requested: runtime,
+            }),
         }
     }
 
@@ -236,11 +254,17 @@ impl MappingTable {
     pub fn materialize(&self) -> Result<MaterializedNamespace, MappingError> {
         let mut entries = BTreeMap::new();
         for rule in &self.rules {
-            if entries.insert(rule.logical.clone(), rule.physical.clone()).is_some() {
+            if entries
+                .insert(rule.logical.clone(), rule.physical.clone())
+                .is_some()
+            {
                 return Err(MappingError::ConflictingPhysicalPath);
             }
         }
-        Ok(MaterializedNamespace { entries, runtime: self.runtime })
+        Ok(MaterializedNamespace {
+            entries,
+            runtime: self.runtime,
+        })
     }
 
     pub fn remove(&mut self, logical: &LogicalPath) -> Result<MappingRule, MappingError> {
@@ -323,7 +347,9 @@ mod tests {
         let logical = LogicalPath::new("/bin/app").unwrap();
         let physical = PhysicalPath::new("/data/system/apps/example/resources/bin/app");
         let mut table = MappingTable::new();
-        table.insert(MappingRule::new(logical.clone(), physical.clone())).unwrap();
+        table
+            .insert(MappingRule::new(logical.clone(), physical.clone()))
+            .unwrap();
         assert_eq!(table.resolve(&logical).unwrap(), physical);
     }
 
@@ -335,10 +361,18 @@ mod tests {
         let outside = LogicalPath::new("/lib/gtk4.so").unwrap();
         let physical = PhysicalPath::new("/data/system/libs/gtk/4");
         let mut table = MappingTable::new();
-        table.insert(MappingRule::subtree(logical, physical)).unwrap();
+        table
+            .insert(MappingRule::subtree(logical, physical))
+            .unwrap();
         assert_eq!(table.iter().next().unwrap().kind(), MappingKind::Subtree);
-        assert_eq!(table.resolve(&child).unwrap().as_path(), Path::new("/data/system/libs/gtk/4/libgtk.so"));
-        assert_eq!(table.resolve(&nested).unwrap().as_path(), Path::new("/data/system/libs/gtk/4/themes/default.ini"));
+        assert_eq!(
+            table.resolve(&child).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/libgtk.so")
+        );
+        assert_eq!(
+            table.resolve(&nested).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/themes/default.ini")
+        );
         assert_eq!(table.resolve(&outside), Err(MappingError::NotMapped));
     }
 
@@ -352,7 +386,10 @@ mod tests {
         table.bind_runtime(RuntimeKind::Glibc).unwrap();
         assert_eq!(
             table.bind_runtime(RuntimeKind::Bundle),
-            Err(MappingError::RuntimeConflict { existing: RuntimeKind::Glibc, requested: RuntimeKind::Bundle })
+            Err(MappingError::RuntimeConflict {
+                existing: RuntimeKind::Glibc,
+                requested: RuntimeKind::Bundle
+            })
         );
         let materialized = table.materialize().unwrap();
         assert_eq!(materialized.runtime(), Some(RuntimeKind::Glibc));
@@ -361,7 +398,10 @@ mod tests {
     #[test]
     fn unsafe_logical_paths_are_rejected() {
         assert_eq!(LogicalPath::new("etc/app"), Err(MappingError::NotAbsolute));
-        assert_eq!(LogicalPath::new("/etc/../secret"), Err(MappingError::ParentTraversal));
+        assert_eq!(
+            LogicalPath::new("/etc/../secret"),
+            Err(MappingError::ParentTraversal)
+        );
     }
 
     #[test]
@@ -369,10 +409,17 @@ mod tests {
         let mut table = MappingTable::new();
         let a = LogicalPath::new("/a").unwrap();
         let b = LogicalPath::new("/b").unwrap();
-        table.insert(MappingRule::new(a.clone(), PhysicalPath::new("/data/a"))).unwrap();
-        table.insert(MappingRule::new(b, PhysicalPath::new("/data/b"))).unwrap();
+        table
+            .insert(MappingRule::new(a.clone(), PhysicalPath::new("/data/a")))
+            .unwrap();
+        table
+            .insert(MappingRule::new(b, PhysicalPath::new("/data/b")))
+            .unwrap();
         let namespace = table.materialize().unwrap();
         assert_eq!(namespace.len(), 2);
-        assert_eq!(namespace.resolve(&a).unwrap().as_path(), Path::new("/data/a"));
+        assert_eq!(
+            namespace.resolve(&a).unwrap().as_path(),
+            Path::new("/data/a")
+        );
     }
 }

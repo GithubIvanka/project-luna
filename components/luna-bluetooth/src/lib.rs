@@ -18,12 +18,24 @@ pub struct BluetoothDevice {
 
 impl BluetoothDevice {
     pub fn new(address: impl Into<String>, name: Option<String>) -> Self {
-        Self { address: address.into(), name, connected: false }
+        Self {
+            address: address.into(),
+            name,
+            connected: false,
+        }
     }
-    pub fn address(&self) -> &str { &self.address }
-    pub fn name(&self) -> Option<&str> { self.name.as_deref() }
-    pub const fn connected(&self) -> bool { self.connected }
-    pub fn set_connected(&mut self, connected: bool) { self.connected = connected; }
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    pub const fn connected(&self) -> bool {
+        self.connected
+    }
+    pub fn set_connected(&mut self, connected: bool) {
+        self.connected = connected;
+    }
 }
 
 pub trait BluetoothBackend {

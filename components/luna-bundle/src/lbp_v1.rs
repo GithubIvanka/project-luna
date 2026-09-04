@@ -90,14 +90,13 @@ impl LbpArchive {
             return Err(LbpError::UnsupportedFlags(flags));
         }
 
-        let count = usize::try_from(read_u32(&bytes, 8)?)
-            .map_err(|_| LbpError::NumericOverflow)?;
-        let table_offset = usize::try_from(read_u64(&bytes, 12)?)
-            .map_err(|_| LbpError::NumericOverflow)?;
-        let table_length = usize::try_from(read_u64(&bytes, 20)?)
-            .map_err(|_| LbpError::NumericOverflow)?;
-        let header_length = usize::try_from(read_u32(&bytes, 28)?)
-            .map_err(|_| LbpError::NumericOverflow)?;
+        let count = usize::try_from(read_u32(&bytes, 8)?).map_err(|_| LbpError::NumericOverflow)?;
+        let table_offset =
+            usize::try_from(read_u64(&bytes, 12)?).map_err(|_| LbpError::NumericOverflow)?;
+        let table_length =
+            usize::try_from(read_u64(&bytes, 20)?).map_err(|_| LbpError::NumericOverflow)?;
+        let header_length =
+            usize::try_from(read_u32(&bytes, 28)?).map_err(|_| LbpError::NumericOverflow)?;
 
         let expected_table_length = count
             .checked_mul(SECTION_ENTRY_SIZE)
@@ -169,10 +168,10 @@ impl LbpArchive {
         require_at_most_one(&sections, SectionKind::Resources)?;
         require_at_most_one(&sections, SectionKind::Signature)?;
 
-        let manifest_section = find_section(&sections, SectionKind::Manifest)
-            .ok_or(LbpError::InvalidSectionTable)?;
-        let payload_section = find_section(&sections, SectionKind::Payload)
-            .ok_or(LbpError::InvalidSectionTable)?;
+        let manifest_section =
+            find_section(&sections, SectionKind::Manifest).ok_or(LbpError::InvalidSectionTable)?;
+        let payload_section =
+            find_section(&sections, SectionKind::Payload).ok_or(LbpError::InvalidSectionTable)?;
 
         let manifest_bytes = decode_section(&bytes, manifest_section)?;
         let payload_bytes = decode_section(&bytes, payload_section)?;
@@ -319,8 +318,8 @@ pub struct Metadata {
 
 impl LbpManifest {
     pub fn from_toml(input: &str) -> Result<Self, LbpError> {
-        let manifest: Self = toml::from_str(input)
-            .map_err(|error| LbpError::ManifestFormat(error.to_string()))?;
+        let manifest: Self =
+            toml::from_str(input).map_err(|error| LbpError::ManifestFormat(error.to_string()))?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -438,19 +437,31 @@ impl std::fmt::Display for LbpError {
         match self {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::InvalidHeader => formatter.write_str("invalid LBP1 header"),
-            Self::UnsupportedVersion(version) => write!(formatter, "unsupported LBP version: {version}"),
+            Self::UnsupportedVersion(version) => {
+                write!(formatter, "unsupported LBP version: {version}")
+            }
             Self::UnsupportedFlags(flags) => write!(formatter, "unsupported LBP flags: {flags:#x}"),
             Self::InvalidSectionTable => formatter.write_str("invalid LBP section table"),
             Self::InvalidSection => formatter.write_str("invalid LBP section"),
             Self::UnknownSectionType(kind) => write!(formatter, "unknown LBP section type: {kind}"),
-            Self::UnsupportedCompression(value) => write!(formatter, "unsupported LBP compression: {value}"),
+            Self::UnsupportedCompression(value) => {
+                write!(formatter, "unsupported LBP compression: {value}")
+            }
             Self::HashMismatch => formatter.write_str("LBP content hash mismatch"),
             Self::ManifestFormat(error) => write!(formatter, "invalid manifest: {error}"),
             Self::PayloadFormat(error) => write!(formatter, "invalid payload archive: {error}"),
             Self::PayloadPath(path) => write!(formatter, "unsafe payload path: {}", path.display()),
-            Self::DuplicatePayloadPath(path) => write!(formatter, "duplicate payload path: {}", path.display()),
-            Self::UnsupportedEntry(entry) => write!(formatter, "unsupported payload entry: {entry}"),
-            Self::MissingPayloadFile(path) => write!(formatter, "manifest references missing payload file: {}", path.display()),
+            Self::DuplicatePayloadPath(path) => {
+                write!(formatter, "duplicate payload path: {}", path.display())
+            }
+            Self::UnsupportedEntry(entry) => {
+                write!(formatter, "unsupported payload entry: {entry}")
+            }
+            Self::MissingPayloadFile(path) => write!(
+                formatter,
+                "manifest references missing payload file: {}",
+                path.display()
+            ),
             Self::NumericOverflow => formatter.write_str("numeric overflow"),
             Self::ResourceLimit => formatter.write_str("resource limit exceeded"),
         }
@@ -484,7 +495,12 @@ pub fn build_from_directory(
     let compressed = zstd::stream::encode_all(Cursor::new(&payload), 3)
         .map_err(|error| LbpError::PayloadFormat(error.to_string()))?;
     let sections = [
-        (SectionKind::Manifest, COMPRESSION_NONE, manifest_bytes, None),
+        (
+            SectionKind::Manifest,
+            COMPRESSION_NONE,
+            manifest_bytes,
+            None,
+        ),
         (
             SectionKind::Payload,
             COMPRESSION_ZSTD,
@@ -532,10 +548,8 @@ pub fn build_from_directory(
         output[start..start + 4].copy_from_slice(&info.kind.code().to_le_bytes());
         output[start + 4..start + 8].copy_from_slice(&info.compression.to_le_bytes());
         output[start + 8..start + 16].copy_from_slice(&info.offset.to_le_bytes());
-        output[start + 16..start + 24]
-            .copy_from_slice(&info.compressed_length.to_le_bytes());
-        output[start + 24..start + 32]
-            .copy_from_slice(&info.uncompressed_length.to_le_bytes());
+        output[start + 16..start + 24].copy_from_slice(&info.compressed_length.to_le_bytes());
+        output[start + 24..start + 32].copy_from_slice(&info.uncompressed_length.to_le_bytes());
         output[start + 32..start + 64].copy_from_slice(&info.content_hash);
     }
 
@@ -628,10 +642,7 @@ fn collect_source_files(
     Err(LbpError::UnsupportedEntry(relative.display().to_string()))
 }
 
-fn validate_manifest_payload(
-    manifest: &LbpManifest,
-    payload: &[u8],
-) -> Result<(), LbpError> {
+fn validate_manifest_payload(manifest: &LbpManifest, payload: &[u8]) -> Result<(), LbpError> {
     let mut paths = BTreeSet::new();
     let mut archive = Archive::new(Cursor::new(payload));
     for entry in archive.entries().map_err(payload_error)? {
@@ -651,9 +662,7 @@ fn validate_manifest_payload(
         }
         let source = Path::new(&mapping.source);
         if !paths.contains(source) && !paths.iter().any(|path| path.starts_with(source)) {
-            return Err(LbpError::MissingPayloadFile(PathBuf::from(
-                &mapping.source,
-            )));
+            return Err(LbpError::MissingPayloadFile(PathBuf::from(&mapping.source)));
         }
     }
     Ok(())
@@ -776,7 +785,12 @@ fn find_section(sections: &[SectionInfo], kind: SectionKind) -> Option<&SectionI
 }
 
 fn require_exactly_one(sections: &[SectionInfo], kind: SectionKind) -> Result<(), LbpError> {
-    if sections.iter().filter(|section| section.kind == kind).count() == 1 {
+    if sections
+        .iter()
+        .filter(|section| section.kind == kind)
+        .count()
+        == 1
+    {
         Ok(())
     } else {
         Err(LbpError::InvalidSectionTable)
@@ -784,7 +798,12 @@ fn require_exactly_one(sections: &[SectionInfo], kind: SectionKind) -> Result<()
 }
 
 fn require_at_most_one(sections: &[SectionInfo], kind: SectionKind) -> Result<(), LbpError> {
-    if sections.iter().filter(|section| section.kind == kind).count() <= 1 {
+    if sections
+        .iter()
+        .filter(|section| section.kind == kind)
+        .count()
+        <= 1
+    {
         Ok(())
     } else {
         Err(LbpError::InvalidSectionTable)
@@ -822,8 +841,7 @@ fn validate_non_overlapping(sections: &[SectionInfo]) -> Result<(), LbpError> {
 
 fn decode_section(bytes: &[u8], section: &SectionInfo) -> Result<Vec<u8>, LbpError> {
     let start = usize::try_from(section.offset).map_err(|_| LbpError::NumericOverflow)?;
-    let len = usize::try_from(section.compressed_length)
-        .map_err(|_| LbpError::NumericOverflow)?;
+    let len = usize::try_from(section.compressed_length).map_err(|_| LbpError::NumericOverflow)?;
     let end = start.checked_add(len).ok_or(LbpError::NumericOverflow)?;
     if end > bytes.len() {
         return Err(LbpError::InvalidSection);
@@ -836,8 +854,7 @@ fn decode_section(bytes: &[u8], section: &SectionInfo) -> Result<Vec<u8>, LbpErr
 
     let decoded = match section.compression {
         COMPRESSION_NONE => stored.to_vec(),
-        COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(stored))
-            .map_err(payload_error)?,
+        COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(stored)).map_err(payload_error)?,
         other => return Err(LbpError::UnsupportedCompression(other)),
     };
     if decoded.len() as u64 != section.uncompressed_length {
@@ -932,12 +949,30 @@ mod tests {
         let root = fixture();
         let bytes = build_from_directory(&manifest(), &root).expect("build bundle");
         assert_eq!(&bytes[..4], b"LBP1");
-        assert_eq!(u16::from_le_bytes(bytes[4..6].try_into().expect("header version")), 1);
-        assert_eq!(u16::from_le_bytes(bytes[6..8].try_into().expect("flags")), 0);
-        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().expect("section count")), 2);
-        assert_eq!(u64::from_le_bytes(bytes[12..20].try_into().expect("table offset")), 64);
-        assert_eq!(u64::from_le_bytes(bytes[20..28].try_into().expect("table length")), 128);
-        assert_eq!(u32::from_le_bytes(bytes[28..32].try_into().expect("header length")), 64);
+        assert_eq!(
+            u16::from_le_bytes(bytes[4..6].try_into().expect("header version")),
+            1
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[6..8].try_into().expect("flags")),
+            0
+        );
+        assert_eq!(
+            u32::from_le_bytes(bytes[8..12].try_into().expect("section count")),
+            2
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[12..20].try_into().expect("table offset")),
+            64
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[20..28].try_into().expect("table length")),
+            128
+        );
+        assert_eq!(
+            u32::from_le_bytes(bytes[28..32].try_into().expect("header length")),
+            64
+        );
         assert_ne!(&bytes[32..64], &[0u8; 32]);
         let _ = fs::remove_dir_all(root);
     }
@@ -997,10 +1032,9 @@ mod tests {
     fn extraction_preserves_payload_bytes() {
         let root = fixture();
         let destination = temp_dir();
-        let archive = LbpArchive::from_bytes(
-            build_from_directory(&manifest(), &root).expect("build bundle"),
-        )
-        .expect("parse bundle");
+        let archive =
+            LbpArchive::from_bytes(build_from_directory(&manifest(), &root).expect("build bundle"))
+                .expect("parse bundle");
         archive
             .extract_payload(&destination)
             .expect("extract payload");

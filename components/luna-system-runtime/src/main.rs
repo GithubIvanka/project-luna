@@ -75,11 +75,16 @@ fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
     for (program, args) in definitions {
         match runtime.spawn_process(program, args.iter().copied()) {
             Ok(id) => {
-                eprintln!("luna-system-runtime: started system service {program} (pid {})", id.get());
+                eprintln!(
+                    "luna-system-runtime: started system service {program} (pid {})",
+                    id.get()
+                );
                 services.push(id);
             }
             Err(error) if std::env::var_os("LUNA_STRICT_SYSTEM_SERVICES").is_none() => {
-                eprintln!("luna-system-runtime: optional system service {program} unavailable: {error}");
+                eprintln!(
+                    "luna-system-runtime: optional system service {program} unavailable: {error}"
+                );
             }
             Err(error) => {
                 eprintln!("luna-system-runtime: required system service {program} failed: {error}");
@@ -126,7 +131,10 @@ fn main() {
     let respawn = std::env::var_os("LUNA_NO_RESPAWN").is_none();
     let mut runtime = SystemRuntimeService::new();
 
-    match PersistentSystemManager::open_or_initialize_redb("/data", default_development_system_state()) {
+    match PersistentSystemManager::open_or_initialize_redb(
+        "/data",
+        default_development_system_state(),
+    ) {
         Ok(manager) => {
             let state = manager.state().clone();
             runtime.attach_system_manager(manager);
@@ -154,10 +162,13 @@ fn main() {
             }
         };
 
-        let login_process = match runtime.spawn_process(&login_command, std::iter::empty::<&str>()) {
+        let login_process = match runtime.spawn_process(&login_command, std::iter::empty::<&str>())
+        {
             Ok(id) => id,
             Err(error) => {
-                eprintln!("luna-system-runtime: failed to launch graphical login {login_command}: {error}");
+                eprintln!(
+                    "luna-system-runtime: failed to launch graphical login {login_command}: {error}"
+                );
                 std::process::exit(1);
             }
         };
@@ -176,7 +187,9 @@ fn main() {
         };
 
         if !login_succeeded(&login_status) {
-            eprintln!("luna-system-runtime: graphical authentication failed; returning to login screen");
+            eprintln!(
+                "luna-system-runtime: graphical authentication failed; returning to login screen"
+            );
             let _ = runtime.cancel_login(session);
             if !respawn {
                 break;
@@ -190,7 +203,9 @@ fn main() {
         }
 
         if let Err(error) = launch_graphical_user_session(&mut runtime, session, &session_command) {
-            eprintln!("luna-system-runtime: failed to launch graphical UserSession {session_command}: {error}");
+            eprintln!(
+                "luna-system-runtime: failed to launch graphical UserSession {session_command}: {error}"
+            );
             std::process::exit(1);
         }
 
@@ -202,7 +217,9 @@ fn main() {
 
             for service in &system_services {
                 if matches!(runtime.poll_process(*service), Ok(ProcessState::Exited(_))) {
-                    eprintln!("luna-system-runtime: a supervised host service exited; continuing in degraded mode");
+                    eprintln!(
+                        "luna-system-runtime: a supervised host service exited; continuing in degraded mode"
+                    );
                 }
             }
 

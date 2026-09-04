@@ -30,10 +30,16 @@ fn main() {
 
 fn run_login() -> io::Result<()> {
     if !Path::new(GREETD).is_file() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "embedded greetd backend is missing"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "embedded greetd backend is missing",
+        ));
     }
     if !Path::new(GREETER_SESSION).is_file() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Noctalia Greeter session is missing"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Noctalia Greeter session is missing",
+        ));
     }
     fs::create_dir_all(RUN_DIR)?;
     set_mode(RUN_DIR, 0o733)?;
@@ -51,14 +57,19 @@ fn run_login() -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(600);
     let result = loop {
         if let Some(status) = greetd.try_wait()? {
-            return Err(io::Error::other(format!("embedded greetd exited before authentication: {status}")));
+            return Err(io::Error::other(format!(
+                "embedded greetd exited before authentication: {status}"
+            )));
         }
         if let Some(value) = read_authenticated_result()? {
             break value;
         }
         if Instant::now() >= deadline {
             let _ = greetd.kill();
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "graphical login timed out"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "graphical login timed out",
+            ));
         }
         thread::sleep(Duration::from_millis(50));
     };
@@ -107,7 +118,9 @@ fn read_authenticated_result() -> io::Result<Option<AuthenticatedUser>> {
     let username = parts
         .next()
         .filter(|value| !value.is_empty() && !value.contains('\0') && !value.contains(':'))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid authenticated username"))?
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "invalid authenticated username")
+        })?
         .to_owned();
 
     if metadata.uid() != uid {
@@ -134,15 +147,31 @@ fn username_for_uid(uid: u32) -> io::Result<Option<String>> {
 fn write_handoff() -> io::Result<()> {
     let username = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
-        .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "authenticated user environment is missing"))?;
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "authenticated user environment is missing",
+            )
+        })?;
     let uid = unsafe { libc::getuid() };
-    let expected = username_for_uid(uid)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "authenticated uid has no passwd entry"))?;
+    let expected = username_for_uid(uid)?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "authenticated uid has no passwd entry",
+        )
+    })?;
     if expected != username {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "authenticated identity mismatch"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "authenticated identity mismatch",
+        ));
     }
     let temp = format!("{RUN_DIR}/result.{uid}.{}", std::process::id());
-    let mut file = OpenOptions::new().create_new(true).write(true).mode(0o644).open(&temp)?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o644)
+        .open(&temp)?;
     writeln!(file, "{uid}")?;
     writeln!(file, "{username}")?;
     file.sync_all()?;
@@ -158,6 +187,8 @@ fn set_mode(path: &str, mode: u32) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other("failed to set Luna login runtime permissions"))
+        Err(io::Error::other(
+            "failed to set Luna login runtime permissions",
+        ))
     }
 }

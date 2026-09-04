@@ -4,16 +4,24 @@
 pub struct DeviceId(String);
 
 impl DeviceId {
-    pub fn new(value: impl Into<String>) -> Self { Self(value.into()) }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct VolumeId(String);
 
 impl VolumeId {
-    pub fn new(value: impl Into<String>) -> Self { Self(value.into()) }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,9 +43,15 @@ impl VolumeInfo {
     pub fn new(id: VolumeId, label: Option<String>, state: VolumeState) -> Self {
         Self { id, label, state }
     }
-    pub fn id(&self) -> &VolumeId { &self.id }
-    pub fn label(&self) -> Option<&str> { self.label.as_deref() }
-    pub fn state(&self) -> VolumeState { self.state }
+    pub fn id(&self) -> &VolumeId {
+        &self.id
+    }
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+    pub fn state(&self) -> VolumeState {
+        self.state
+    }
 }
 
 pub trait DeviceQuery {

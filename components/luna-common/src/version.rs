@@ -11,7 +11,11 @@ pub struct Version {
 impl Version {
     /// Creates a semantic version.
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     pub const fn major(self) -> u32 {

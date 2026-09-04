@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use luna_bundle::lbp::{
-    build_from_directory, BundleManifestInfo, Capabilities, EntryPoint, LbpArchive, LbpError,
-    LbpManifest, MappingDeclaration, Metadata, PlatformInfo, FORMAT_VERSION,
+    BundleManifestInfo, Capabilities, EntryPoint, FORMAT_VERSION, LbpArchive, LbpError,
+    LbpManifest, MappingDeclaration, Metadata, PlatformInfo, build_from_directory,
 };
 
 fn temp_dir() -> PathBuf {
