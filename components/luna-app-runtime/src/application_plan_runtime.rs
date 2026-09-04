@@ -51,6 +51,26 @@ impl ApplicationLaunchContext {
     pub fn staging_parent(&self) -> &Path {
         &self.staging_parent
     }
+
+    /// Validate filesystem roots before any staging directory or child process
+    /// is created.
+    ///
+    /// Both roots must be absolute. The staging parent must not be the System
+    /// Image root itself, preventing a launch from creating instance state in
+    /// the immutable lower filesystem.
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
+            return Err(RuntimeError::Staging(
+                "launch context roots must be absolute paths".into(),
+            ));
+        }
+        if self.base_root == self.staging_parent {
+            return Err(RuntimeError::Staging(
+                "staging parent must differ from base root".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(unix)]
@@ -75,6 +95,8 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         runtime: &mut SystemRuntimeService,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
+        context.validate()?;
+
         let program = plan.executable().path().to_str().ok_or_else(|| {
             RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
         })?;
@@ -142,5 +164,43 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         self.processes.insert(process, id);
         self.roots.insert(process, root);
         Ok(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApplicationLaunchContext;
+    use crate::RuntimeError;
+    use luna_namespace::LinuxMountNamespace;
+    use std::path::Path;
+
+    #[test]
+    fn launch_context_accepts_distinct_absolute_roots() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/data/runtime"),
+        );
+        assert!(context.validate().is_ok());
+    }
+
+    #[test]
+    fn launch_context_rejects_relative_roots() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("system"),
+            Path::new("/luna/data/runtime"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_staging_inside_base_root_boundary() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/system"),
+        );
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
     }
 }
