@@ -1,6 +1,6 @@
 # Application Launch Contract
 
-**Status:** Draft for implementation
+**Status:** Draft implemented in `luna-app-runtime`
 **Scope:** `UserSession` → `ApplicationInstance`
 
 ## 1. Purpose
@@ -16,6 +16,8 @@ MappingPlan
     ↓
 luna-security
     ↓
+AuthorizedApplicationPlan
+    ↓
 luna-namespace
     ↓
 process spawn / exec
@@ -27,27 +29,32 @@ No later stage may be used to grant authority that was not present in an earlier
 
 ## 2. ApplicationPlan
 
-`ApplicationPlan` is the execution decision produced from a validated bundle declaration and an active `UserSession`.
+`ApplicationPlan` is the explicit execution decision produced from a validated Bundle declaration and an active `UserSession`.
 
 It describes:
 
 - application identity and version;
 - target `SessionId`;
 - selected `RuntimeSpec`;
-- executable identity;
+- executable identity and arguments;
 - requested resources;
-- resulting `MappingPlan`;
-- the authorization context required to materialize the execution environment.
+- resulting `MappingTable` context;
+- the authorization requests required before materialization.
 
-`ApplicationPlan` is an orchestration model owned by the application execution boundary. It must not become a duplicate Bundle codec or filesystem implementation.
+The plan is an orchestration model of `luna-app-runtime`. It is not a Bundle codec or filesystem implementation.
 
 ## 3. MappingPlan
 
-`MappingPlan` is produced from the application resource declarations plus the execution context. It is a deterministic description of the logical filesystem view.
+`luna-root-mapping` owns mapping semantics and returns a deterministic mapping description. It does not authorize access and does not perform Linux namespace operations.
 
-`luna-root-mapping` owns mapping semantics. It does not authorize access and does not perform Linux namespace operations.
+The application plan validates:
 
-The plan must be completely validated before security evaluation. Invalid, ambiguous, or contradictory mappings fail before authorization.
+- runtime compatibility;
+- every declared logical resource;
+- executable reachability through the mapping;
+- mapping consistency.
+
+Invalid, ambiguous, or contradictory mappings fail before security evaluation.
 
 ## 4. Security boundary
 
@@ -57,31 +64,31 @@ The plan must be completely validated before security evaluation. Invalid, ambig
 request ≠ grant
 ```
 
-A security decision must be available before Linux namespace materialization. `Deny`, policy errors, and unsupported constrained decisions fail closed.
+A successful policy decision returns an `AuthorizedApplicationPlan`. `Deny`, policy errors, and unsupported constrained decisions fail closed.
 
-A successful policy decision does not itself create mounts or processes.
+The authorized plan is a distinct type so the process launcher cannot accidentally accept an unapproved plan.
 
 ## 5. Namespace materialization
 
-`luna-namespace` receives only an already-authorized mapping context. Its responsibility is enforcing the mapping through Linux namespace primitives.
+`luna-namespace` receives only an already-authorized execution context. Its responsibility is enforcing the logical filesystem view through Linux namespace primitives.
 
 Physical paths in `DATA` remain implementation details. Applications operate through their logical root.
 
-Namespace creation/materialization must not consult an alternate policy path or silently expand the authorized mapping.
-
 ## 6. Process launch
 
-The executable launched by the runtime must correspond to the executable declared by the application execution plan. A caller must not be able to bypass the declaration by supplying an unrelated absolute path.
+The launcher consumes only `AuthorizedApplicationPlan` and performs the process staging/materialization sequence.
 
-The child process receives the materialized logical root and the execution context selected by the plan.
+The executable launched by the runtime must be the executable recorded in the plan and must resolve through the plan's mapping.
 
-Unexpected process, namespace, filesystem, or policy failures return typed errors and must trigger cleanup of resources already acquired for the failed launch.
+The child process receives the materialized logical root and selected execution context.
+
+If process creation fails after staging begins, the temporary staging root is cleaned up before returning the error.
 
 ## 7. ApplicationInstance
 
 `ApplicationInstance` represents one concrete launched application execution.
 
-The runtime owns its lifecycle and records at minimum:
+The runtime records at minimum:
 
 - instance identity;
 - application identity/version;
@@ -90,11 +97,9 @@ The runtime owns its lifecycle and records at minimum:
 - lifecycle state;
 - supervised process identity when one exists.
 
-The instance is not considered fully running until the process has been successfully created and associated with the instance.
+`Running` is reached only after the supervised process has been created and attached.
 
 ## 8. Ownership model
-
-The hierarchy remains:
 
 ```text
 luna-system-runtime
@@ -108,25 +113,24 @@ ApplicationInstance
 
 `luna-system-runtime` remains the system-wide supervisor. `luna-app-runtime` owns application execution lifecycle. There is no generic `luna-runtime` daemon.
 
-Borrowed references (`&T`, `&mut T`) should be used for transient access to plans, manifests, policy and runtime services. Long-lived application state belongs to the runtime owner.
-
 ## 9. Required tests
 
-The implementation must test at least:
+The implementation covers the planning and authorization boundary with tests for:
 
-1. invalid bundle declaration is rejected before namespace materialization;
-2. invalid/ambiguous mapping is rejected before security;
-3. denied security request causes no namespace materialization;
-4. policy error fails closed;
-5. executable not declared by the application is rejected;
-6. successful authorization permits exactly the supplied mapping;
-7. process-launch failure cleans up staging resources;
-8. successful launch creates one `ApplicationInstance` with the correct session/runtime identity;
-9. process exit transitions the instance and cleans its execution root.
+1. inactive session rejection;
+2. invalid executable rejection;
+3. executable-not-mapped rejection;
+4. runtime/mapping mismatch rejection;
+5. foreign authorization-principal rejection;
+6. fail-closed denial;
+7. successful creation of typed `AuthorizedApplicationPlan`;
+8. exposure of the authorized-plan launcher contract.
+
+Linux namespace/process integration tests remain required for full mount, exec and cleanup validation.
 
 ## 10. Open design questions
 
-The following require separate ADR/RFC decisions before they become policy:
+The following still require separate ADR/RFC decisions before becoming policy:
 
 - exact schema for executable declaration in the Bundle manifest;
 - algorithm that translates resource declarations into authorization requests;
