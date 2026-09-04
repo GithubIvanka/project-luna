@@ -109,7 +109,7 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 
 ## Тестовый контракт
 
-План должен проверяться отдельно от Linux mount/exec tests:
+План проверяется отдельно от Linux mount/exec tests:
 
 - inactive session отклоняется;
 - невалидный bundle отклоняется;
