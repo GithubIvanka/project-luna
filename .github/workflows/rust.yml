@@ -22,11 +22,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Apply formatting for diagnostic baseline
-        if: github.sha == 'ca51b9be7b079583b6cbf19ce46b81f5ee96e839'
+      - name: Apply formatting baseline
+        if: github.event.head_commit.message == 'ci: one-shot rustfmt baseline'
         run: cargo fmt --all
       - name: Commit formatting baseline
-        if: github.sha == 'ca51b9be7b079583b6cbf19ce46b81f5ee96e839'
+        if: github.event.head_commit.message == 'ci: one-shot rustfmt baseline'
         run: |
           if git diff --quiet; then
             exit 0
@@ -37,7 +37,7 @@ jobs:
           git commit -m "style: format Rust sources with rustfmt"
           git push origin HEAD:main
       - name: Check formatting
-        if: github.sha != 'ca51b9be7b079583b6cbf19ce46b81f5ee96e839'
+        if: github.event.head_commit.message != 'ci: one-shot rustfmt baseline'
         run: cargo fmt --all -- --check
 
   check-and-test:
