@@ -16,6 +16,8 @@ luna-security
     ↓
 AuthorizedApplicationPlan
     ↓
+ApplicationLaunchContext
+    ↓
 luna-namespace
     ↓
 process spawn / exec
@@ -45,7 +47,11 @@ Successful authorization creates `AuthorizedApplicationPlan`. No namespace or pr
 
 ## Process launch
 
-The launcher accepts only `AuthorizedApplicationPlan`. It stages an execution root, materializes the logical root in the child, and creates the supervised process through `luna-system-runtime`.
+The launcher accepts only `AuthorizedApplicationPlan` plus an `ApplicationLaunchContext` selected by the caller.
+
+`ApplicationLaunchContext` groups the process-local Linux mount namespace together with the immutable System Image base root and per-launch staging parent. This makes the namespace/root handoff an explicit typed boundary instead of a positional collection of unrelated paths.
+
+The launcher stages an execution root, materializes the logical root in the child, and creates the supervised process through `luna-system-runtime`.
 
 The executable must be absolute, traversal-free, and present in the authorized mapping. Spawn failure cleans the temporary staging root.
 
@@ -57,7 +63,7 @@ The plan launcher marks the instance `Running` only after successful process cre
 
 ## Tests
 
-Planning and authorization coverage includes inactive sessions, executable validation, executable mapping, runtime mismatch, principal binding, fail-closed denial, successful authorization, and the authorized launcher API surface.
+Planning and authorization coverage includes inactive sessions, executable validation, executable mapping, runtime mismatch, principal binding, fail-closed denial, successful authorization, authorization ordering, fail-closed pipeline termination, and the authorized launcher API surface.
 
 Privileged Linux namespace/process tests remain a separate integration stage.
 
