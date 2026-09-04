@@ -42,13 +42,9 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         base_root: &Path,
         staging_parent: &Path,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
-        let program = plan
-            .executable()
-            .path()
-            .to_str()
-            .ok_or_else(|| {
-                RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
-            })?;
+        let program = plan.executable().path().to_str().ok_or_else(|| {
+            RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
+        })?;
 
         fs::create_dir_all(staging_parent)
             .map_err(|error| RuntimeError::Staging(error.to_string()))?;
