@@ -23,4 +23,144 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, x86_64-unknown-linux-uefi
+          targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
+
+      - name: Install desktop and image toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            busybox-static build-essential clang cpio cmake curl dbus \
+            dosfstools e2fsprogs file fonts-dejavu-core gdisk git gzip \
+            libadwaita-1-dev libcairo2-dev libdbus-1-dev libdisplay-info-dev \
+            libdrm-dev libegl1-mesa-dev libelf-dev libfontconfig1-dev libfreetype6-dev \
+            libgbm-dev libgles2-mesa-dev libglib2.0-dev libgtk-4-dev \
+            libical-dev libinput-dev libjxl-dev liblua5.4-dev libmd4c-dev \
+            libpam0g-dev libpango1.0-dev libpipewire-0.3-dev libpixman-1-dev \
+            libpolkit-agent-1-dev libpolkit-gobject-1-dev libqalculate-dev \
+            libseat-dev libsecret-1-dev libsndfile1-dev libsodium-dev \
+            libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
+            libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libxml2-dev m4 meson mtools musl-tools ninja-build \
+            network-manager bluez pipewire pipewire-pulse wireplumber \
+            libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
+            openssl pkg-config rustfmt squashfs-tools util-linux \
+            wayland-protocols
+
+      - name: Prepare development login credential
+        run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
+
+      - name: Build Project Luna kernel
+        run: bash tools/build-luna-kernel.sh
+
+      - name: Verify Project Luna kernel payload
+        run: |
+          test -f dist/kernel/current/bzImage
+          file dist/kernel/current/bzImage
+          cat dist/kernel/current/release
+          echo "LUNA_KERNEL_VERSION=$(cat dist/kernel/current/release)" >> "$GITHUB_ENV"
+
+      - name: Build complete desktop payload
+        run: bash tools/build-desktop-root.sh
+
+      - name: Add curated Nerd Fonts
+        run: |
+          bash tools/build-nerd-fonts.sh
+          cp -a dist/nerd-fonts-root/. dist/desktop-root/
+
+      - name: Install Luna Ghostty defaults
+        run: |
+          install -Dm0644 config/ghostty/luna.conf dist/desktop-root/etc/luna/ghostty.conf
+          install -Dm0644 config/ghostty/luna.conf dist/desktop-root/etc/ghostty/config
+
+      - name: Add current Yazi file engine and Luna Files GUI
+        env:
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: bash tools/build-yazi-payload.sh
+
+      - name: Add audio network Bluetooth and removable-media services
+        env:
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: bash tools/prepare-desktop-services.sh
+
+      - name: Apply Luna graphical session audio bootstrap
+        env:
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: bash tools/patch-niri-session.sh
+
+      - name: Verify desktop payload
+        run: |
+          test -x dist/desktop-root/usr/bin/luna-login
+          test -x dist/desktop-root/usr/bin/niri
+          test -x dist/desktop-root/usr/bin/niri-session
+          sh -n dist/desktop-root/usr/bin/niri-session
+          test "$(cat dist/desktop-root/etc/luna/graphical-session)" = "/usr/bin/niri-session"
+          test -x dist/desktop-root/usr/bin/noctalia
+          test -x dist/desktop-root/usr/bin/noctalia-greeter
+          test -x dist/desktop-root/usr/bin/noctalia-greeter-compositor
+          test -x dist/desktop-root/usr/bin/noctalia-greeter-session
+          test -x dist/desktop-root/usr/bin/greetd
+          test -x dist/desktop-root/usr/bin/ghostty
+          test -x dist/desktop-root/usr/bin/fish
+          test -x dist/desktop-root/usr/bin/bash
+          test -x dist/desktop-root/usr/bin/yazi
+          test -x dist/desktop-root/usr/bin/ya
+          test -x dist/desktop-root/usr/bin/luna-files
+          test -L dist/desktop-root/usr/bin/sh
+          test -x dist/desktop-root/usr/bin/setpriv
+          test -x dist/desktop-root/usr/sbin/NetworkManager
+          test -x dist/desktop-root/usr/bin/nmcli
+          test -x dist/desktop-root/usr/libexec/bluetooth/bluetoothd
+          test -x dist/desktop-root/usr/bin/bluetoothctl
+          test -x dist/desktop-root/usr/bin/pipewire
+          test -x dist/desktop-root/usr/bin/pipewire-pulse
+          test -x dist/desktop-root/usr/bin/wireplumber
+          test -x dist/desktop-root/usr/bin/pactl
+          test -x dist/desktop-root/usr/bin/dbus-daemon
+          test -x dist/desktop-root/usr/bin/dbus-run-session
+          test -x dist/desktop-root/usr/libexec/udisks2/udisksd
+          test -x dist/desktop-root/usr/bin/udisksctl
+          test -d dist/desktop-root/usr/share/noctalia/assets
+          test -d dist/desktop-root/var/lib/noctalia-greeter
+          test -f dist/desktop-root/etc/pam.d/greetd
+          test -f dist/desktop-root/usr/share/wayland-sessions/luna.desktop
+          test -f dist/desktop-root/etc/luna/files.toml
+          test -f dist/desktop-root/etc/luna/fonts.toml
+          test -f dist/desktop-root/etc/luna/ghostty.conf
+          test -f dist/desktop-root/etc/ghostty/config
+          test -f dist/desktop-root/etc/fonts/conf.d/99-luna-nerd-fonts.conf
+          test -f dist/desktop-root/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Luna.svg
+          test -f dist/desktop-root/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Files.svg
+          test -f dist/desktop-root/etc/luna/services/network.toml
+          test -f dist/desktop-root/etc/luna/services/bluetooth.toml
+          test -f dist/desktop-root/etc/luna/services/audio.toml
+          test -f dist/desktop-root/etc/dbus-1/system.conf
+          test -n "$(find dist/desktop-root/usr/share/fonts/truetype/luna -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit)"
+          cat dist/desktop-root/etc/luna/yazi.version
+          cat dist/desktop-root/etc/luna/fonts.toml
+          cat dist/desktop-root/etc/luna/ghostty.conf
+          cat dist/desktop-root/etc/luna/desktop-ready
+
+      - name: Build Luna PC image
+        env:
+          LUNA_TEST_KERNEL: ${{ github.workspace }}/dist/kernel/current/bzImage
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
+        run: bash tools/build-pc-image.sh
+
+      - name: Inspect generated image
+        run: |
+          file dist/luna-pc.img
+          cat dist/BUILD-INFO
+          cat dist/SHA256SUMS
+
+      - name: Upload Luna PC image
+        uses: actions/upload-artifact@v4
+        with:
+          name: luna-pc-x86_64
+          path: |
+            dist/luna-pc.img
+            dist/luna-*.squashfs
+            dist/luna-initramfs.img
+            dist/BUILD-INFO
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
