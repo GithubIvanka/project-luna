@@ -3,9 +3,7 @@
 **Status:** Draft implemented in `luna-app-runtime`
 **Scope:** `UserSession` → `ApplicationInstance`
 
-## 1. Purpose
-
-This contract defines the execution boundary for launching a Luna application. The launch path must remain explicit and ordered:
+## Launch pipeline
 
 ```text
 Bundle declaration
@@ -25,86 +23,50 @@ process spawn / exec
 ApplicationInstance
 ```
 
-No later stage may be used to grant authority that was not present in an earlier stage.
+The application execution plan is validated before authorization. The authorized plan is a distinct type consumed by the process launcher.
 
-## 2. ApplicationPlan
+## ApplicationPlan
 
-`ApplicationPlan` is the explicit execution decision produced from a validated Bundle declaration and an active `UserSession`.
+`ApplicationPlan` contains application identity/version, session identity, `RuntimeSpec`, executable path and arguments, resource declarations, mapping context, and explicit authorization requests.
 
-It describes application identity/version, session identity, `RuntimeSpec`, executable path and arguments, resource declarations, mapping context, and explicit authorization requests.
+The plan is orchestration state owned by the application runtime boundary. It is not a Bundle codec, namespace implementation, or security policy store.
 
-The plan is an orchestration model of `luna-app-runtime`. It is not a Bundle codec or filesystem implementation.
+## Mapping
 
-## 3. MappingPlan
+The plan verifies runtime compatibility, every declared logical resource, executable reachability through the `MappingTable`, and mapping consistency.
 
-`luna-root-mapping` owns mapping semantics and returns a deterministic mapping description. It does not authorize access and does not perform Linux namespace operations.
+Mapping validation precedes security evaluation. `luna-root-mapping` remains responsible only for deterministic logical-to-physical mapping semantics.
 
-The application plan validates runtime compatibility, every declared logical resource, executable reachability through the mapping, and mapping consistency.
+## Authorization
 
-Invalid, ambiguous, or contradictory mappings fail before security evaluation.
+`luna-security` evaluates the complete request set. `Deny`, policy errors, and unsupported `Constrained` decisions fail closed.
 
-## 4. Security boundary
+Successful authorization creates `AuthorizedApplicationPlan`. No namespace or process operation is performed as part of policy evaluation.
 
-`luna-security` evaluates the complete authorization request set derived from the execution plan.
+## Process launch
 
-```text
-request ≠ grant
-```
+The launcher accepts only `AuthorizedApplicationPlan`. It stages an execution root, materializes the logical root in the child, and creates the supervised process through `luna-system-runtime`.
 
-A successful policy decision returns an `AuthorizedApplicationPlan`. `Deny`, policy errors, and unsupported constrained decisions fail closed.
+The executable must be absolute, traversal-free, and present in the authorized mapping. Spawn failure cleans the temporary staging root.
 
-The authorized plan is a distinct type so the process launcher cannot accidentally accept an unapproved plan.
+## ApplicationInstance
 
-## 5. Namespace materialization
+`ApplicationInstance` records instance identity, application identity/version, session identity, runtime specification, lifecycle state, and supervised process identity.
 
-`luna-namespace` receives only an already-authorized execution context. Its responsibility is enforcing the logical filesystem view through Linux namespace primitives.
+The plan launcher marks the instance `Running` only after successful process creation and process attachment.
 
-Physical paths in `DATA` remain implementation details. Applications operate through their logical root.
+## Tests
 
-## 6. Process launch
+Planning and authorization coverage includes inactive sessions, executable validation, executable mapping, runtime mismatch, principal binding, fail-closed denial, successful authorization, and the authorized launcher API surface.
 
-The plan launcher consumes only `AuthorizedApplicationPlan` and performs staging, logical-root materialization in the child, and supervised process creation.
+Privileged Linux namespace/process tests remain a separate integration stage.
 
-The executable launched by the runtime must be the executable recorded in the plan and must resolve through the plan's mapping.
+## Open decisions
 
-If process creation fails after staging begins, the temporary staging root is cleaned up before returning the error.
-
-## 7. ApplicationInstance
-
-`ApplicationInstance` represents one concrete launched application execution.
-
-The runtime records instance identity, application identity/version, session identity, runtime specification, lifecycle state, and supervised process identity when one exists.
-
-`Running` is reached only after the supervised process has been created and attached.
-
-## 8. Ownership model
-
-```text
-luna-system-runtime
-    ↓
-UserSession
-    ↓
-luna-app-runtime
-    ↓
-ApplicationInstance
-```
-
-`luna-system-runtime` remains the system-wide supervisor. `luna-app-runtime` owns application execution lifecycle. There is no generic `luna-runtime` daemon.
-
-## 9. Implemented tests
-
-The planning boundary covers inactive-session rejection, executable-path validation, executable-not-mapped rejection, runtime/mapping mismatch rejection, foreign-principal rejection, fail-closed denial, successful creation of typed `AuthorizedApplicationPlan`, and compile-time exposure of the authorized-plan launcher contract.
-
-Linux namespace/process integration tests remain required for privileged mount/exec and full cleanup validation.
-
-## 10. Open design questions
-
-The following still require separate ADR/RFC decisions before becoming policy:
-
-- exact schema for executable declaration in the Bundle manifest;
-- algorithm that translates resource declarations into authorization requests;
-- semantics of `Ask` and user-confirmation IPC;
-- enforcement of `Constrained` decisions;
+- Bundle executable declaration schema;
+- resource declaration → authorization request translation;
+- `Ask` and confirmation IPC;
+- `Constrained` enforcement;
 - cgroup/resource-limit contract;
 - restart policy;
-- exact logical-root mount set and portal integration.
+- final logical-root mount/portal set.
