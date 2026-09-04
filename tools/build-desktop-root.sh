@@ -42,14 +42,26 @@ fetch_git https://gitlab.freedesktop.org/wlroots/wlroots.git "$WLROOTS_VERSION" 
 fetch_git https://gitlab.freedesktop.org/pipewire/wireplumber.git "$WIREPLUMBER_VERSION" "$SRC/wireplumber"
 
 FISH_DIR="$SRC/fish-$FISH_VERSION-linux-x86_64"
-if [ ! -d "$FISH_DIR" ]; then
-    curl -fsSL "https://github.com/fish-shell/fish-shell/releases/download/$FISH_VERSION/fish-$FISH_VERSION-linux-x86_64.tar.xz" -o "$SRC/fish-linux.tar.xz"
-    tar -xf "$SRC/fish-linux.tar.xz" -C "$SRC"
+FISH_ARCHIVE="$SRC/fish-$FISH_VERSION-linux-x86_64.tar.xz"
+if [ ! -x "$FISH_DIR/usr/bin/fish" ]; then
+    rm -rf "$FISH_DIR"
+    mkdir -p "$FISH_DIR"
+    curl -fsSL "https://github.com/fish-shell/fish-shell/releases/download/$FISH_VERSION/fish-$FISH_VERSION-linux-x86_64.tar.xz" -o "$FISH_ARCHIVE"
+    tar -xf "$FISH_ARCHIVE" -C "$FISH_DIR"
+    mkdir -p "$FISH_DIR/usr/bin"
+    for dir in bin lib share; do
+        if [ -d "$FISH_DIR/$dir" ]; then
+            mv "$FISH_DIR/$dir" "$FISH_DIR/usr/$dir"
+        fi
+    done
+    FISH_BIN="$(find "$FISH_DIR" -maxdepth 4 \( -type f -o -type l \) -name fish -perm -0100 -print -quit)"
+    test -n "$FISH_BIN"
+    if [ "$FISH_BIN" != "$FISH_DIR/usr/bin/fish" ]; then
+        install -Dm0755 "$FISH_BIN" "$FISH_DIR/usr/bin/fish"
+        rm -f "$FISH_BIN"
+    fi
 fi
-if [ ! -d "$FISH_DIR" ]; then
-    FISH_DIR="$(find "$SRC" -maxdepth 1 -mindepth 1 -type d -name "fish-$FISH_VERSION-*" -print -quit)"
-fi
-[ -n "$FISH_DIR" ] && [ -d "$FISH_DIR" ] || { echo "fish payload directory not found" >&2; exit 1; }
+[ -x "$FISH_DIR/usr/bin/fish" ] || { echo "fish payload binary not found" >&2; exit 1; }
 
 if ! command -v zig >/dev/null 2>&1 || ! zig version | grep -qx "$GHOSTTY_ZIG_VERSION"; then
     curl -fsSL "https://ziglang.org/download/$GHOSTTY_ZIG_VERSION/zig-linux-x86_64-$GHOSTTY_ZIG_VERSION.tar.xz" -o "$SRC/zig.tar.xz"
