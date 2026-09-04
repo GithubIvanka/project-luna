@@ -258,12 +258,10 @@ impl fmt::Display for PlanError {
             Self::Mapping(error) => write!(f, "mapping error: {error}"),
             Self::InvalidExecutable(path) => write!(f, "invalid executable: {path}"),
             Self::ExecutableNotMapped(path) => write!(f, "executable is not mapped: {path}"),
-            Self::RuntimeMismatch { mapping, requested } => {
-                write!(
-                    f,
-                    "runtime mismatch: mapping={mapping:?}, requested={requested}"
-                )
-            }
+            Self::RuntimeMismatch { mapping, requested } => write!(
+                f,
+                "runtime mismatch: mapping={mapping:?}, requested={requested}"
+            ),
             Self::ForeignPrincipal { expected } => write!(
                 f,
                 "authorization request principal does not match application {expected}"
