@@ -48,7 +48,7 @@ jobs:
             network-manager bluez pipewire pipewire-pulse wireplumber \
             libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
             openssl pkg-config rustfmt squashfs-tools util-linux \
-            wayland-protocols
+            wayland-protocols xsltproc
 
       - name: Prepare development login credential
         run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
