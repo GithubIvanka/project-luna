@@ -1,5 +1,5 @@
-//! Application execution runtime boundary for Project Luna.
-//! Application process ownership belongs to `luna-system-runtime`.
+// Application execution runtime boundary for Project Luna.
+// Application process ownership belongs to `luna-system-runtime`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -240,8 +240,7 @@ impl InMemoryApplicationRuntime {
             });
         }
         for resource in manifest.resources() {
-            let logical =
-                LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
+            let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
             mapping
                 .resolve(&logical)
                 .map_err(|_| RuntimeError::Mapping(MappingError::NotMapped))?;
