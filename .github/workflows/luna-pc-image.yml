@@ -25,6 +25,10 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl, x86_64-unknown-uefi
 
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
       - name: Install desktop and image toolchain
         run: |
           sudo apt-get update
