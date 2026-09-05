@@ -81,6 +81,34 @@ Capability identity также отделена от authorization: `CapabilityR
 
 Физический System Image остаётся immutable источником системных ресурсов. Он не становится application `/` и не раскрывается приложению целиком. Требуемые ресурсы подключаются явно через RuntimeProfile и authorized mapping; остальные ресурсы System Image остаются вне logical root приложения.
 
+## Per-application Linux environment
+
+Каждый запуск получает собственный Linux-shaped environment. Приложение видит привычную Linux иерархию, насколько её сформировал `RuntimeProfile` и namespace runtime, но не получает автоматического доступа ко всем физическим ресурсам этих путей.
+
+```text
+Application sees
+    ↓
+logical `/`
+/etc /usr /lib /tmp /proc /sys /dev ...
+
+Application may access
+    ↓
+only explicitly authorized resources
+
+Application does NOT automatically access
+    ↓
+host filesystem
+SYSTEM
+other users
+other applications
+privileged devices
+host namespaces/services
+```
+
+Видимость и доступ — разные свойства. Наличие `/etc` не означает доступ ко всему физическому `/etc` хоста; наличие `/dev` не означает доступ к устройствам. Каждое внешнее filesystem mapping и capability должны пройти policy authorization.
+
+Capabilities также не являются скрытым продолжением filesystem. Например, grant `network` означает только ту сетевую возможность, которую предоставляет runtime/provider; он не открывает host filesystem или произвольные namespaces.
+
 ## Executable boundary
 
 Executable path является частью plan и должен:
@@ -108,7 +136,7 @@ Executable path является частью plan и должен:
 
 Logical root создаётся как tmpfs в private mount namespace; staging directory на persistent storage является только mountpoint и не является backing store для `/`.
 
-Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount()`. Это устраняет pathname TOCTOU между проверкой source и bind operation. Target-side containment и trust-domain validation физического source ещё являются отдельным hardening item.
+Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`. Это устраняет pathname TOCTOU между проверкой source и bind operation. Target-side containment и trust-domain validation физического source ещё являются отдельным hardening item.
 
 Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
 
