@@ -65,10 +65,7 @@ pub fn materialize_profiled_logical_root(
             )
             .with_access(rule.access().iter().copied()),
         };
-        namespace.apply_mapping(
-            &adjusted,
-            !rule.access().contains(&ResourceAccess::Write),
-        )?;
+        namespace.apply_mapping(&adjusted, !rule.access().contains(&ResourceAccess::Write))?;
     }
 
     fs::create_dir_all(root.join("proc"))?;
