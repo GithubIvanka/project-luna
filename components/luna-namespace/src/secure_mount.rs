@@ -9,7 +9,7 @@
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBun};
+use std::path::{Path, PathBuf};
 
 use crate::NamespaceError;
 
