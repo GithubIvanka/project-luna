@@ -11,7 +11,7 @@
 - создание и настройкой private mount namespace;
 - controlled bind mounts;
 - подготовкой RAM-backed logical root;
-- cleanup materialized resources;
+- transactional cleanup materialized resources при ошибке;
 - низкоуровневой materialization части Root Mapping;
 - kernel-level filesystem enforcement через Landlock;
 - безопасным FD-based подключением доверенных физических источников.
@@ -46,6 +46,8 @@ System Image остаётся внутренним immutable source. В logical 
 
 Для production mappings physical source должен принадлежать явно выбранному system-runtime trusted source root. Bundle не может сам объявить новый trust root.
 
+Source и target имеют независимые границы доверия. Source разрешается только под explicit trusted source root, а target — только под explicit per-launch logical-root destination. Ни один production target не разрешается относительно host `/`.
+
 Проверка и подключение выполняются через FD-based path resolution:
 
 ```text
@@ -64,16 +66,24 @@ mount_setattr(... MOUNT_ATTR_RDONLY)   [если read-only]
         ↓
 detached mount fd
         ↓
-openat2(target relative to host root)
+trusted logical-root fd
+        ↓
+openat2(target relative to logical root)
         ↓
 target O_PATH fd
         ↓
-move_mount(... MOVE_MOUNT_F_EMPTY_PATH | MOVE_MOUNT_T_EMPTY_PATH)
+move_mount(... MOUNT_MOUNT_*_EMPTY_PATH)
 ```
 
-Таким образом source и target не проходят отдельную pathname-проверку перед attach: kernel objects фиксируются FD до операции монтирования. Read-only применяется к detached mount object до attachment, без pathname-based remount.
+Таким образом source и target фиксируются через directory/file descriptors до attach. Read-only применяется к detached mount object до attachment, без pathname-based remount.
 
-Низкоуровневый `secure_bind_mount()` сохраняется только для совместимости с внутренними/legacy callers; production profile path обязан использовать explicit trusted source root.
+Низкоуровневый `secure_bind_mount()` сохраняется только для legacy/internal callers; production profile path обязан использовать explicit source и target roots.
+
+## Transactional cleanup
+
+Materialization регистрирует каждый успешно установленный mount в локальной transaction. При любой последующей ошибке mounts снимаются в обратном порядке через `umount2(..., MNT_DETACH)`. Transaction commit выполняется только после завершения всего logical-root materialization.
+
+После успешного запуска cleanup staging root выполняется `luna-app-runtime` при exit/reconcile/terminate; сам mount namespace дополнительно уничтожается kernel при завершении дочернего процесса.
 
 ## Filesystem permissions
 
@@ -91,7 +101,7 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Ошибки
 
-Если любой обязательный mount/materialization шаг не выполнен, namespace не считается готовым. Частично созданное окружение должно быть очищено.
+Если любой обязательный mount/materialization шаг не выполнен, namespace не считается готовым. Уже созданные mounts откатываются transaction cleanup. Слой выше отвечает за удаление самого staging directory и служебного runtime state.
 
 ## Зависимости
 
@@ -99,6 +109,6 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Открыто
 
-- fully transactional cleanup всех mount objects и промежуточного состояния при частично неуспешной materialization;
 - полноценный filtered `/dev`;
-- production handling ошибок mount и восстановления после аварийного завершения.
+- production handling ошибок mount и восстановления после аварийного завершения процесса;
+- privileged Linux integration tests для реального unshare/mount/chroot/Landlock path.
