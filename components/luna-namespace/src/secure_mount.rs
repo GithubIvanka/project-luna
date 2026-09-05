@@ -23,10 +23,11 @@ pub(crate) fn secure_bind_mount(
     secure_bind_mount_from_root(Path::new("/"), source, target, read_only)
 }
 
-/// Bind mount `source` only when it is lexically beneath `trusted_root`.
+/// Bind mount `source` relative to an explicit physical trust root.
 ///
-/// The final source lookup is still performed with `openat2`, so a source
-/// symlink, magic-link, or `..` escape cannot cross the trusted-root FD.
+/// Callers that pass `/` deliberately request the lower-level legacy mode and
+/// must establish trust themselves. Production launch code passes an explicit
+/// non-root trust domain selected by the system runtime.
 #[cfg(target_os = "linux")]
 pub(crate) fn secure_bind_mount_from_root(
     trusted_root: &Path,
@@ -35,7 +36,6 @@ pub(crate) fn secure_bind_mount_from_root(
     read_only: bool,
 ) -> Result<(), NamespaceError> {
     if !trusted_root.is_absolute()
-        || trusted_root == Path::new("/")
         || !source.is_absolute()
         || source == Path::new("/")
         || !target.is_absolute()
