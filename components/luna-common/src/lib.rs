@@ -5,11 +5,13 @@
 //! persistence, runtime state, filesystem operations, and serialization belong
 //! to their owning crates.
 
+mod access;
 mod id;
 mod runtime;
 mod user;
 mod version;
 
+pub use access::ResourceAccess;
 pub use id::{BundleId, ComponentId};
 pub use runtime::{ParseRuntimeKindError, RuntimeKind, RuntimeSpec};
 pub use user::UserId;
