@@ -343,9 +343,7 @@ fn path_depth(path: &Path) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath,
-    };
+    use super::{LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath};
     use luna_common::{ResourceAccess, RuntimeKind};
     use std::path::Path;
 
@@ -372,8 +370,11 @@ mod tests {
     #[test]
     fn mapping_access_is_explicit_and_deterministic() {
         let logical = LogicalPath::new("/data/file").unwrap();
-        let rule = MappingRule::file(logical, PhysicalPath::new("/data/file"))
-            .with_access([ResourceAccess::Write, ResourceAccess::Read, ResourceAccess::Read]);
+        let rule = MappingRule::file(logical, PhysicalPath::new("/data/file")).with_access([
+            ResourceAccess::Write,
+            ResourceAccess::Read,
+            ResourceAccess::Read,
+        ]);
         assert_eq!(
             rule.access().iter().copied().collect::<Vec<_>>(),
             vec![ResourceAccess::Read, ResourceAccess::Write]

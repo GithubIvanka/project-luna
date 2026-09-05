@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use luna_common::RuntimeProfile;
-use luna_namespace::{materialize_profiled_logical_root, LinuxMountNamespace};
+use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
 use luna_root_mapping::{LogicalPath, MappingKind};
 use luna_security::{CapabilityName, CapabilityRegistry, Principal};
 use luna_system_runtime::SystemRuntimeService;
@@ -85,8 +85,7 @@ impl ApplicationLaunchContext {
                 "staging parent must not be the host root".into(),
             ));
         }
-        if self.staging_parent == self.base_root
-            || self.staging_parent.starts_with(&self.base_root)
+        if self.staging_parent == self.base_root || self.staging_parent.starts_with(&self.base_root)
         {
             return Err(RuntimeError::Staging(
                 "staging parent must be outside base root".into(),

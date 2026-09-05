@@ -12,8 +12,7 @@ use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest}
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
 use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-    SecurityError,
+    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
 };
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -375,8 +374,7 @@ mod tests {
             BundleKind::Application,
         ));
         manifest.add_resource(
-            BundleResource::new("/bin/app", "bin/app")
-                .with_access([ResourceAccess::Execute]),
+            BundleResource::new("/bin/app", "bin/app").with_access([ResourceAccess::Execute]),
         );
         manifest
     }
@@ -540,10 +538,7 @@ mod tests {
             seen: std::cell::RefCell<Vec<AuthorizationRequest>>,
         }
         impl PolicyAuthority for RecordingAllow {
-            fn authorize(
-                &self,
-                request: &AuthorizationRequest,
-            ) -> Result<Decision, SecurityError> {
+            fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
                 self.seen.borrow_mut().push(request.clone());
                 Ok(Decision::Allow)
             }
@@ -572,10 +567,7 @@ mod tests {
     fn authorization_requires_runtime_permission() {
         struct RuntimeDeny;
         impl PolicyAuthority for RuntimeDeny {
-            fn authorize(
-                &self,
-                request: &AuthorizationRequest,
-            ) -> Result<Decision, SecurityError> {
+            fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
                 if matches!(request.resource, Resource::Runtime(_)) {
                     Ok(Decision::Deny)
                 } else {

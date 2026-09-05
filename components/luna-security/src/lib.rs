@@ -92,12 +92,7 @@ impl StaticPolicyAuthority {
     pub fn grant(&mut self, principal: Principal, resource: Resource, permission: Permission) {
         self.grants.insert((principal, resource, permission));
     }
-    pub fn revoke(
-        &mut self,
-        principal: &Principal,
-        resource: &Resource,
-        permission: Permission,
-    ) {
+    pub fn revoke(&mut self, principal: &Principal, resource: &Resource, permission: Permission) {
         self.grants
             .remove(&(principal.clone(), resource.clone(), permission));
     }

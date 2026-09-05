@@ -11,7 +11,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 use landlock::{
-    Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
+    ABI, Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
     RulesetCreatedAttr, RulesetStatus,
 };
 use luna_common::ResourceAccess;
@@ -210,10 +210,7 @@ impl LinuxMountNamespace {
     }
 
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
-    pub fn enforce_filesystem_access(
-        &self,
-        mappings: &MappingTable,
-    ) -> Result<(), NamespaceError> {
+    pub fn enforce_filesystem_access(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
         let handled = AccessFs::from_all(ABI::V3);
         let mut ruleset = Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
@@ -491,7 +488,7 @@ fn mount_with_data(
 
 #[cfg(test)]
 mod tests {
-    use super::{landlock_access, LinuxMountNamespace, NamespaceError};
+    use super::{LinuxMountNamespace, NamespaceError, landlock_access};
     use luna_common::ResourceAccess;
     use luna_root_mapping::{LogicalPath, MappingRule, PhysicalPath};
 
