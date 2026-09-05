@@ -5,7 +5,7 @@ on:
     branches: [develop]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format-artifact:
@@ -13,22 +13,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: true
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - name: Format workspace
         run: cargo fmt --all
-      - name: Pack formatted sources
+      - name: Commit formatting
         run: |
-          tar -czf /tmp/formatted-sources.tar.gz \
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
             components/luna-app-runtime/src/application_plan.rs \
             components/luna-app-runtime/src/application_plan_runtime.rs \
             components/luna-namespace/src/lib.rs \
             components/luna-root-mapping/src/lib.rs \
             components/luna-security/src/lib.rs
-      - name: Upload formatted sources
-        uses: actions/upload-artifact@v6
-        with:
-          name: formatted-sources
-          path: /tmp/formatted-sources.tar.gz
+          if git diff --cached --quiet; then
+            echo "No formatting changes."
+          else
+            git commit -m "style: apply rustfmt to namespace and runtime sources"
+            git push origin HEAD:develop
+          fi
