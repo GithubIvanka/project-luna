@@ -18,229 +18,31 @@ jobs:
       - name: Patch secure mount backend
         run: |
           python - <<'PY'
+          from base64 import b64decode
           from pathlib import Path
+          import re
 
+          payload = """Ly8hIEZpbGUtZGVzY3JpcHRvci1iYXNlZCBzZWN1cmUgYmluZCBtb3VudGluZyBmb3IgdHJ1c3RlZCBydW50aW1lIHNvdXJjZXMuCi8vIQovLyEgU291cmNlIHJlc29sdXRpb24gaXMgcGVyZm9ybWVkIHdpdGggYG9wZW5hdDIoMilgIHVzaW5nIGBSRVNPTFZFX0JFTkVBVEhgLAovLyEgYFJFU09MVkVfTk9fU1lNTElOS1NgLCBhbmQgYFJFU09MVkVfTk9fTUFHSUNMSU5LU2AuIFRoZSByZXN1bHRpbmcgT19QQVRICi8vISBkZXNjcmlwdG9yIGlzIGNvbnZlcnRlZCBpbnRvIGEgZGV0YWNoZWQgbW91bnQgb2JqZWN0IHdpdGggYG9wZW5fdHJlZSgyKWAKLy8hIGFuZCBhdHRhY2hlZCB3aXRoIGBtb3ZlX21vdW50KDIpYC4gVGhpcyBjbG9zZXMgdGhlIHBhdGhuYW1lLWNoZWNrIHZlcnN1cwovLyEgbW91bnQgdGltZS1vZi1jaGVjay90aW1lLW9mLXVzZSB3aW5kb3cgZm9yIHNvdXJjZSByZXNvdXJjZXMuCgp1c2Ugc3RkOjppbzsKdXNlIHN0ZDo6b3M6OmZkOjp7QXNSYXdGZCwgRnJvbVJhd0ZkLCBPd25lZEZkfTsKdXNlIHN0ZDo6b3M6OnVuaXg6OmZmaTo6T3NTdHJFeHQ7CnVzZSBzdGQ6OnBhdGg6OntQYXRoLCBQYXRoQnVufTsKCnVzZSBjcmF0ZTo6TmFtZXNwYWNlRXJyb3I7CgojW2NmZyh0YXJnZXRfb3MgPSAibGludXgiKV0KcHViKGNyYXRlKSBmbiBzZWN1cmVfYmluZF9tb3VudCgKICAgIHNvdXJjZTogJlBhdGgsCiAgICB0YXJnZXQ6ICZQYXRoLAogICAgcmVhZF9vbmx5OiBib29sLAopIC0+IFJlc3VsdDwoKSwgTmFtZXNwYWNlRXJyb3I+IHsKICAgIGlmICFzb3VyY2UuaXNfYWJzb2x1dGUoKSB8fCBzb3VyY2UgPT0gUGF0aDo6bmV3KCIvIikgewogICAgICAgIHJldHVybiBFcnIoTmFtZXNwYWNlRXJyb3I6OkludmFsaWRQYXRoKTsKICAgIH0KCiAgICBsZXQgcm9vdF9mZCA9IG9wZW5fcGF0aChQYXRoOjpuZXcoIi8iKSk/OwogICAgbGV0IHJlbGF0aXZlID0gc291cmNlCiAgICAgICAgLnN0cmlwX3ByZWZpeCgiLyIpCiAgICAgICAgLm1hcF9lcnIofF98IE5hbWVzcGFjZUVycm9yOjpJbnZhbGlkUGF0aCk/OwogICAgbGV0IHNvdXJjZV9mZCA9IG9wZW5fYmVuZWF0aChyb290X2ZkLmFzX3Jhd19mZCgpLCByZWxhdGl2ZSk/OwogICAgbGV0IG1vdW50X2ZkID0gY2xvbmVfbW91bnQoc291cmNlX2ZkLmFzX3Jhd19mZCgpKT87CiAgICBhdHRhY2hfbW91bnQobW91bnRfZmQuYXNfcmF3X2ZkKCksIHRhcmdldCk/OwoKICAgIGlmIHJlYWRfb25seSB7CiAgICAgICAgbGV0IHRhcmdldCA9IHBhdGhfY3N0cmluZyh0YXJnZXQpPzsKICAgICAgICBsZXQgc3RhdHVzID0gdW5zYWZlIHsKICAgICAgICAgICAgbGliYzo6bW91bnQoCiAgICAgICAgICAgICAgICBzdGQ6OnB0cjo6bnVsbCgpLAogICAgICAgICAgICAgICAgdGFyZ2V0LmFzX3B0cigpLAogICAgICAgICAgICAgICAgc3RkOjpwdHI6Om51bGwoKSwKICAgICAgICAgICAgICAgIGxpYmM6Ok1TX0JJTkQgfCBsaWJjOjpNU19SRU1PVU5UIHwgbGliYzo6TVNfUkRPTkxZLAogICAgICAgICAgICAgICAgc3RkOjpwdHI6Om51bGwoKSwKICAgICAgICAgICAgKQogICAgICAgIH07CiAgICAgICAgaWYgc3RhdHVzID09IC0xIHsKICAgICAgICAgICAgcmV0dXJuIEVycihpbzo6RXJyb3I6Omxhc3Rfb3NfZXJyb3IoKS5pbnRvKCkpOwogICAgICAgIH0KICAgIH0KCiAgICBPaygoKSkKfQoKI1tjZmcobm90KHRhcmdldF9vcyA9ICJsaW51eCIpKV0KcHViKGNyYXRlKSBmbiBzZWN1cmVfYmluZF9tb3VudCgKICAgIF9zb3VyY2U6ICZQYXRoLAogICAgX3RhcmdldDogJlBhdGgsCiAgICBfcmVhZF9vbmx5OiBib29sLAopIC0+IFJlc3VsdDwoKSwgTmFtZXNwYWNlRXJyb3I+IHsKICAgIEVycihpbzo6RXJyb3I6Om5ldygKICAgICAgICBpbzo6RXJyb3JLaW5kOjpVbnN1cHBvcnRlZCwKICAgICAgICAic2VjdXJlIGJpbmQgbW91bnRpbmcgcmVxdWlyZXMgTGludXggb3BlbmF0Mi9vcGVuX3RyZWUvbW92ZV9tb3VudCIsCiAgICApCiAgICAuaW50bygpKQp9CgojW2NmZyh0YXJnZXRfb3MgPSAibGludXgiKV0KZm4gb3Blbl9wYXRoKHBhdGg6ICZQYXRoKSAtPiBSZXN1bHQ8T3duZWRGZCwgTmFtZXNwYWNlRXJyb3I+IHsKICAgIGxldCBwYXRoID0gcGF0aF9jc3RyaW5nKHBhdGgpPzsKICAgIGxldCBmZCA9IHVuc2FmZSB7IGxpYmM6Om9wZW4ocGF0aC5hc19wdHIoKSwgbGliYzo6T19QQVRIIHwgbGliYzo6T19ESVJFQ1RPUlkgfCBsaWJjOjpPX0NMT0VYRUMpIH07CiAgICBpZiBmZCA9PSAtMSB7CiAgICAgICAgcmV0dXJuIEVycihpbzo6RXJyb3I6Omxhc3Rfb3NfZXJyb3IoKS5pbnRvKCkpOwogICAgfQogICAgT2sodW5zYWZlIHsgT3duZWRGZDo6ZnJvbV9yYXdfZmQoZmQpIH0pCn0KCiNbY2ZnKHRhcmdldF9vcyA9ICJsaW51eCIpXQpmbiBvcGVuX2JlbmVhdGgoZGlyZmQ6IGxpYmM6OmNfaW50LCByZWxhdGl2ZTogJlBhdGgpIC0+IFJlc3VsdDxPd25lZEZkLCBOYW1lc3BhY2VFcnJvcj4gewogICAgbGV0IHBhdGggPSByZWxhdGl2ZS5hc19vc19zdHIoKTsKICAgIGlmIHBhdGguaXNfZW1wdHkoKSB8fCBQYXRoQnVmOjpmcm9tKHBhdGgpLmlzX2Fic29sdXRlKCkgewogICAgICAgIHJldHVybiBFcnIoTmFtZXNwYWNlRXJyb3I6OkludmFsaWRQYXRoKTsKICAgIH0KICAgIGxldCBwYXRoID0gcGF0aF9jc3RyaW5nKFBhdGg6Om5ldyhwYXRoKSk/OwogICAgbGV0IGhvdyA9IE9wZW5Ib3cgewogICAgICAgIGZsYWdzOiAobGliYzo6T19QQVRIIHwgbGliYzo6T19DTE9FWEVDKSBhcyB1NjQsCiAgICAgICAgbW9kZTogMCwKICAgICAgICByZXNvbHZlOiBSRVNPTFZFX0JFTkVBVEggfCBSRVNPTFZFX05PX01BR0lDTElOS1MgfCBSRVNPTFZFX05PX1NZTUxJTktTLAogICAgfTsKICAgIGxldCBmZCA9IHVuc2FmZSB7CiAgICAgICAgbGliYzo6c3lzY2FsbCgKICAgICAgICAgICAgbGliYzo6U1lTX29wZW5hdDIsCiAgICAgICAgICAgIGRpcmZkLAogICAgICAgICAgICBwYXRoLmFzX3B0cigpLAogICAgICAgICAgICAmaG93IGFzICpjb25zdCBPcGVuSG93LAogICAgICAgICAgICBzdGQ6Om1lbTo6c2l6ZV9vZjo6PE9wZW5Ib3c+KCksCiAgICAgICAgKSBhcyBsaWJjOjpjX2ludAogICAgfTsKICAgIGlmIGZkID09IC0xIHsKICAgICAgICByZXR1cm4gRXJyKGlvOjpFcnJvcjo6bGFzdF9vc19lcnJvcigpLmludG8oKSk7CiAgICB9CiAgICBPayh1bnNhZmUgeyBPd25lZEZkOjpmcm9tX3Jhd19mZChmZCkgfSkKfQoKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmZuIGNsb25lX21vdW50KHNvdXJjZV9mZDogbGliYzo6Y19pbnQpIC0+IFJlc3VsdDxPd25lZEZkLCBOYW1lc3BhY2VFcnJvcj4gewogICAgbGV0IGVtcHR5ID0gWzBfdThdOwogICAgbGV0IGZkID0gdW5zYWZlIHsKICAgICAgICBsaWJjOjpzeXNjYWxsKAogICAgICAgICAgICBsaWJjOjpTWVNfb3Blbl90cmVlLAogICAgICAgICAgICBzb3VyY2VfZmQsCiAgICAgICAgICAgIGVtcHR5LmFzX3B0cigpLAogICAgICAgICAgICAoT1BFTl9UUkVFX0NMT05FIHwgT1BFTl9UUkVFX0NMT0VYRUMgfCBBVF9FTVBUWV9QQVRIKSBhcyBsaWJjOjpjX3VpbnQsCiAgICAgICAgKSBhcyBsaWJjOjpjX2ludAogICAgfTsKICAgIGlmIGZkID09IC0xIHsKICAgICAgICByZXR1cm4gRXJyKGlvOjpFcnJvcjo6bGFzdF9vc19lcnJvcigpLmludG8oKSk7CiAgICB9CiAgICBPayh1bnNhZmUgeyBPd25lZEZkOjpmcm9tX3Jhd19mZChmZCkgfSkKfQoKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmZuIGF0dGFjaF9tb3VudChtb3VudF9mZDogbGliYzo6Y19pbnQsIHRhcmdldDogJlBhdGgpIC0+IFJlc3VsdDwoKSwgTmFtZXNwYWNlRXJyb3I+IHsKICAgIGxldCBlbXB0eSA9IFswX3U4XTsKICAgIGxldCB0YXJnZXQgPSBwYXRoX2NzdHJpbmcodGFyZ2V0KT87CiAgICBsZXQgc3RhdHVzID0gdW5zYWZlIHsKICAgICAgICBsaWJjOjpzeXNjYWxsKAogICAgICAgICAgICBsaWJjOjpTWVNfbW92ZV9tb3VudCwKICAgICAgICAgICAgbW91bnRfZmQsCiAgICAgICAgICAgIGVtcHR5LmFzX3B0cigpLAogICAgICAgICAgICBsaWJjOjpBVF9GRENXRCwKICAgICAgICAgICAgdGFyZ2V0LmFzX3B0cigpLAogICAgICAgICAgICBNT1ZFX01PVU5UX0ZfRU1QVFlfUEFUSCwKICAgICAgICApIGFzIGxpYmM6OmNfaW50CiAgICB9OwogICAgaWYgc3RhdHVzID09IC0xIHsKICAgICAgICByZXR1cm4gRXJyKGlvOjpFcnJvcjo6bGFzdF9vc19lcnJvcigpLmludG8oKSk7CiAgICB9CiAgICBPaygoKSkKfQoKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmZuIHBhdGhfY3N0cmluZyhwYXRoOiAmUGF0aCkgLT4gUmVzdWx0PHN0ZDo6ZmZpOjpDU3RyaW5nLCBOYW1lc3BhY2VFcnJvcj4gewogICAgc3RkOjpmZmk6OkNTdHJpbmc6Om5ldyhwYXRoLmFzX29zX3N0cigpLmFzX2J5dGVzKCkpLm1hcF9lcnIofF98IE5hbWVzcGFjZUVycm9yOjpJbnZhbGlkUGF0aCkKfQoKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCiNbcmVwcihDKV0Kc3RydWN0IE9wZW5Ib3cgewogICAgZmxhZ3M6IHU2NCwKICAgIG1vZGU6IHU2NCwKICAgIHJlc29sdmU6IHU2NCwKfQoKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmNvbnN0IEFUX0VNUFRZX1BBVEg6IHUzMiA9IDB4MTAwMDsKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmNvbnN0IE9QRU5fVFJFRV9DTE9ORTogdTMyID0gMHgwMDAwXzAwMDE7CiNbY2ZnKHRhcmdldF9vcyA9ICJsaW51eCIpXQpjb25zdCBPUEVOX1RSRUVfQ0xPRVhFQzogdTMyID0gbGliYzo6T19DTE9FWEVDIGFzIHUzMjsKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmNvbnN0IE1PVkVfTU9VTlRfRl9FTVBUWV9QQVRIOiB1MzIgPSAweDAwMDBfMDAwNDsKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmNvbnN0IFJFU09MVkVfTk9fTUFHSUNMSU5LUzogdTY0ID0gMHgwMjsKI1tjZmcodGFyZ2V0X29zID0gImxpbnV4IildCmNvbnN0IFJFU09MVkVfTk9fU1lNTElOS1M6IHU2NCA9IDB4MDQ7CiNbY2ZnKHRhcmdldF9vcyA9ICJsaW51eCIpXQpjb25zdCBSRVNPTFZFX0JFTkVBVEg6IHU2NCA9IDB4MDg7Cg=="""
           secure_mount = Path("components/luna-namespace/src/secure_mount.rs")
-          secure_mount.write_text(r'''//! File-descriptor-based secure bind mounting for trusted runtime sources.
-//!
-//! Source resolution is performed with `openat2(2)` using `RESOLVE_BENEATH`,
-//! `RESOLVE_NO_SYMLINKS`, and `RESOLVE_NO_MAGICLINKS`. The resulting O_PATH
-//! descriptor is converted into a detached mount object with `open_tree(2)`
-//! and attached with `move_mount(2)`. This closes the pathname-check versus
-//! mount time-of-check/time-of-use window for source resources.
+          secure_mount.write_bytes(b64decode(payload))
 
-use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
-
-use crate::NamespaceError;
-
-#[cfg(target_os = "linux")]
-pub(crate) fn secure_bind_mount(
-    source: &Path,
-    target: &Path,
-    read_only: bool,
-) -> Result<(), NamespaceError> {
-    if !source.is_absolute() || source == Path::new("/") {
-        return Err(NamespaceError::InvalidPath);
-    }
-
-    let root_fd = open_path(Path::new("/"))?;
-    let relative = source
-        .strip_prefix("/")
-        .map_err(|_| NamespaceError::InvalidPath)?;
-    let source_fd = open_beneath(root_fd.as_raw_fd(), relative)?;
-    let mount_fd = clone_mount(source_fd.as_raw_fd())?;
-    attach_mount(mount_fd.as_raw_fd(), target)?;
-
-    if read_only {
-        let target = path_cstring(target)?;
-        let status = unsafe {
-            libc::mount(
-                std::ptr::null(),
-                target.as_ptr(),
-                std::ptr::null(),
-                libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-                std::ptr::null(),
-            )
-        };
-        if status == -1 {
-            return Err(io::Error::last_os_error().into());
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn secure_bind_mount(
-    _source: &Path,
-    _target: &Path,
-    _read_only: bool,
-) -> Result<(), NamespaceError> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "secure bind mounting requires Linux openat2/open_tree/move_mount",
-    )
-    .into())
-}
-
-#[cfg(target_os = "linux")]
-fn open_path(path: &Path) -> Result<OwnedFd, NamespaceError> {
-    let path = path_cstring(path)?;
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC) };
-    if fd == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
-#[cfg(target_os = "linux")]
-fn open_beneath(dirfd: libc::c_int, relative: &Path) -> Result<OwnedFd, NamespaceError> {
-    let path = relative.as_os_str();
-    if path.is_empty() || PathBuf::from(path).is_absolute() {
-        return Err(NamespaceError::InvalidPath);
-    }
-    let path = path_cstring(Path::new(path))?;
-    let how = OpenHow {
-        flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
-        mode: 0,
-        resolve: RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_SYMLINKS,
-    };
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            dirfd,
-            path.as_ptr(),
-            &how as *const OpenHow,
-            std::mem::size_of::<OpenHow>(),
-        ) as libc::c_int
-    };
-    if fd == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
-#[cfg(target_os = "linux")]
-fn clone_mount(source_fd: libc::c_int) -> Result<OwnedFd, NamespaceError> {
-    let empty = [0_u8];
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_open_tree,
-            source_fd,
-            empty.as_ptr(),
-            (OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_EMPTY_PATH) as libc::c_uint,
-        ) as libc::c_int
-    };
-    if fd == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
-#[cfg(target_os = "linux")]
-fn attach_mount(mount_fd: libc::c_int, target: &Path) -> Result<(), NamespaceError> {
-    let empty = [0_u8];
-    let target = path_cstring(target)?;
-    let status = unsafe {
-        libc::syscall(
-            libc::SYS_move_mount,
-            mount_fd,
-            empty.as_ptr(),
-            libc::AT_FDCWD,
-            target.as_ptr(),
-            MOVE_MOUNT_F_EMPTY_PATH,
-        ) as libc::c_int
-    };
-    if status == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn path_cstring(path: &Path) -> Result<std::ffi::CString, NamespaceError> {
-    std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| NamespaceError::InvalidPath)
-}
-
-#[cfg(target_os = "linux")]
-#[repr(C)]
-struct OpenHow {
-    flags: u64,
-    mode: u64,
-    resolve: u64,
-}
-
-#[cfg(target_os = "linux")]
-const AT_EMPTY_PATH: u32 = 0x1000;
-#[cfg(target_os = "linux")]
-const OPEN_TREE_CLONE: u32 = 0x0000_0001;
-#[cfg(target_os = "linux")]
-const OPEN_TREE_CLOEXEC: u32 = libc::O_CLOEXEC as u32;
-#[cfg(target_os = "linux")]
-const MOVE_MOUNT_F_EMPTY_PATH: u32 = 0x0000_0004;
-#[cfg(target_os = "linux")]
-const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
-#[cfg(target_os = "linux")]
-const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-#[cfg(target_os = "linux")]
-const RESOLVE_BENEATH: u64 = 0x08;
-''', encoding="utf-8")
-
-          lib = Path("components/luna-namespace/src/lib.rs")
-          text = lib.read_text()
-          text = text.replace("mod profile;\n", "mod profile;\nmod secure_mount;\n", 1)
-          old = '''fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    if mount(Some(source), target, None, libc::MS_BIND)? == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    if read_only
-        && mount(
-            None,
-            target,
-            None,
-            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-        )? == -1
-    {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
-}
-'''
-          new = '''fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    secure_mount::secure_bind_mount(source, target, read_only)
-}
-'''
-          if old not in text:
-              raise SystemExit("expected bind_mount implementation not found in luna-namespace/src/lib.rs")
-          text = text.replace(old, new, 1)
-          lib.write_text(text, encoding="utf-8")
-
-          profile = Path("components/luna-namespace/src/profile.rs")
-          text = profile.read_text()
-          old = '''fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    mount_filesystem_path(Some(source), target, libc::MS_BIND, None)?;
-    if read_only {
-        mount_filesystem_path(
-            None,
-            target,
-            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-            None,
-        )?;
-    }
-    Ok(())
-}
-'''
-          new = '''fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    crate::secure_mount::secure_bind_mount(source, target, read_only)
-}
-'''
-          if old not in text:
-              raise SystemExit("expected bind_mount implementation not found in profile.rs")
-          text = text.replace(old, new, 1)
-          profile.write_text(text, encoding="utf-8")
+          for path in [
+              Path("components/luna-namespace/src/lib.rs"),
+              Path("components/luna-namespace/src/profile.rs"),
+          ]:
+              text = path.read_text()
+              if path.name == "lib.rs":
+                  if "mod secure_mount;" not in text:
+                      text = text.replace("mod profile;\n", "mod profile;\nmod secure_mount;\n", 1)
+                  pattern = r"fn bind_mount\(source: &Path, target: &Path, read_only: bool\) -> Result<(), NamespaceError> \{.*?\n\}"
+                  replacement = "fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {\n    secure_mount::secure_bind_mount(source, target, read_only)\n}"
+              else:
+                  pattern = r"fn bind_mount\(source: &Path, target: &Path, read_only: bool\) -> Result<(), NamespaceError> \{.*?\n\}"
+                  replacement = "fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {\n    crate::secure_mount::secure_bind_mount(source, target, read_only)\n}"
+              text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"expected bind_mount function not found in {path}")
+              path.write_text(text)
           PY
       - name: Format patched sources
         run: cargo fmt --all
