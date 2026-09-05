@@ -25,9 +25,10 @@ pub(crate) fn secure_bind_mount(
 
 /// Bind mount `source` relative to an explicit physical trust root.
 ///
-/// Callers that pass `/` deliberately request the lower-level legacy mode and
-/// must establish trust themselves. Production launch code passes an explicit
-/// non-root trust domain selected by the system runtime.
+/// The trust root is itself opened through `openat2(2)` without following
+/// symlinks. Production launch code passes an explicit non-root trust domain
+/// selected by the system runtime; bundle-supplied paths are resolved only
+/// beneath that already-opened domain.
 #[cfg(target_os = "linux")]
 pub(crate) fn secure_bind_mount_from_root(
     trusted_root: &Path,
@@ -36,6 +37,7 @@ pub(crate) fn secure_bind_mount_from_root(
     read_only: bool,
 ) -> Result<(), NamespaceError> {
     if !trusted_root.is_absolute()
+        || trusted_root == Path::new("/")
         || !source.is_absolute()
         || source == Path::new("/")
         || !target.is_absolute()
@@ -44,7 +46,12 @@ pub(crate) fn secure_bind_mount_from_root(
         return Err(NamespaceError::InvalidPath);
     }
 
-    let root_fd = open_path(trusted_root)?;
+    let host_root_fd = open_path(Path::new("/"))?;
+    let trusted_relative = trusted_root
+        .strip_prefix("/")
+        .map_err(|_| NamespaceError::InvalidPath)?;
+    let root_fd = open_beneath(host_root_fd.as_raw_fd(), trusted_relative)?;
+
     let relative = source
         .strip_prefix(trusted_root)
         .map_err(|_| NamespaceError::FilesystemAccess("source is outside trusted root".into()))?;
@@ -63,11 +70,10 @@ pub(crate) fn secure_bind_mount_from_root(
     let target_relative = target
         .strip_prefix("/")
         .map_err(|_| NamespaceError::InvalidPath)?;
-    let target_fd = if target_relative.as_os_str().is_empty() {
+    if target_relative.as_os_str().is_empty() {
         return Err(NamespaceError::InvalidPath);
-    } else {
-        open_beneath(target_root_fd.as_raw_fd(), target_relative)?
-    };
+    }
+    let target_fd = open_beneath(target_root_fd.as_raw_fd(), target_relative)?;
 
     attach_mount(mount_fd.as_raw_fd(), target_fd.as_raw_fd())?;
     Ok(())
