@@ -19,6 +19,8 @@ pub enum Resource {
     UserData(UserId),
     ApplicationData { user: UserId, application: BundleId },
     Application(BundleId),
+    FilesystemPath(String),
+    Capability(String),
     Runtime(RuntimeKind),
     Volume(String),
     Device(String),
@@ -86,7 +88,12 @@ impl StaticPolicyAuthority {
     pub fn grant(&mut self, principal: Principal, resource: Resource, permission: Permission) {
         self.grants.insert((principal, resource, permission));
     }
-    pub fn revoke(&mut self, principal: &Principal, resource: &Resource, permission: Permission) {
+    pub fn revoke(
+        &mut self,
+        principal: &Principal,
+        resource: &Resource,
+        permission: Permission,
+    ) {
         self.grants
             .remove(&(principal.clone(), resource.clone(), permission));
     }
@@ -115,6 +122,7 @@ mod tests {
         Resource, StaticPolicyAuthority,
     };
     use luna_common::{BundleId, RuntimeKind, UserId};
+
     #[test]
     fn explicit_grant_allows_and_revoke_denies() {
         let principal = Principal::Application(BundleId::from("example.app"));
@@ -131,6 +139,7 @@ mod tests {
         policy.revoke(&principal, &resource, Permission::Read);
         assert_eq!(policy.authorize(&request).unwrap(), Decision::Deny);
     }
+
     #[test]
     fn visibility_is_independent_from_read() {
         let principal = Principal::Application(BundleId::from("example.app"));
@@ -154,6 +163,7 @@ mod tests {
         assert_eq!(policy.authorize(&visible).unwrap(), Decision::Allow);
         assert_eq!(policy.authorize(&readable).unwrap(), Decision::Deny);
     }
+
     #[test]
     fn grants_are_scoped_to_principal_resource_and_permission() {
         let principal = Principal::Application(BundleId::from("example.app"));
@@ -197,6 +207,7 @@ mod tests {
             Decision::Deny
         );
     }
+
     #[test]
     fn runtime_requires_explicit_use_permission() {
         let principal = Principal::Application(BundleId::from("example.app"));
@@ -211,6 +222,32 @@ mod tests {
         policy.grant(principal, resource, Permission::Use);
         assert_eq!(policy.authorize(&request).unwrap(), Decision::Allow);
     }
+
+    #[test]
+    fn filesystem_and_named_capabilities_are_distinct_resources() {
+        let principal = Principal::Application(BundleId::from("example.app"));
+        let filesystem = Resource::FilesystemPath("/home/alice/Documents".into());
+        let network = Resource::Capability("network".into());
+        let mut policy = StaticPolicyAuthority::new();
+        let read_request = AuthorizationRequest {
+            principal: principal.clone(),
+            resource: filesystem,
+            permission: Permission::Read,
+        };
+        let network_request = AuthorizationRequest {
+            principal: principal.clone(),
+            resource: network,
+            permission: Permission::Use,
+        };
+        policy.grant(
+            read_request.principal.clone(),
+            read_request.resource.clone(),
+            Permission::Read,
+        );
+        assert_eq!(policy.authorize(&read_request).unwrap(), Decision::Allow);
+        assert_eq!(policy.authorize(&network_request).unwrap(), Decision::Deny);
+    }
+
     #[test]
     fn constrained_decision_is_typed() {
         let decision = Decision::Constrained {
@@ -221,6 +258,7 @@ mod tests {
         };
         assert!(matches!(decision, Decision::Constrained { .. }));
     }
+
     #[test]
     fn system_is_an_explicit_principal_not_an_implicit_bypass() {
         let request = AuthorizationRequest {
