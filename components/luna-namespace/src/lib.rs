@@ -10,7 +10,9 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
-use luna_root_mapping::{MappingRule, MappingTable};
+use landlock::{Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetStatus, ABI};
+use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
+use luna_common::ResourceAccess;
 
 #[derive(Debug)]
 pub enum NamespaceError {
@@ -18,6 +20,8 @@ pub enum NamespaceError {
     InvalidPath,
     MissingBaseRoot,
     RootNotEmpty,
+    FilesystemAccess(String),
+    Landlock(String),
 }
 
 impl std::fmt::Display for NamespaceError {
@@ -29,6 +33,8 @@ impl std::fmt::Display for NamespaceError {
             }
             Self::MissingBaseRoot => f.write_str("logical root base directory does not exist"),
             Self::RootNotEmpty => f.write_str("logical root staging directory must be empty"),
+            Self::FilesystemAccess(error) => write!(f, "filesystem access policy failed: {error}"),
+            Self::Landlock(error) => write!(f, "Landlock enforcement failed: {error}"),
         }
     }
 }
@@ -106,10 +112,12 @@ impl LinuxMountNamespace {
             fs::create_dir_all(root.join(directory))?;
         }
         for rule in mappings.iter() {
-            prepare_mount_target(root, rule)?;
+            if !rule.access().is_empty() {
+                prepare_mount_target(root, rule)?;
+            }
         }
 
-        self.apply_read_only_mappings_at_root(root, mappings)?;
+        self.apply_mappings_at_root(root, mappings)?;
         mount_proc(&root.join("proc"))?;
         mount_sysfs(&root.join("sys"))?;
         mount_tmpfs(&root.join("dev"), "mode=0755")?;
@@ -120,48 +128,52 @@ impl LinuxMountNamespace {
         })
     }
 
-    /// Apply validated mappings at the caller's current root as read-only binds.
+    /// Apply mappings at the caller's current root using their declared access.
     ///
-    /// Callers must already be executing in the intended namespace/root.
-    pub fn apply_read_only_mappings(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
-        for rule in mappings.iter() {
-            self.apply_mapping(rule, true)?;
+    /// This performs mount materialization only. Fine-grained Read/Write/Execute
+    /// enforcement is applied separately by `enforce_filesystem_access`.
+    pub fn apply_mappings(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
+        for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
+            let read_only = !rule.access().contains(&ResourceAccess::Write);
+            self.apply_mapping(rule, read_only)?;
         }
         Ok(())
     }
 
-    fn apply_read_only_mappings_at_root(
+    fn apply_mappings_at_root(
         &self,
         root: &Path,
         mappings: &MappingTable,
     ) -> Result<(), NamespaceError> {
-        for rule in mappings.iter() {
+        for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
             let logical = root.join(rule.logical().as_str().trim_start_matches('/'));
             let physical = rule.physical().clone();
             let adjusted = match rule.kind() {
-                luna_root_mapping::MappingKind::File => MappingRule::file(
+                MappingKind::File => MappingRule::file(
                     luna_root_mapping::LogicalPath::new(logical)
                         .map_err(|_| NamespaceError::InvalidPath)?,
                     physical,
-                ),
-                luna_root_mapping::MappingKind::Subtree => MappingRule::subtree(
+                )
+                .with_access(rule.access().iter().copied()),
+                MappingKind::Subtree => MappingRule::subtree(
                     luna_root_mapping::LogicalPath::new(logical)
                         .map_err(|_| NamespaceError::InvalidPath)?,
                     physical,
-                ),
+                )
+                .with_access(rule.access().iter().copied()),
             };
-            self.apply_mapping(&adjusted, true)?;
+            let read_only = !rule.access().contains(&ResourceAccess::Write);
+            self.apply_mapping(&adjusted, read_only)?;
         }
         Ok(())
     }
 
-    /// Apply one already-authorized mapping. Writable mappings must only be
-    /// requested after `luna-security` has granted the corresponding access.
+    /// Apply one mapping's mount layer. Authorization must already be complete.
     pub fn apply_mapping(&self, rule: &MappingRule, read_only: bool) -> Result<(), NamespaceError> {
         let target = rule.logical().as_path();
         let source = rule.physical().as_path();
         match rule.kind() {
-            luna_root_mapping::MappingKind::File => {
+            MappingKind::File => {
                 if !source.is_file() {
                     return Err(io::Error::new(
                         io::ErrorKind::NotFound,
@@ -176,7 +188,7 @@ impl LinuxMountNamespace {
                     fs::File::create(target)?;
                 }
             }
-            luna_root_mapping::MappingKind::Subtree => {
+            MappingKind::Subtree => {
                 if !source.is_dir() {
                     return Err(io::Error::new(
                         io::ErrorKind::NotFound,
@@ -188,6 +200,48 @@ impl LinuxMountNamespace {
             }
         }
         bind_mount(source, target, read_only)
+    }
+
+    /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
+    ///
+    /// The ruleset is deliberately created with a complete ABI-v3 filesystem
+    /// access set and hard compatibility requirements: a partially-supported
+    /// kernel cannot silently weaken Luna's policy. A successful call therefore
+    /// means that the process and all future children are actually restricted.
+    pub fn enforce_filesystem_access(
+        &self,
+        mappings: &MappingTable,
+    ) -> Result<(), NamespaceError> {
+        let handled = AccessFs::from_all(ABI::V3);
+        let mut ruleset = Ruleset::default()
+            .set_compatibility(CompatLevel::HardRequirement)
+            .handle_access(handled)
+            .map_err(|error| NamespaceError::Landlock(error.to_string()))?
+            .create()
+            .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+
+        for rule in mappings.iter() {
+            if rule.access().is_empty() {
+                continue;
+            }
+            let access = landlock_access(rule)?;
+            let fd = PathFd::new(rule.logical().as_path())
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            ruleset = ruleset
+                .add_rule(PathBeneath::new(fd, access))
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+        }
+
+        let status = ruleset
+            .restrict_self()
+            .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+        if status.ruleset != RulesetStatus::FullyEnforced || !status.no_new_privs {
+            return Err(NamespaceError::Landlock(format!(
+                "filesystem restrictions were not fully enforced: {:?}",
+                status.ruleset
+            )));
+        }
+        Ok(())
     }
 
     /// Switch the calling process into the prepared logical root.
@@ -246,10 +300,34 @@ impl LogicalRoot {
     }
 }
 
+fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, NamespaceError> {
+    let mut access = AccessFs::Execute.into();
+    if rule.access().contains(&ResourceAccess::Read) {
+        access |= AccessFs::ReadFile;
+        if rule.kind() == MappingKind::Subtree {
+            access |= AccessFs::ReadDir;
+        }
+    }
+    if rule.access().contains(&ResourceAccess::Write) {
+        access |= AccessFs::WriteFile | AccessFs::Truncate;
+        if rule.kind() == MappingKind::Subtree {
+            access |= AccessFs::RemoveDir
+                | AccessFs::RemoveFile
+                | AccessFs::MakeDir
+                | AccessFs::MakeReg
+                | AccessFs::Refer;
+        }
+    }
+    if rule.access().contains(&ResourceAccess::Execute) {
+        access |= AccessFs::Execute;
+    }
+    Ok(access)
+}
+
 fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), NamespaceError> {
     let target = root.join(rule.logical().as_str().trim_start_matches('/'));
     match rule.kind() {
-        luna_root_mapping::MappingKind::File => {
+        MappingKind::File => {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -257,7 +335,7 @@ fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), Namespace
                 fs::File::create(target)?;
             }
         }
-        luna_root_mapping::MappingKind::Subtree => fs::create_dir_all(target)?,
+        MappingKind::Subtree => fs::create_dir_all(target)?,
     }
     Ok(())
 }
