@@ -25,6 +25,8 @@ SYSTEM/images/
 
 Имя payload содержит версию. Соседний TOML manifest описывает metadata, которые нужны загрузке и управлению.
 
+SYSTEM является внутренней областью хранения Luna. Она не является обычным пользовательским filesystem namespace: пользователь не должен получать визуальный или обычный физический доступ к System Images.
+
 ## 3. Содержимое image
 
 SquashFS содержит неизменяемую системную userspace среду, необходимую для построения logical Linux root.
@@ -66,9 +68,25 @@ System Image B ── совместим ── Kernel 2
 
 ## 6. Модель доступа
 
-Архитектура допускает lazy/hybrid доступ к SquashFS вместо обязательной полной загрузки image в RAM.
+System Image остаётся физическим неизменяемым источником system content на скрытом SYSTEM-разделе.
 
-Logical-root layer может материализовывать только нужные данные. Уже материализованный активный system content нельзя освобождать только потому, что исходный image позднее удалён, если другого валидного источника нет.
+Он **не является физическим Linux `/` приложения** и не должен целиком копироваться в runtime root.
+
+Runtime создаёт отдельный **RAM-backed logical Linux root `/`**. Требуемые системные ресурсы предоставляются в него через явные trusted mappings/profile и могут подгружаться лениво из System Image.
+
+```text
+SYSTEM/images/luna-X.Y.Z.squashfs
+                │
+                │ explicit mapping / lazy access
+                ▼
+private application namespace
+                │
+                └── RAM-backed logical `/`
+```
+
+Пустая физическая директория staging, используемая как mountpoint, не считается backing filesystem для `/`: содержимое logical root находится в runtime/virtual filesystem state.
+
+Уже материализованный активный system content нельзя освобождать только потому, что исходный image позднее удалён, если другого валидного источника нет.
 
 ## 7. Factory
 
