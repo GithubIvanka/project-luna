@@ -47,7 +47,7 @@ pub(crate) fn secure_bind_mount_from_root(
     let root_fd = open_path(trusted_root)?;
     let relative = source
         .strip_prefix(trusted_root)
-        .map_err(|_| NamespaceError::UntrustedSource)?;
+        .map_err(|_| NamespaceError::FilesystemAccess("source is outside trusted root".into()))?;
     let source_fd = if relative.as_os_str().is_empty() {
         root_fd.try_clone().map_err(NamespaceError::Io)?
     } else {
