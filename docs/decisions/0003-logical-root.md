@@ -14,26 +14,54 @@ The immutable System Image remains a physical SquashFS payload on the hidden SYS
 
 The SYSTEM partition is a system-internal storage area. Ordinary users must not receive a filesystem view that exposes SYSTEM, its System Images, or its kernel inventory. It is not part of the user's normal file-manager namespace and is not mounted as user-visible storage.
 
+## Per-application Linux environment
+
+Every application runs against a **Linux-shaped virtual environment**. The process is presented with the conventional filesystem namespaces expected by Linux software, but visibility and access are independently controlled by Luna's authorization and namespace layers.
+
+A path being present in the logical `/` does not grant unrestricted access to the corresponding physical resource. The application receives only:
+
+- its own declared and authorized resources;
+- explicitly selected trusted system resources from `RuntimeProfile`;
+- explicitly authorized runtime/pseudo-filesystems;
+- explicitly granted external capabilities such as network, clipboard, devices, or host integration.
+
+This establishes the rule:
+
+```text
+visible path != granted resource
+capability request != capability grant
+```
+
+An application may therefore see conventional paths such as `/etc`, `/usr`, `/lib`, `/tmp`, `/proc`, `/sys` and `/dev` while each path is backed only by resources selected for that launch. Access to host files, other users, other applications, devices, or external services is denied unless a separate policy grant makes it available.
+
+Capabilities are not implicit extensions of the filesystem. For example, a `network` grant provides the network capability selected by the runtime; it does not expose the host filesystem or arbitrary host namespaces.
+
+The logical root is **per application execution**, not a global root shared by all applications.
+
 ## Runtime model
 
 ```text
-physical storage
+physical storage / host resources
 
 SYSTEM/images/luna-X.Y.Z.squashfs
 SYSTEM/kernels/*
+DATA/*
+host services / devices / network
         │
-        │ explicit trusted mappings / lazy access
+        │ authorization + explicit trusted mappings/capabilities
         ▼
-private namespace
+private application namespace
         │
-        └── RAM-backed logical `/` (tmpfs/runtime filesystem)
+        └── RAM-backed logical `/`
                 │
+                ├── conventional Linux directories
                 ├── selected system resources
-                ├── authorized application resources
-                └── runtime pseudo-filesystems
+                ├── application-owned resources
+                ├── runtime pseudo-filesystems
+                └── explicitly granted capabilities
 ```
 
-The physical SYSTEM payload remains the source of immutable system content; the logical `/` is a separate runtime composition.
+The physical SYSTEM payload remains the source of immutable system content; the logical `/` is a separate runtime composition. No application receives the SYSTEM filesystem itself as a normal filesystem tree.
 
 ## `luna-root`
 
