@@ -20,24 +20,15 @@ pub(crate) fn secure_bind_mount(
     target: &Path,
     read_only: bool,
 ) -> Result<(), NamespaceError> {
-    secure_bind_mount_from_root(Path::new("/"), source, target, read_only)
+    secure_bind_mount_from_roots(Path::new("/"), source, Path::new("/"), target, read_only)
 }
 
 /// Bind mount `source` below an explicit source root and `target` below an
 /// explicit destination root.
 ///
-/// The target root is mandatory for the production path so a logical target
-/// can never silently resolve against the host `/`.
-#[cfg(target_os = "linux")]
-pub(crate) fn secure_bind_mount_from_root(
-    trusted_root: &Path,
-    source: &Path,
-    target: &Path,
-    read_only: bool,
-) -> Result<(), NamespaceError> {
-    secure_bind_mount_from_roots(trusted_root, source, Path::new("/"), target, read_only)
-}
-
+/// Production launch code supplies non-root source and target trust domains.
+/// The legacy wrapper above intentionally retains host-root behavior for
+/// internal compatibility and is not used by the profile-driven launcher.
 #[cfg(target_os = "linux")]
 pub(crate) fn secure_bind_mount_from_roots(
     trusted_source_root: &Path,
@@ -46,12 +37,14 @@ pub(crate) fn secure_bind_mount_from_roots(
     target: &Path,
     read_only: bool,
 ) -> Result<(), NamespaceError> {
+    let legacy_host_binding = trusted_source_root == Path::new("/")
+        && trusted_target_root == Path::new("/");
     if !trusted_source_root.is_absolute()
-        || trusted_source_root == Path::new("/")
+        || (!legacy_host_binding && trusted_source_root == Path::new("/"))
         || !source.is_absolute()
         || source == Path::new("/")
         || !trusted_target_root.is_absolute()
-        || trusted_target_root == Path::new("/")
+        || (!legacy_host_binding && trusted_target_root == Path::new("/"))
         || !target.is_absolute()
         || target == Path::new("/")
     {
@@ -59,10 +52,14 @@ pub(crate) fn secure_bind_mount_from_roots(
     }
 
     let host_root_fd = open_path(Path::new("/"))?;
-    let trusted_relative = trusted_source_root
-        .strip_prefix("/")
-        .map_err(|_| NamespaceError::InvalidPath)?;
-    let source_root_fd = open_beneath(host_root_fd.as_raw_fd(), trusted_relative)?;
+    let source_root_fd = if trusted_source_root == Path::new("/") {
+        host_root_fd.try_clone().map_err(NamespaceError::Io)?
+    } else {
+        let trusted_relative = trusted_source_root
+            .strip_prefix("/")
+            .map_err(|_| NamespaceError::InvalidPath)?;
+        open_beneath(host_root_fd.as_raw_fd(), trusted_relative)?
+    };
 
     let source_relative = source
         .strip_prefix(trusted_source_root)
@@ -74,7 +71,11 @@ pub(crate) fn secure_bind_mount_from_roots(
         set_mount_read_only(mount_fd.as_raw_fd())?;
     }
 
-    let target_root_fd = open_path(trusted_target_root)?;
+    let target_root_fd = if trusted_target_root == Path::new("/") {
+        host_root_fd
+    } else {
+        open_path(trusted_target_root)?
+    };
     let target_relative = target
         .strip_prefix(trusted_target_root)
         .map_err(|_| NamespaceError::FilesystemAccess("target is outside target root".into()))?;
