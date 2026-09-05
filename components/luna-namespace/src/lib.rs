@@ -17,6 +17,9 @@ use landlock::{
 use luna_common::ResourceAccess;
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
+mod profile;
+pub use profile::materialize_profiled_logical_root;
+
 #[derive(Debug)]
 pub enum NamespaceError {
     Io(io::Error),
@@ -79,6 +82,9 @@ impl LinuxMountNamespace {
     /// SquashFS System Image. A writable upper/work pair is created next to the
     /// staging root and an OverlayFS mount composes the lower System Image with
     /// that writable runtime layer. The System Image itself is never modified.
+    ///
+    /// The production launcher must prefer `materialize_profiled_logical_root`
+    /// so the complete System Image is not exposed to an application.
     pub fn materialize_logical_root(
         &self,
         root: &Path,
@@ -134,9 +140,6 @@ impl LinuxMountNamespace {
     }
 
     /// Apply mappings at the caller's current root using their declared access.
-    ///
-    /// This performs mount materialization only. Fine-grained Read/Write/Execute
-    /// enforcement is applied separately by `enforce_filesystem_access`.
     pub fn apply_mappings(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
         for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
             let read_only = !rule.access().contains(&ResourceAccess::Write);
@@ -173,7 +176,6 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
-    /// Apply one mapping's mount layer. Authorization must already be complete.
     pub fn apply_mapping(&self, rule: &MappingRule, read_only: bool) -> Result<(), NamespaceError> {
         let target = rule.logical().as_path();
         let source = rule.physical().as_path();
@@ -208,11 +210,6 @@ impl LinuxMountNamespace {
     }
 
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
-    ///
-    /// The ruleset is deliberately created with an explicit ABI-v3 filesystem
-    /// access set and hard compatibility requirements: a partially-supported
-    /// kernel cannot silently weaken Luna's policy. A successful call means the
-    /// process and its future children are actually restricted.
     pub fn enforce_filesystem_access(
         &self,
         mappings: &MappingTable,
@@ -249,7 +246,6 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
-    /// Switch the calling process into the prepared logical root.
     pub fn enter_logical_root(&self, root: &LogicalRoot) -> Result<(), NamespaceError> {
         if !root.path.is_dir() {
             return Err(NamespaceError::MissingBaseRoot);
@@ -263,7 +259,6 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
-    /// Bind one authorized device node into the prepared logical root's `/dev`.
     pub fn expose_device(
         &self,
         root: &LogicalRoot,
@@ -299,7 +294,6 @@ impl LogicalRoot {
         &self.path
     }
 
-    /// Returns the runtime support directory holding the OverlayFS upper/work layers.
     pub fn support_path(&self) -> &Path {
         &self.support
     }
