@@ -53,11 +53,7 @@ pub fn materialize_profiled_logical_root(
         fs::create_dir_all(&target)?;
         let read_only = !access.contains(&ResourceAccess::Write);
         crate::secure_mount::secure_bind_mount_from_roots(
-            base_root,
-            &source,
-            root,
-            &target,
-            read_only,
+            base_root, &source, root, &target, read_only,
         )?;
         transaction.record(&target);
     }
