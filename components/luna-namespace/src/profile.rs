@@ -15,10 +15,9 @@ use std::path::{Path, PathBuf};
 use luna_common::{ResourceAccess, RuntimeProfile};
 use luna_root_mapping::{LogicalPath, MappingKind, MappingRule, MappingTable};
 
-use crate::{LinuxMountNamespace, LogicalRoot, NamespaceError};
+use crate::{LogicalRoot, NamespaceError};
 
 pub fn materialize_profiled_logical_root(
-    namespace: &LinuxMountNamespace,
     root: &Path,
     base_root: &Path,
     trusted_source_roots: &[PathBuf],
@@ -185,16 +184,6 @@ fn mount_filesystem(
 ) -> Result<(), NamespaceError> {
     let source = CString::new(filesystem).map_err(|_| NamespaceError::InvalidPath)?;
     mount_raw(Some(&source), target, Some(&source), flags, data)
-}
-
-fn mount_filesystem_path(
-    source: Option<&Path>,
-    target: &Path,
-    flags: libc::c_ulong,
-    data: Option<&str>,
-) -> Result<(), NamespaceError> {
-    let source = source.map(path_cstring).transpose()?;
-    mount_raw(source.as_ref(), target, None, flags, data)
 }
 
 fn mount_raw(
