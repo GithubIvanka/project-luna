@@ -246,23 +246,21 @@ impl MappingTable {
 
     /// Resolves a logical resource to its physical backing path.
     pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
+        Ok(self.resolve_rule(logical)?.physical.clone())
+    }
+
+    /// Resolves a logical resource to the mapping rule responsible for it.
+    pub fn resolve_rule(&self, logical: &LogicalPath) -> Result<&MappingRule, MappingError> {
         if let Some(rule) = self.rules.iter().find(|rule| rule.logical == *logical) {
-            return Ok(rule.physical.clone());
+            return Ok(rule);
         }
 
-        let candidate = self
-            .rules
+        self.rules
             .iter()
             .filter(|rule| rule.kind == MappingKind::Subtree)
             .filter(|rule| is_descendant(logical.as_path(), rule.logical.as_path()))
-            .max_by_key(|rule| path_depth(rule.logical.as_path()));
-
-        let rule = candidate.ok_or(MappingError::NotMapped)?;
-        let relative = logical
-            .as_path()
-            .strip_prefix(rule.logical.as_path())
-            .map_err(|_| MappingError::NotMapped)?;
-        Ok(PhysicalPath::new(rule.physical.as_path().join(relative)))
+            .max_by_key(|rule| path_depth(rule.logical.as_path()))
+            .ok_or(MappingError::NotMapped)
     }
 
     /// Produces a deterministic namespace description without making Linux
@@ -380,6 +378,27 @@ mod tests {
             rule.access().iter().copied().collect::<Vec<_>>(),
             vec![ResourceAccess::Read, ResourceAccess::Write]
         );
+    }
+
+    #[test]
+    fn resolve_rule_returns_most_specific_subtree() {
+        let mut table = MappingTable::new();
+        table
+            .insert(MappingRule::subtree(
+                LogicalPath::new("/data").unwrap(),
+                PhysicalPath::new("/one"),
+            ))
+            .unwrap();
+        table
+            .insert(MappingRule::subtree(
+                LogicalPath::new("/data/app").unwrap(),
+                PhysicalPath::new("/two"),
+            ))
+            .unwrap();
+        let rule = table
+            .resolve_rule(&LogicalPath::new("/data/app/file").unwrap())
+            .unwrap();
+        assert_eq!(rule.physical().as_path(), Path::new("/two"));
     }
 
     #[test]
