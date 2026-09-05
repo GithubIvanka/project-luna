@@ -2,16 +2,18 @@
 //!
 //! Authorization is intentionally completed before this module is entered.
 //! The launcher only consumes an `AuthorizedApplicationPlan`, validates that
-//! its mapping still matches the bundle declaration, materializes the logical
-//! root in a private mount namespace, installs filesystem enforcement, and
-//! registers the supervised process.
+//! its mapping/capability declarations still match execution policy, builds a
+//! profile-driven logical root in a private mount namespace, installs
+//! filesystem enforcement, and registers the supervised process.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use luna_bundle::ResourceAccess;
-use luna_namespace::LinuxMountNamespace;
+use luna_common::RuntimeProfile;
+use luna_namespace::{materialize_profiled_logical_root, LinuxMountNamespace};
 use luna_root_mapping::{LogicalPath, MappingKind};
+use luna_security::{CapabilityName, CapabilityRegistry, Principal};
 use luna_system_runtime::SystemRuntimeService;
 
 use crate::application_plan::AuthorizedApplicationPlan;
@@ -126,12 +128,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
     ) -> Result<ApplicationInstanceId, RuntimeError> {
         context.validate()?;
         validate_mapping_access(&plan)?;
-
-        if let Some(capability) = plan.manifest().capabilities().next() {
-            return Err(RuntimeError::Security(format!(
-                "capability enforcement is not implemented by the Linux launcher: {capability}"
-            )));
-        }
+        validate_capabilities(&plan)?;
 
         let program = plan.executable().path().to_str().ok_or_else(|| {
             RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
@@ -157,13 +154,19 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let root_for_child = root.clone();
         let args = plan.executable().args().to_vec();
         let namespace = context.namespace();
+        let profile = RuntimeProfile::minimal();
         let process = runtime.spawn_process_with_pre_exec(program, args, move || {
             namespace
                 .enter_private()
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-            let logical = namespace
-                .materialize_logical_root(&root_for_child, &base_root, &mapping)
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let logical = materialize_profiled_logical_root(
+                &namespace,
+                &root_for_child,
+                &base_root,
+                &mapping,
+                &profile,
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
             namespace
                 .enter_logical_root(&logical)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
@@ -240,6 +243,22 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
                 rule.logical()
             )));
         }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
+    let registry = CapabilityRegistry::with_default_providers();
+    let principal = Principal::Application(plan.application().clone());
+    for capability in plan.manifest().capabilities() {
+        let name = CapabilityName::new(capability.to_owned())
+            .map_err(|error| RuntimeError::Security(error.to_string()))?;
+        // The plan has already passed policy authorization. This second step
+        // only verifies that the approved capability has a registered provider.
+        registry
+            .grant(principal.clone(), name)
+            .map_err(|error| RuntimeError::Security(error.to_string()))?;
     }
     Ok(())
 }
