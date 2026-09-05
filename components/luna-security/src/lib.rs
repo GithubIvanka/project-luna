@@ -7,6 +7,10 @@ use luna_common::{BundleId, RuntimeKind, UserId};
 use std::collections::BTreeSet;
 use std::fmt;
 
+mod capability;
+
+pub use capability::{CapabilityGrant, CapabilityName, CapabilityProvider, CapabilityRegistry};
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum Principal {
     User(UserId),
