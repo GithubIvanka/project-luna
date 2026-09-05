@@ -529,7 +529,7 @@ mod tests {
         )
         .with_access([ResourceAccess::Read]);
         let access = landlock_access(&rule).unwrap();
-        assert!(access.contains(lan­dlock::AccessFs::ReadFile));
+        assert!(access.contains(landlock::AccessFs::ReadFile));
         assert!(!access.contains(landlock::AccessFs::WriteFile));
         assert!(!access.contains(landlock::AccessFs::Execute));
     }
