@@ -9,7 +9,6 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use luna_bundle::ResourceAccess;
 use luna_common::RuntimeProfile;
 use luna_namespace::{materialize_profiled_logical_root, LinuxMountNamespace};
 use luna_root_mapping::{LogicalPath, MappingKind};
@@ -215,8 +214,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
 #[cfg(unix)]
 fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
     for resource in plan.manifest().resources() {
-        let logical = LogicalPath::new(resource.logical_path())
-            .map_err(|error| RuntimeError::Mapping(error))?;
+        let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
         let rule = plan
             .mapping()
             .resolve_rule(&logical)
@@ -234,8 +232,7 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
             resource.logical_path() == rule.logical().as_str()
                 || (rule.kind() == MappingKind::Subtree
                     && resource.logical_path().starts_with(rule.logical().as_str())
-                    && resource.logical_path()[rule.logical().as_str().len()..]
-                        .starts_with('/'))
+                    && resource.logical_path()[rule.logical().as_str().len()..].starts_with('/'))
         });
         if !declared {
             return Err(RuntimeError::Security(format!(
