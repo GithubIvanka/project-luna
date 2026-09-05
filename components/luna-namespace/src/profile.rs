@@ -13,7 +13,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use luna_common::{ResourceAccess, RuntimeProfile};
-use luna_root_mapping::{LogicalPath, MappingKind, MappingRule, MappingTable, PhysicalPath};
+use luna_root_mapping::{LogicalPath, MappingKind, MappingRule, MappingTable};
 
 use crate::{LinuxMountNamespace, LogicalRoot, NamespaceError};
 
@@ -152,9 +152,9 @@ fn mount_raw(
         .transpose()?;
     let status = unsafe {
         libc::mount(
-            source.map_or(std::ptr::null(), CString::as_ptr),
+            source.map_or(std::ptr::null(), |value| value.as_ptr()),
             target.as_ptr(),
-            filesystem.map_or(std::ptr::null(), CString::as_ptr),
+            filesystem.map_or(std::ptr::null(), |value| value.as_ptr()),
             flags,
             data.as_ref()
                 .map_or(std::ptr::null(), |value| value.as_ptr().cast()),
@@ -169,6 +169,3 @@ fn mount_raw(
 fn path_cstring(path: &Path) -> Result<CString, NamespaceError> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| NamespaceError::InvalidPath)
 }
-
-// Keep the `PhysicalPath` type in this module's contract explicit.
-const _: fn(PhysicalPath) = |_| {};
