@@ -1,6 +1,6 @@
 # Project Luna — текущее состояние
 
-**Последнее обновление:** 2026-09-03
+**Последнее обновление:** 2026-09-05
 
 > `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
 
@@ -17,14 +17,16 @@
 | Foundation/domain APIs | baseline реализован |
 | Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
 | Typed runtime contract | `RuntimeKind` / `RuntimeSpec` реализованы как properties execution environment |
+| Runtime profile | `RuntimeProfile::minimal()` добавлен как явный contract trusted system resources |
+| Capability contract | `CapabilityName` / `CapabilityRegistry` / `CapabilityGrant` / `CapabilityProvider` добавлены; provider invocation ещё не подключён |
 | Generic `luna-runtime` | явно отклонён и удалён |
 | Runtime ↔ mapping ↔ Security | contract реализован; authorization предшествует namespace materialization |
-| Linux namespace/materialization | development backend реализован; production child-creation hardening продолжается |
+| Linux namespace/materialization | development backend реализован; profile-driven system view и production child-creation hardening продолжаются |
 | Persistent state | durable `redb` backend в `DATA/system/state` реализован |
 | Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
 | Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
 | `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
-| `luna-app-runtime` | ApplicationInstance lifecycle и execution setup реализованы |
+| `luna-app-runtime` | ApplicationInstance lifecycle, ApplicationPlan и typed execution boundary реализованы |
 | `luna-init` | native musl early-userspace реализован и упаковывается как `/init` |
 | `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
 | Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
@@ -68,36 +70,7 @@ Noctalia Shell
 
 Обычный вход не использует TTY, console shell или `luna-session`.
 
-`B` открывает исключительное текстовое Boot Menu:
-
-```text
-1. Continue to Luna
-2. Verbose Boot
-3. System Image selection
-4. Recovery Environment
-5. Factory Environment
-6. Boot from USB / External Device
-```
-
-## Обнаружение boot targets
-
-`luna-boot.efi` использует реальное содержимое SYSTEM:
-
-```text
-SYSTEM/images/*.squashfs + adjacent *.toml
-              ↓
-       manifest validation
-              ↓
-SYSTEM/kernels/<version>/bzImage
-              ↓
-   compatible kernel filter
-              ↓
-      version ordering
-              ↓
-       BootTarget catalog
-```
-
-Recovery и Factory являются специальными ролями System Image и не входят в обычный список выбора. External boot — отдельный UEFI chainload path.
+`B` открывает исключительное текстовое Boot Menu.
 
 ## Runtime
 
@@ -113,18 +86,51 @@ luna-system-runtime
 Execution pipeline:
 
 ```text
+Bundle
+  ↓
 ApplicationPlan
-    ↓
-MappingPlan
-    ↓
+  ↓ validate
 luna-security
-    ↓
+  ↓ Allow
+AuthorizedApplicationPlan
+  ↓
+ApplicationLaunchContext + RuntimeProfile
+  ↓
 luna-namespace
-    ↓
+  ↓
 process execution
+  ↓
+ApplicationInstance
 ```
 
+`ApplicationInstance` является representation конкретного execution lifecycle, а не security policy boundary.
+
 `RuntimeKind` — только тип execution environment; generic `luna-runtime` отсутствует.
+
+## Security model
+
+Filesystem access и named capabilities разделены.
+
+```text
+Filesystem:
+  read / write / execute — explicit
+  empty access            — no access
+
+Capabilities:
+  namespaced identity
+  explicit registry entry
+  explicit authorization
+  typed CapabilityGrant
+  no implicit inheritance
+```
+
+`luna-security` решает, разрешён ли запрос. `luna-namespace` и provider backends должны применять уже авторизованный результат.
+
+### Текущее ограничение namespace
+
+Текущий development backend создаёт OverlayFS с полным System Image как lower layer. Поэтому `RuntimeProfile` уже существует как контракт, но ещё не является фактическим ограничителем видимости SYSTEM.
+
+Это зафиксировано как hardening gap, а не как завершённая A3 implementation. Production path должен материализовать только profile-selected trusted resources плюс явно разрешённые application mappings.
 
 ## System initialization
 
@@ -144,26 +150,19 @@ switch_root
 
 ## Ближайшие технические приоритеты
 
-1. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
-2. Завершить graphical login + niri + Noctalia integration.
-3. Расширить `luna-app-runtime` runtime-specific loader/library mapping без нарушения security/mapping boundaries.
-4. Закончить fine-grained security и filtered `/dev` population.
-5. Завершить durable boot/update success/failure state.
-6. Завершить LBP1 conformance и Ed25519 trust binding.
-7. Реализовать IPC/event transport, resource enforcement и device/volume integration.
-8. Завершить `.lbp` install → ApplicationInstance launch/recovery loop.
-9. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
+1. Перевести namespace materialization на profile-driven System Image view без раскрытия всего SYSTEM.
+2. Завершить physical symlink/containment hardening для mapping roots и staging paths.
+3. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
+4. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
+5. Завершить graphical login + niri + Noctalia integration.
+6. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
+7. Завершить durable boot/update success/failure state.
+8. Завершить LBP1 conformance и Ed25519 trust binding.
+9. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
+10. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
 
 ## Phase 0 documentation
 
-Черновики новых архитектурных контрактов находятся в `docs/contracts/`:
-
-```text
-SYSTEM-IMAGE-CONTRACT.md
-KERNEL-CONTRACT.md
-BOOT-STATE-CONTRACT.md
-BOOT-HANDOFF-CONTRACT.md
-FAILURE-RECOVERY-CONTRACT.md
-```
+Черновики новых архитектурных контрактов находятся в `docs/contracts/`.
 
 Они уточняют существующие архитектурные границы и не считаются принятыми до отдельного решения.
