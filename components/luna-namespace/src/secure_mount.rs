@@ -23,12 +23,11 @@ pub(crate) fn secure_bind_mount(
     secure_bind_mount_from_root(Path::new("/"), source, target, read_only)
 }
 
-/// Bind mount `source` relative to an explicit physical trust root.
+/// Bind mount `source` below an explicit source root and `target` below an
+/// explicit destination root.
 ///
-/// The trust root is itself opened through `openat2(2)` without following
-/// symlinks. Production launch code passes an explicit non-root trust domain
-/// selected by the system runtime; bundle-supplied paths are resolved only
-/// beneath that already-opened domain.
+/// The target root is mandatory for the production path so a logical target
+/// can never silently resolve against the host `/`.
 #[cfg(target_os = "linux")]
 pub(crate) fn secure_bind_mount_from_root(
     trusted_root: &Path,
@@ -36,10 +35,23 @@ pub(crate) fn secure_bind_mount_from_root(
     target: &Path,
     read_only: bool,
 ) -> Result<(), NamespaceError> {
-    if !trusted_root.is_absolute()
-        || trusted_root == Path::new("/")
+    secure_bind_mount_from_roots(trusted_root, source, Path::new("/"), target, read_only)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn secure_bind_mount_from_roots(
+    trusted_source_root: &Path,
+    source: &Path,
+    trusted_target_root: &Path,
+    target: &Path,
+    read_only: bool,
+) -> Result<(), NamespaceError> {
+    if !trusted_source_root.is_absolute()
+        || trusted_source_root == Path::new("/")
         || !source.is_absolute()
         || source == Path::new("/")
+        || !trusted_target_root.is_absolute()
+        || trusted_target_root == Path::new("/")
         || !target.is_absolute()
         || target == Path::new("/")
     {
@@ -47,32 +59,25 @@ pub(crate) fn secure_bind_mount_from_root(
     }
 
     let host_root_fd = open_path(Path::new("/"))?;
-    let trusted_relative = trusted_root
+    let trusted_relative = trusted_source_root
         .strip_prefix("/")
         .map_err(|_| NamespaceError::InvalidPath)?;
-    let root_fd = open_beneath(host_root_fd.as_raw_fd(), trusted_relative)?;
+    let source_root_fd = open_beneath(host_root_fd.as_raw_fd(), trusted_relative)?;
 
-    let relative = source
-        .strip_prefix(trusted_root)
+    let source_relative = source
+        .strip_prefix(trusted_source_root)
         .map_err(|_| NamespaceError::FilesystemAccess("source is outside trusted root".into()))?;
-    let source_fd = if relative.as_os_str().is_empty() {
-        root_fd.try_clone().map_err(NamespaceError::Io)?
-    } else {
-        open_beneath(root_fd.as_raw_fd(), relative)?
-    };
+    let source_fd = open_beneath(source_root_fd.as_raw_fd(), source_relative)?;
     let mount_fd = clone_mount(source_fd.as_raw_fd())?;
 
     if read_only {
         set_mount_read_only(mount_fd.as_raw_fd())?;
     }
 
-    let target_root_fd = open_path(Path::new("/"))?;
+    let target_root_fd = open_path(trusted_target_root)?;
     let target_relative = target
-        .strip_prefix("/")
-        .map_err(|_| NamespaceError::InvalidPath)?;
-    if target_relative.as_os_str().is_empty() {
-        return Err(NamespaceError::InvalidPath);
-    }
+        .strip_prefix(trusted_target_root)
+        .map_err(|_| NamespaceError::FilesystemAccess("target is outside target root".into()))?;
     let target_fd = open_beneath(target_root_fd.as_raw_fd(), target_relative)?;
 
     attach_mount(mount_fd.as_raw_fd(), target_fd.as_raw_fd())?;
