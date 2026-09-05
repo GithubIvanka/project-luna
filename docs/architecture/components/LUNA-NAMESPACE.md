@@ -14,7 +14,8 @@
 - transactional cleanup materialized resources при ошибке;
 - низкоуровневой materialization части Root Mapping;
 - kernel-level filesystem enforcement через Landlock;
-- безопасным FD-based подключением доверенных физических источников.
+- безопасным FD-based подключением доверенных физических источников;
+- PID-namespace boundary, когда она включена в execution profile.
 
 ## Обязательный порядок
 
@@ -41,6 +42,22 @@ Production materialization не создаёт обычный persistent Linux r
 Сначала создаётся пустой staging mountpoint, затем внутри private mount namespace на нём создаётся tmpfs. Это и есть backing store логического `/`. Persistent staging path содержит только mountpoint и служебную metadata, но не содержимое root filesystem.
 
 System Image остаётся внутренним immutable source. В logical root попадают только ресурсы, которые явно разрешены RuntimeProfile и MappingTable.
+
+Boot/runtime system materialization использует ту же принципиальную модель: boot-critical immutable system content предварительно materializes в RAM, дополнительные immutable resources могут быть hydrated lazily, а volatile paths (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) создаются runtime-механизмами. Ни один application process не получает физический SYSTEM path как свой `/`.
+
+## PID namespace
+
+При включённой PID isolation приложение не становится PID 1.
+
+```text
+application PID namespace
+├── PID 1 → Luna namespace supervisor/init
+└── PID 2+ → application process tree
+```
+
+PID 1 используется для child reaping, signal/lifecycle boundary и удержания namespace supervisor semantics. Реальный application executable запускается как PID 2 или выше.
+
+Это не security-through-obscurity механизм: приложение всё равно не должно полагаться на конкретные PID values для security. Требование PID 2+ существует как правильная Linux lifecycle/supervision модель и исключает назначение application процесса специальной роли PID 1.
 
 ## Безопасное подключение физических ресурсов
 
@@ -72,7 +89,7 @@ openat2(target relative to logical root)
         ↓
 target O_PATH fd
         ↓
-move_mount(... MOUNT_MOUNT_*_EMPTY_PATH)
+move_mount(... *_EMPTY_PATH)
 ```
 
 Таким образом source и target фиксируются через directory/file descriptors до attach. Read-only применяется к detached mount object до attachment, без pathname-based remount.
@@ -97,7 +114,7 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Linux mechanisms
 
-В основе используются существующие kernel primitives: mount namespaces, tmpfs, bind mounts, `openat2`, `open_tree`, `mount_setattr`, `move_mount`, chroot и Landlock. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
+В основе используются существующие kernel primitives: mount namespaces, PID namespaces where enabled, tmpfs, bind mounts, `openat2`, `open_tree`, `mount_setattr`, `move_mount`, chroot и Landlock. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
 
 ## Ошибки
 
@@ -109,6 +126,9 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Открыто
 
+- PID namespace supervisor/child-spawn implementation;
+- точная signal/reaping semantics PID 1 supervisor;
+- lazy System Image hydration/materialization implementation;
 - полноценный filtered `/dev`;
 - production handling ошибок mount и восстановления после аварийного завершения процесса;
-- privileged Linux integration tests для реального unshare/mount/chroot/Landlock path.
+- privileged Linux integration tests для реального unshare/mount/chroot/Landlock/PID path.
