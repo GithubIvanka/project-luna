@@ -1,7 +1,7 @@
 # Project Luna — Accepted Architecture Decisions
 
 **Status:** canonical accepted-decision ledger  
-**Current through:** 2026-08-31  
+**Current through:** 2026-09-05  
 **Authoritative current architecture:** `docs/ARCHITECTURE.md`  
 **Purpose:** one compact record of the accepted outcomes from the architecture discussion. Historical phase files and ADRs remain traceability records; they do not override this ledger or the Source of Truth.
 
@@ -67,7 +67,8 @@ DATA/
 - There is no global System Image manifest.
 - System Image version and kernel version are independent.
 - Compatible image/kernel combinations are determined by metadata and compatibility rules.
-- System Image content may be exposed lazily/hybrid rather than copied completely into RAM at boot.
+- System Image content may be exposed through a RAM materialization/hydration model rather than being used as the long-term backing filesystem for `/`.
+- Boot-critical system content is materialized into the active RAM-backed system root before normal runtime depends on it; additional immutable resources may be hydrated lazily.
 - Factory is the original installed, known-good System Image plus its factory kernel.
 - Factory remains preserved and immutable.
 - System Images have retention policies; the current and previous usable states must remain available according to policy.
@@ -117,7 +118,11 @@ DATA/
 - Physical `SYSTEM/...` and `DATA/...` paths are implementation details.
 - Applications must not need to know they are running inside a container-like mechanism.
 - Mapping is a Linux-compatible composition layer, not a physical copy of the DATA hierarchy.
-- System files may be loaded into RAM on demand; if a currently active System Image is removed after its required content has been materialized, system content already loaded into RAM must not be reclaimed when no other source exists.
+- The logical `/` for the running system/application is RAM-backed and is not the System Image itself.
+- Boot-critical system content is materialized into RAM as an initial system base; additional immutable resources may be hydrated lazily into the RAM-backed logical root.
+- Pseudo-filesystems and volatile paths such as `/dev`, `/proc`, `/sys`, `/run` and `/tmp` are runtime-generated rather than persistent copies of SYSTEM.
+- Already materialized active system content must remain valid independently of the original System Image lifetime.
+- Removal of an active System Image requires proof that no still-required runtime resource depends on that image.
 
 ## 8. Root mapping
 
@@ -229,12 +234,13 @@ luna-system-runtime
 - Each ApplicationInstance receives an isolated filesystem/mount namespace.
 - Linux namespaces are implementation primitives, not the user-facing architecture.
 - Mount namespace isolation is mandatory for application filesystem separation.
-- User namespace, PID namespace, network namespace, IPC/UTS/time isolation and other primitives are policy-driven according to the application's resource/security profile.
+- User namespace, network namespace, IPC/UTS/time isolation and other primitives remain policy-driven according to the application's resource/security profile.
+- A PID namespace is part of the application isolation/supervision boundary where process isolation is enabled.
 - Application isolation must preserve the appearance of a conventional Linux filesystem rather than expose container implementation details.
-- The initial implementation uses Linux mount namespaces, controlled bind mounts and OverlayFS where useful.
-- `luna-namespace` may use idmapped mounts when they simplify UID/GID presentation without copying or chowning files.
-- No application receives `CAP_SYS_ADMIN` or equivalent host-level privilege by default.
-- PID namespace use is for isolation and supervision; it is not required to make the application believe it is PID 1.
+- The application process must never intentionally run as PID 1 in its application PID namespace.
+- PID 1 is reserved for the Luna namespace supervisor/init, which owns child reaping, namespace lifetime and supervision duties.
+- The actual application starts at PID 2 or a later PID in that namespace.
+- The application must not receive `CAP_SYS_ADMIN` or equivalent host-level privilege by default.
 - `cgroups v2` is the accepted resource-control primitive.
 
 ## 15. Resource protection
