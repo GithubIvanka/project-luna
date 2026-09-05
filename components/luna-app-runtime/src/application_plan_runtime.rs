@@ -155,8 +155,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let namespace = context.namespace();
         let profile = RuntimeProfile::minimal();
         let process = runtime.spawn_process_with_pre_exec(program, args, move || {
-            namespace
-                .enter_private()
+            LinuxMountNamespace::enter_private()
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             let logical = materialize_profiled_logical_root(
                 &namespace,
