@@ -1,14 +1,17 @@
 //! Process-launch integration for [`ApplicationPlan`].
 //!
 //! Authorization is intentionally completed before this module is entered.
-//! The launcher only consumes an `AuthorizedApplicationPlan`, materializes the
-//! logical root in a private mount namespace, installs filesystem enforcement,
-//! and registers the supervised process.
+//! The launcher only consumes an `AuthorizedApplicationPlan`, validates that
+//! its mapping still matches the bundle declaration, materializes the logical
+//! root in a private mount namespace, installs filesystem enforcement, and
+//! registers the supervised process.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use luna_bundle::ResourceAccess;
 use luna_namespace::LinuxMountNamespace;
+use luna_root_mapping::{LogicalPath, MappingKind};
 use luna_system_runtime::SystemRuntimeService;
 
 use crate::application_plan::AuthorizedApplicationPlan;
@@ -122,6 +125,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
         context.validate()?;
+        validate_mapping_access(&plan)?;
 
         if let Some(capability) = plan.manifest().capabilities().next() {
             return Err(RuntimeError::Security(format!(
@@ -203,6 +207,41 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         self.roots.insert(process, root);
         Ok(id)
     }
+}
+
+#[cfg(unix)]
+fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
+    for resource in plan.manifest().resources() {
+        let logical = LogicalPath::new(resource.logical_path())
+            .map_err(|error| RuntimeError::Mapping(error))?;
+        let rule = plan
+            .mapping()
+            .resolve_rule(&logical)
+            .map_err(RuntimeError::Mapping)?;
+        if rule.access() != resource.access() {
+            return Err(RuntimeError::Security(format!(
+                "mapping access does not match bundle declaration: {}",
+                resource.logical_path()
+            )));
+        }
+    }
+
+    for rule in plan.mapping().iter() {
+        let declared = plan.manifest().resources().iter().any(|resource| {
+            resource.logical_path() == rule.logical().as_str()
+                || (rule.kind() == MappingKind::Subtree
+                    && resource.logical_path().starts_with(rule.logical().as_str())
+                    && resource.logical_path()[rule.logical().as_str().len()..]
+                        .starts_with('/'))
+        });
+        if !declared {
+            return Err(RuntimeError::Security(format!(
+                "mapping is not declared by the bundle: {}",
+                rule.logical()
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
