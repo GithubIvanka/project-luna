@@ -10,7 +10,10 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
-use landlock::{Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetStatus};
+use landlock::{
+    Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
+    RulesetStatus,
+};
 use luna_common::ResourceAccess;
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
@@ -33,7 +36,9 @@ impl std::fmt::Display for NamespaceError {
             }
             Self::MissingBaseRoot => f.write_str("logical root base directory does not exist"),
             Self::RootNotEmpty => f.write_str("logical root staging directory must be empty"),
-            Self::FilesystemAccess(error) => write!(f, "filesystem access policy failed: {error}"),
+            Self::FilesystemAccess(error) => {
+                write!(f, "filesystem access policy failed: {error}")
+            }
             Self::Landlock(error) => write!(f, "Landlock enforcement failed: {error}"),
         }
     }
@@ -488,7 +493,9 @@ fn mount_with_data(
 
 #[cfg(test)]
 mod tests {
-    use super::NamespaceError;
+    use super::{landlock_access, LinuxMountNamespace, NamespaceError};
+    use luna_common::ResourceAccess;
+    use luna_root_mapping::{LogicalPath, MappingRule, PhysicalPath};
 
     #[test]
     fn invalid_path_has_stable_message() {
@@ -512,5 +519,50 @@ mod tests {
             NamespaceError::RootNotEmpty.to_string(),
             "logical root staging directory must be empty"
         );
+    }
+
+    #[test]
+    fn read_access_does_not_grant_write_or_execute() {
+        let rule = MappingRule::file(
+            LogicalPath::new("/data/file").unwrap(),
+            PhysicalPath::new("/data/file"),
+        )
+        .with_access([ResourceAccess::Read]);
+        let access = landlock_access(&rule).unwrap();
+        assert!(access.contains(lan­dlock::AccessFs::ReadFile));
+        assert!(!access.contains(landlock::AccessFs::WriteFile));
+        assert!(!access.contains(landlock::AccessFs::Execute));
+    }
+
+    #[test]
+    fn write_only_access_does_not_grant_read() {
+        let rule = MappingRule::file(
+            LogicalPath::new("/data/file").unwrap(),
+            PhysicalPath::new("/data/file"),
+        )
+        .with_access([ResourceAccess::Write]);
+        let access = landlock_access(&rule).unwrap();
+        assert!(!access.contains(landlock::AccessFs::ReadFile));
+        assert!(access.contains(landlock::AccessFs::WriteFile));
+        assert!(access.contains(landlock::AccessFs::Truncate));
+        assert!(!access.contains(landlock::AccessFs::Execute));
+    }
+
+    #[test]
+    fn execute_only_access_does_not_grant_read_or_write() {
+        let rule = MappingRule::file(
+            LogicalPath::new("/bin/app").unwrap(),
+            PhysicalPath::new("/bin/app"),
+        )
+        .with_access([ResourceAccess::Execute]);
+        let access = landlock_access(&rule).unwrap();
+        assert!(access.contains(landlock::AccessFs::Execute));
+        assert!(!access.contains(landlock::AccessFs::ReadFile));
+        assert!(!access.contains(landlock::AccessFs::WriteFile));
+    }
+
+    #[test]
+    fn namespace_type_is_zero_sized() {
+        assert_eq!(std::mem::size_of::<LinuxMountNamespace>(), 0);
     }
 }
