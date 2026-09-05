@@ -41,6 +41,15 @@ pub fn materialize_profiled_logical_root(
     mount_tmpfs(root)?;
     transaction.record(root);
 
+    // Build the complete destination skeleton before any bind mount can alter
+    // pathname traversal. This keeps preparation on the fresh RAM-backed tree.
+    for (logical_path, _) in profile.resources() {
+        fs::create_dir_all(root.join(logical_path.trim_start_matches('/')))?;
+    }
+    for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
+        prepare_mount_target(root, rule)?;
+    }
+
     for (logical_path, access) in profile.resources() {
         let source = base_root.join(logical_path.trim_start_matches('/'));
         let target = root.join(logical_path.trim_start_matches('/'));
@@ -50,7 +59,6 @@ pub fn materialize_profiled_logical_root(
                 source.display()
             )));
         }
-        fs::create_dir_all(&target)?;
         let read_only = !access.contains(&ResourceAccess::Write);
         crate::secure_mount::secure_bind_mount_from_roots(
             base_root, &source, root, &target, read_only,
@@ -82,7 +90,6 @@ pub fn materialize_profiled_logical_root(
                     source.display()
                 ))
             })?;
-        prepare_mount_target(root, &adjusted)?;
         crate::secure_mount::secure_bind_mount_from_roots(
             trusted_root,
             source,
