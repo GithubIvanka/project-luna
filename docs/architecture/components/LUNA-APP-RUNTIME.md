@@ -1,6 +1,6 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
+**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration, PID supervisor и полноценный kernel/provider enforcement продолжаются.
 
 ## Назначение
 
@@ -35,7 +35,9 @@ ApplicationLaunchContext + RuntimeProfile
   ↓
 luna-namespace
   ↓
-process spawn / exec
+PID namespace supervisor
+  ↓
+application process (PID 2+)
   ↓
 ApplicationInstance
 ```
@@ -77,9 +79,9 @@ Capability identity также отделена от authorization: `CapabilityR
 /usr
 ```
 
-`luna-namespace` материализует этот профиль в отдельный RAM-backed logical root. Production launch path не использует полный System Image как OverlayFS lower и не создаёт persistent upper/work слой для `/`.
+`luna-namespace` материализует профиль в отдельный RAM-backed logical root. Production launch path не использует полный System Image как OverlayFS lower и не создаёт persistent upper/work слой для `/`.
 
-Физический System Image остаётся immutable источником системных ресурсов. Он не становится application `/` и не раскрывается приложению целиком. Требуемые ресурсы подключаются явно через RuntimeProfile и authorized mapping; остальные ресурсы System Image остаются вне logical root приложения.
+Физический System Image остаётся immutable source. Он не становится application `/` и не раскрывается приложению целиком. Boot/runtime слой материализует boot-critical system base в RAM, а дополнительные immutable resources могут гидратироваться лениво. Приложение получает только те системные и собственные ресурсы, которые входят в его authorized execution context.
 
 ## Per-application Linux environment
 
@@ -109,6 +111,12 @@ host namespaces/services
 
 Capabilities также не являются скрытым продолжением filesystem. Например, grant `network` означает только ту сетевую возможность, которую предоставляет runtime/provider; он не открывает host filesystem или произвольные namespaces.
 
+## PID boundary
+
+Application PID 1 запрещён как execution target. При использовании PID namespace PID 1 резервируется под Luna namespace supervisor/init, а реальный executable приложения стартует с PID 2 или выше.
+
+Это не механизм сокрытия изоляции от приложения. Это корректная Linux lifecycle boundary: namespace supervisor отвечает за reaping и lifetime namespace, а application process не принимает на себя специальную роль PID 1.
+
 ## Executable boundary
 
 Executable path является частью plan и должен:
@@ -124,8 +132,8 @@ Executable path является частью plan и должен:
 
 `ApplicationLaunchContext` является типизированным execution context для одного запуска и содержит:
 
-- process-local Linux mount namespace;
-- immutable System Image base root;
+- process-local Linux namespaces;
+- immutable System Image source;
 - отдельный staging parent для runtime state.
 
 До создания staging directory context проверяется. Оба filesystem roots должны быть абсолютными, без `.`/`..`, а staging parent должен находиться вне System Image base-root tree. Runtime state не должен записываться в immutable System Image.
@@ -136,7 +144,7 @@ Executable path является частью plan и должен:
 
 Logical root создаётся как tmpfs в private mount namespace; staging directory на persistent storage является только mountpoint и не является backing store для `/`.
 
-Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`. Это устраняет pathname TOCTOU между проверкой source и bind operation. Target-side containment и trust-domain validation физического source ещё являются отдельным hardening item.
+Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`. Это устраняет pathname TOCTOU между проверкой source и bind operation.
 
 Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
 
@@ -190,10 +198,11 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - invalid launch context отклоняет запуск до создания staging directory;
 - staging внутри System Image root отклоняется;
 - launcher принимает только authorized plan type;
-- capability names неизвестные Registry не могут получить grant.
+- capability names неизвестные Registry не могут получить grant;
+- PID supervisor test must keep application executable at PID 2+ when PID isolation is enabled.
 
-Linux integration дополнительно проверяет cleanup staging root и lifecycle процесса.
+Linux integration дополнительно проверяет cleanup staging root, PID namespace lifecycle и process reaping.
 
 ## Открыто
 
-Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; filtered `/dev`; полноценный kernel enforcement.
+Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; PID supervisor/child-spawn implementation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; полноценный kernel enforcement.
