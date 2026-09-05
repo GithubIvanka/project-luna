@@ -10,7 +10,7 @@ use std::ffi::CString;
 use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use luna_common::{ResourceAccess, RuntimeProfile};
 use luna_root_mapping::{LogicalPath, MappingKind, MappingRule, MappingTable, PhysicalPath};
@@ -50,12 +50,12 @@ pub fn materialize_profiled_logical_root(
         let adjusted = match rule.kind() {
             MappingKind::File => MappingRule::file(
                 LogicalPath::new(logical_path).map_err(|_| NamespaceError::InvalidPath)?,
-                PhysicalPath::new(rule.physical()),
+                rule.physical().clone(),
             )
             .with_access(rule.access().iter().copied()),
             MappingKind::Subtree => MappingRule::subtree(
                 LogicalPath::new(logical_path).map_err(|_| NamespaceError::InvalidPath)?,
-                PhysicalPath::new(rule.physical()),
+                rule.physical().clone(),
             )
             .with_access(rule.access().iter().copied()),
         };
@@ -69,29 +69,54 @@ pub fn materialize_profiled_logical_root(
     fs::create_dir_all(root.join("sys"))?;
     fs::create_dir_all(root.join("dev"))?;
     fs::create_dir_all(root.join("tmp"))?;
-    mount_filesystem("proc", &root.join("proc"), libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC, None)?;
+    mount_filesystem(
+        "proc",
+        &root.join("proc"),
+        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        None,
+    )?;
     mount_filesystem(
         "sysfs",
         &root.join("sys"),
         libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_RDONLY,
         None,
     )?;
-    mount_filesystem("tmpfs", &root.join("dev"), libc::MS_NOSUID | libc::MS_NODEV, Some("mode=0755"))?;
-    mount_filesystem("tmpfs", &root.join("tmp"), libc::MS_NOSUID | libc::MS_NODEV, Some("mode=1777"))?;
+    mount_filesystem(
+        "tmpfs",
+        &root.join("dev"),
+        libc::MS_NOSUID | libc::MS_NODEV,
+        Some("mode=0755"),
+    )?;
+    mount_filesystem(
+        "tmpfs",
+        &root.join("tmp"),
+        libc::MS_NOSUID | libc::MS_NODEV,
+        Some("mode=1777"),
+    )?;
 
     Ok(logical)
 }
 
 fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    mount_filesystem_path(source, target, 0, None)?;
+    mount_filesystem_path(Some(source), target, libc::MS_BIND, None)?;
     if read_only {
-        mount_filesystem_path(None::<&Path>, target, libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY, None)?;
+        mount_filesystem_path(
+            None,
+            target,
+            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
+            None,
+        )?;
     }
     Ok(())
 }
 
 fn mount_tmpfs(target: &Path) -> Result<(), NamespaceError> {
-    mount_filesystem("tmpfs", target, libc::MS_NOSUID | libc::MS_NODEV, Some("mode=0755"))
+    mount_filesystem(
+        "tmpfs",
+        target,
+        libc::MS_NOSUID | libc::MS_NODEV,
+        Some("mode=0755"),
+    )
 }
 
 fn mount_filesystem(
@@ -132,7 +157,7 @@ fn mount_raw(
             filesystem.map_or(std::ptr::null(), CString::as_ptr),
             flags,
             data.as_ref()
-                .map_or(std::ptr::null_mut(), |value| value.as_ptr().cast_mut().cast()),
+                .map_or(std::ptr::null(), |value| value.as_ptr().cast()),
         )
     };
     if status == -1 {
@@ -145,5 +170,5 @@ fn path_cstring(path: &Path) -> Result<CString, NamespaceError> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| NamespaceError::InvalidPath)
 }
 
-#[allow(dead_code)]
-fn _keep_pathbuf_type_available(_: PathBuf) {}
+// Keep the `PhysicalPath` type in this module's contract explicit.
+const _: fn(PhysicalPath) = |_| {};
