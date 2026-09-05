@@ -17,6 +17,13 @@ pub enum BundleKind {
     Component,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum ResourceAccess {
+    Read,
+    Write,
+    Execute,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundleMetadata {
     id: BundleId,
@@ -42,19 +49,33 @@ impl BundleMetadata {
 pub struct BundleResource {
     logical_path: String,
     source_path: String,
+    access: BTreeSet<ResourceAccess>,
 }
 impl BundleResource {
     pub fn new(logical_path: impl Into<String>, source_path: impl Into<String>) -> Self {
         Self {
             logical_path: logical_path.into(),
             source_path: source_path.into(),
+            access: BTreeSet::new(),
         }
     }
+
+    pub fn with_access<I>(mut self, access: I) -> Self
+    where
+        I: IntoIterator<Item = ResourceAccess>,
+    {
+        self.access.extend(access);
+        self
+    }
+
     pub fn logical_path(&self) -> &str {
         &self.logical_path
     }
     pub fn source_path(&self) -> &str {
         &self.source_path
+    }
+    pub fn access(&self) -> &BTreeSet<ResourceAccess> {
+        &self.access
     }
 }
 
@@ -62,12 +83,14 @@ impl BundleResource {
 pub struct BundleManifest {
     metadata: BundleMetadata,
     resources: Vec<BundleResource>,
+    capabilities: BTreeSet<String>,
 }
 impl BundleManifest {
     pub fn new(metadata: BundleMetadata) -> Self {
         Self {
             metadata,
             resources: Vec::new(),
+            capabilities: BTreeSet::new(),
         }
     }
     pub fn metadata(&self) -> &BundleMetadata {
@@ -76,8 +99,14 @@ impl BundleManifest {
     pub fn resources(&self) -> &[BundleResource] {
         &self.resources
     }
+    pub fn capabilities(&self) -> impl Iterator<Item = &str> {
+        self.capabilities.iter().map(String::as_str)
+    }
     pub fn add_resource(&mut self, resource: BundleResource) {
         self.resources.push(resource);
+    }
+    pub fn add_capability(&mut self, capability: impl Into<String>) {
+        self.capabilities.insert(capability.into());
     }
 }
 
@@ -85,6 +114,7 @@ impl BundleManifest {
 pub enum BundleError {
     EmptyIdentifier,
     EmptyResourcePath,
+    EmptyCapability,
     DuplicateResource(String),
     InvalidLogicalPath(String),
     InvalidSourcePath(String),
@@ -94,6 +124,7 @@ impl fmt::Display for BundleError {
         match self {
             Self::EmptyIdentifier => f.write_str("bundle identifier is empty"),
             Self::EmptyResourcePath => f.write_str("bundle resource path is empty"),
+            Self::EmptyCapability => f.write_str("bundle capability name is empty"),
             Self::DuplicateResource(path) => write!(f, "duplicate bundle resource: {path}"),
             Self::InvalidLogicalPath(path) => write!(f, "invalid logical bundle path: {path}"),
             Self::InvalidSourcePath(path) => write!(f, "invalid bundle source path: {path}"),
@@ -105,6 +136,11 @@ impl std::error::Error for BundleError {}
 pub fn validate_manifest(manifest: &BundleManifest) -> Result<(), BundleError> {
     if manifest.metadata.id().as_str().trim().is_empty() {
         return Err(BundleError::EmptyIdentifier);
+    }
+    for capability in &manifest.capabilities {
+        if capability.trim().is_empty() {
+            return Err(BundleError::EmptyCapability);
+        }
     }
     let mut paths = BTreeSet::new();
     for resource in manifest.resources() {
@@ -132,7 +168,8 @@ pub fn validate_manifest(manifest: &BundleManifest) -> Result<(), BundleError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BundleError, BundleKind, BundleManifest, BundleMetadata, BundleResource, validate_manifest,
+        BundleError, BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
+        validate_manifest,
     };
     use luna_common::{BundleId, Version};
 
@@ -147,8 +184,43 @@ mod tests {
     #[test]
     fn manifest_validates_unique_resources() {
         let mut manifest = manifest();
-        manifest.add_resource(BundleResource::new("/bin/app", "resources/bin/app"));
+        manifest.add_resource(
+            BundleResource::new("/bin/app", "resources/bin/app")
+                .with_access([ResourceAccess::Execute]),
+        );
         assert!(validate_manifest(&manifest).is_ok());
+    }
+
+    #[test]
+    fn resource_access_is_explicit_and_deterministic() {
+        let resource = BundleResource::new("/data/file", "data/file")
+            .with_access([ResourceAccess::Write, ResourceAccess::Read, ResourceAccess::Read]);
+        assert_eq!(
+            resource.access().iter().copied().collect::<Vec<_>>(),
+            vec![ResourceAccess::Read, ResourceAccess::Write]
+        );
+    }
+
+    #[test]
+    fn manifest_capabilities_are_named_requests() {
+        let mut manifest = manifest();
+        manifest.add_capability("network");
+        manifest.add_capability("audio.output");
+        manifest.add_capability("network");
+        assert_eq!(
+            manifest.capabilities().collect::<Vec<_>>(),
+            vec!["audio.output", "network"]
+        );
+    }
+
+    #[test]
+    fn manifest_rejects_empty_capability() {
+        let mut manifest = manifest();
+        manifest.add_capability("   ");
+        assert!(matches!(
+            validate_manifest(&manifest),
+            Err(BundleError::EmptyCapability)
+        ));
     }
 
     #[test]
