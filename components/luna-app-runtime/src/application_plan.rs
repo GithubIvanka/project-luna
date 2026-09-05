@@ -6,7 +6,7 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
@@ -124,9 +124,7 @@ impl ApplicationPlan {
     ) -> Result<(), PlanError> {
         let path = executable.path();
         if !path.is_absolute()
-            || path
-                .components()
-                .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+            || has_navigation_syntax(path)
             || path.as_os_str().to_string_lossy().contains('\0')
             || path.to_str().is_none()
         {
@@ -346,6 +344,12 @@ fn require_allow(
     }
 }
 
+fn has_navigation_syntax(path: &Path) -> bool {
+    path.to_string_lossy()
+        .split('/')
+        .any(|component| component == "." || component == "..")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApplicationPlan, ExecutableSpec, PlanError};
@@ -523,9 +527,16 @@ mod tests {
                 .with_access([ResourceAccess::Read, ResourceAccess::Write]),
         );
         manifest.add_capability("network");
+        let mut mapping = valid_mapping();
+        mapping
+            .insert(MappingRule::file(
+                LogicalPath::new("/home/alice/config").unwrap(),
+                PhysicalPath::new("/data/apps/example/config"),
+            ))
+            .unwrap();
         let plan = ApplicationPlan::new(
             manifest,
-            valid_mapping(),
+            mapping,
             &active_session(),
             RuntimeSpec::luna(),
             ExecutableSpec::new("/bin/app"),
