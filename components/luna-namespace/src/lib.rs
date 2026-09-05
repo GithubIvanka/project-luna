@@ -11,7 +11,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 use landlock::{
-    Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
+    Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
     RulesetStatus,
 };
 use luna_common::ResourceAccess;
@@ -300,32 +300,36 @@ impl LogicalRoot {
 }
 
 fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, NamespaceError> {
-    let mut access: landlock::BitFlags<AccessFs> = AccessFs::EMPTY.into();
+    let mut access: Option<landlock::BitFlags<AccessFs>> = None;
+    let mut add = |right: AccessFs| {
+        let flags = right.into();
+        access = Some(access.take().unwrap_or_default() | flags);
+    };
+
     if rule.access().contains(&ResourceAccess::Read) {
-        access |= AccessFs::ReadFile;
+        add(AccessFs::ReadFile);
         if rule.kind() == MappingKind::Subtree {
-            access |= AccessFs::ReadDir;
+            add(AccessFs::ReadDir);
         }
     }
     if rule.access().contains(&ResourceAccess::Write) {
-        access |= AccessFs::WriteFile | AccessFs::Truncate;
+        add(AccessFs::WriteFile);
+        add(AccessFs::Truncate);
         if rule.kind() == MappingKind::Subtree {
-            access |= AccessFs::RemoveDir
-                | AccessFs::RemoveFile
-                | AccessFs::MakeDir
-                | AccessFs::MakeReg
-                | AccessFs::Refer;
+            add(AccessFs::RemoveDir);
+            add(AccessFs::RemoveFile);
+            add(AccessFs::MakeDir);
+            add(AccessFs::MakeReg);
+            add(AccessFs::Refer);
         }
     }
     if rule.access().contains(&ResourceAccess::Execute) {
-        access |= AccessFs::Execute;
+        add(AccessFs::Execute);
     }
-    if access.is_empty() {
-        return Err(NamespaceError::FilesystemAccess(
-            "mapping access produced an empty Landlock rule".into(),
-        ));
-    }
-    Ok(access)
+
+    access.ok_or_else(|| {
+        NamespaceError::FilesystemAccess("mapping access produced an empty Landlock rule".into())
+    })
 }
 
 fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), NamespaceError> {
