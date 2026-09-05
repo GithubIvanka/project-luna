@@ -79,19 +79,24 @@ fn runtime_authorization_precedes_explicit_resource_requests() {
         resource: Resource::UserData(UserId::from("alice")),
         permission: Permission::Read,
     };
-    let policy = RecordingPolicy::new(vec![Decision::Allow, Decision::Allow]);
+    let policy = RecordingPolicy::new(vec![Decision::Allow, Decision::Allow, Decision::Allow]);
 
     let authorized = plan(vec![explicit.clone()]).authorize(&policy).unwrap();
 
     assert_eq!(authorized.application().as_str(), "example.app");
     let seen = policy.seen.borrow();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 3);
     assert_eq!(
         seen[0].resource,
         Resource::Runtime(luna_common::RuntimeKind::Luna)
     );
     assert_eq!(seen[0].permission, Permission::Use);
-    assert_eq!(seen[1], explicit);
+    assert_eq!(
+        seen[1].resource,
+        Resource::FilesystemPath("/bin/app".to_owned())
+    );
+    assert_eq!(seen[1].permission, Permission::Execute);
+    assert_eq!(seen[2], explicit);
 }
 
 #[test]
@@ -109,16 +114,33 @@ fn explicit_denial_stops_authorization_pipeline() {
         },
         permission: Permission::Write,
     };
-    let policy = RecordingPolicy::new(vec![Decision::Allow, Decision::Deny, Decision::Allow]);
+    let policy = RecordingPolicy::new(vec![
+        Decision::Allow,
+        Decision::Allow,
+        Decision::Allow,
+        Decision::Deny,
+    ]);
 
-    let result = plan(vec![first, second]).authorize(&policy);
+    let result = plan(vec![first.clone(), second]).authorize(&policy);
 
     assert!(matches!(result, Err(PlanError::Security(_))));
     let seen = policy.seen.borrow();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 4);
     assert_eq!(
         seen[0].resource,
         Resource::Runtime(luna_common::RuntimeKind::Luna)
     );
-    assert_eq!(seen[1].resource, Resource::UserData(UserId::from("alice")));
+    assert_eq!(
+        seen[1].resource,
+        Resource::FilesystemPath("/bin/app".to_owned())
+    );
+    assert_eq!(seen[2], first);
+    assert_eq!(
+        seen[3].resource,
+        Resource::ApplicationData {
+            user: UserId::from("alice"),
+            application: BundleId::from("example.app"),
+        }
+    );
+    assert_eq!(seen[3].permission, Permission::Write);
 }
