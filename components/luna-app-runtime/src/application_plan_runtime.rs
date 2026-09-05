@@ -2,7 +2,8 @@
 //!
 //! Authorization is intentionally completed before this module is entered.
 //! The launcher only consumes an `AuthorizedApplicationPlan`, materializes the
-//! logical root in the child, and registers the supervised process.
+//! logical root in a private mount namespace, installs filesystem enforcement,
+//! and registers the supervised process.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -122,6 +123,12 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
     ) -> Result<ApplicationInstanceId, RuntimeError> {
         context.validate()?;
 
+        if let Some(capability) = plan.manifest().capabilities().next() {
+            return Err(RuntimeError::Security(format!(
+                "capability enforcement is not implemented by the Linux launcher: {capability}"
+            )));
+        }
+
         let program = plan.executable().path().to_str().ok_or_else(|| {
             RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
         })?;
@@ -147,11 +154,17 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let args = plan.executable().args().to_vec();
         let namespace = context.namespace();
         let process = runtime.spawn_process_with_pre_exec(program, args, move || {
+            namespace
+                .enter_private()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
             let logical = namespace
                 .materialize_logical_root(&root_for_child, &base_root, &mapping)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             namespace
                 .enter_logical_root(&logical)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            namespace
+                .enforce_filesystem_access(&mapping)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             Ok(())
         });
