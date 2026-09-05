@@ -37,8 +37,8 @@ pub(crate) fn secure_bind_mount_from_roots(
     target: &Path,
     read_only: bool,
 ) -> Result<(), NamespaceError> {
-    let legacy_host_binding = trusted_source_root == Path::new("/")
-        && trusted_target_root == Path::new("/");
+    let legacy_host_binding =
+        trusted_source_root == Path::new("/") && trusted_target_root == Path::new("/");
     if !trusted_source_root.is_absolute()
         || (!legacy_host_binding && trusted_source_root == Path::new("/"))
         || !source.is_absolute()
@@ -104,7 +104,7 @@ fn open_path(path: &Path) -> Result<OwnedFd, NamespaceError> {
     let fd = unsafe {
         libc::open(
             path.as_ptr(),
-            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
         )
     };
     if fd == -1 {
