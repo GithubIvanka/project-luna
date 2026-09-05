@@ -125,9 +125,9 @@ impl ApplicationPlan {
     ) -> Result<(), PlanError> {
         let path = executable.path();
         if !path.is_absolute()
-            || path.components().any(|component| {
-                matches!(component, Component::ParentDir | Component::CurDir)
-            })
+            || path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
             || path.as_os_str().to_string_lossy().contains('\0')
             || path.to_str().is_none()
         {
@@ -143,7 +143,9 @@ impl ApplicationPlan {
             .find(|resource| resource.logical_path() == path.to_string_lossy())
             .ok_or_else(|| PlanError::ExecutableNotDeclared(path.display().to_string()))?;
         if !resource.access().contains(&ResourceAccess::Execute) {
-            return Err(PlanError::ExecutableNotExecutable(path.display().to_string()));
+            return Err(PlanError::ExecutableNotExecutable(
+                path.display().to_string(),
+            ));
         }
         Ok(())
     }
@@ -348,14 +350,12 @@ fn require_allow(
 #[cfg(test)]
 mod tests {
     use super::{ApplicationPlan, ExecutableSpec, PlanError};
-    use luna_bundle::{
-        BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
-    };
+    use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess};
     use luna_common::{BundleId, RuntimeSpec, UserId, Version};
     use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
     use luna_security::{
-        AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-        SecurityError,
+        AuthorizationRequest, Constraint, Decision, Permission, PolicyAuthority, Principal,
+        Resource, SecurityError,
     };
     use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -572,7 +572,10 @@ mod tests {
     fn authorization_requires_runtime_permission() {
         struct RuntimeDeny;
         impl PolicyAuthority for RuntimeDeny {
-            fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+            fn authorize(
+                &self,
+                request: &AuthorizationRequest,
+            ) -> Result<Decision, SecurityError> {
                 if matches!(request.resource, Resource::Runtime(_)) {
                     Ok(Decision::Deny)
                 } else {
@@ -588,16 +591,22 @@ mod tests {
     fn authorization_rejects_ask_and_constraints() {
         struct Ask;
         impl PolicyAuthority for Ask {
-            fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+            fn authorize(
+                &self,
+                _request: &AuthorizationRequest,
+            ) -> Result<Decision, SecurityError> {
                 Ok(Decision::Ask)
             }
         }
 
         struct Constrained;
         impl PolicyAuthority for Constrained {
-            fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+            fn authorize(
+                &self,
+                _request: &AuthorizationRequest,
+            ) -> Result<Decision, SecurityError> {
                 Ok(Decision::Constrained {
-                    constraints: vec!["read-only".into()],
+                    constraints: vec![Constraint::ReadOnly],
                 })
             }
         }
