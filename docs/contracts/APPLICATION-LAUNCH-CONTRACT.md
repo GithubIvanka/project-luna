@@ -53,9 +53,11 @@ The launcher accepts only `AuthorizedApplicationPlan` plus an `ApplicationLaunch
 
 The context requires absolute, navigation-free roots. Staging must remain outside the System Image base-root tree, host `/`, and the staging tree itself. Trusted source roots must be explicitly selected by the system runtime and must not be host `/` or staging content.
 
-The launcher stages an execution root, materializes the logical `/` as RAM-backed tmpfs inside the child namespace, mounts only the profile and authorized mappings, and creates the supervised process through `luna-system-runtime`.
+The launcher stages an empty execution root, materializes the logical `/` as RAM-backed tmpfs inside the child namespace, mounts only the profile and authorized mappings, and creates the supervised process through `luna-system-runtime`.
 
-Physical source attachment uses FD-based resolution (`openat2` → `open_tree` → `mount_setattr` where needed → `move_mount`). The target is also resolved to an O_PATH FD with the same no-symlink/no-magic-link constraints before attachment.
+Source attachment resolves below the explicit source trust root. Target attachment independently resolves below the per-launch logical-root destination. Both sides use FD-based resolution with `openat2(... RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)`, `open_tree`, `mount_setattr` where needed, and `move_mount`. No production target is resolved against host `/`.
+
+Materialization is transactional. Every successful mount is registered in a local rollback transaction; any later materialization error unmounts already-created mounts in reverse order before returning failure. The higher-level application runtime owns cleanup of the staging directory when the supervised process exits or is terminated.
 
 The executable must be absolute, traversal-free, and present in the authorized mapping. Spawn failure cleans the temporary staging root.
 
@@ -80,4 +82,5 @@ Privileged Linux namespace/process tests remain a separate integration stage.
 - cgroup/resource-limit contract;
 - restart policy;
 - final logical-root mount/portal set;
-- fully transactional cleanup of every mount created during failed materialization.
+- privileged integration tests for real unshare/mount/chroot/Landlock behavior;
+- complete filtered `/dev` policy.
