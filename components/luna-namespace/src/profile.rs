@@ -10,7 +10,7 @@ use std::ffi::CString;
 use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use luna_common::{ResourceAccess, RuntimeProfile};
 use luna_root_mapping::{LogicalPath, MappingKind, MappingRule, MappingTable};
@@ -21,12 +21,14 @@ pub fn materialize_profiled_logical_root(
     namespace: &LinuxMountNamespace,
     root: &Path,
     base_root: &Path,
+    trusted_source_roots: &[PathBuf],
     mappings: &MappingTable,
     profile: &RuntimeProfile,
 ) -> Result<LogicalRoot, NamespaceError> {
     if !base_root.is_dir() {
         return Err(NamespaceError::MissingBaseRoot);
     }
+    validate_trusted_roots(trusted_source_roots)?;
 
     fs::create_dir_all(root)?;
     if fs::read_dir(root)?.next().is_some() {
@@ -48,7 +50,12 @@ pub fn materialize_profiled_logical_root(
         }
         fs::create_dir_all(&target)?;
         let read_only = !access.contains(&ResourceAccess::Write);
-        bind_mount(&source, &target, read_only)?;
+        crate::secure_mount::secure_bind_mount_from_root(
+            base_root,
+            &source,
+            &target,
+            read_only,
+        )?;
     }
 
     for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
@@ -65,7 +72,23 @@ pub fn materialize_profiled_logical_root(
             )
             .with_access(rule.access().iter().copied()),
         };
-        namespace.apply_mapping(&adjusted, !rule.access().contains(&ResourceAccess::Write))?;
+        let source = adjusted.physical().as_path();
+        let trusted_root = trusted_source_roots
+            .iter()
+            .find(|root| source == root.as_path() || source.starts_with(root))
+            .ok_or_else(|| {
+                NamespaceError::FilesystemAccess(format!(
+                    "mapping source is outside trusted source roots: {}",
+                    source.display()
+                ))
+            })?;
+        prepare_mount_target(root, &adjusted)?;
+        crate::secure_mount::secure_bind_mount_from_root(
+            trusted_root,
+            source,
+            adjusted.logical().as_path(),
+            !adjusted.access().contains(&ResourceAccess::Write),
+        )?;
     }
 
     fs::create_dir_all(root.join("proc"))?;
@@ -108,8 +131,41 @@ pub fn materialize_profiled_logical_root(
     })
 }
 
-fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    crate::secure_mount::secure_bind_mount(source, target, read_only)
+fn validate_trusted_roots(roots: &[PathBuf]) -> Result<(), NamespaceError> {
+    for root in roots {
+        if !root.is_absolute() || root == Path::new("/") || has_navigation_syntax(root) {
+            return Err(NamespaceError::InvalidPath);
+        }
+        if !root.is_dir() {
+            return Err(NamespaceError::FilesystemAccess(format!(
+                "trusted source root does not exist: {}",
+                root.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn has_navigation_syntax(path: &Path) -> bool {
+    path.to_string_lossy()
+        .split('/')
+        .any(|component| component == "." || component == "..")
+}
+
+fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), NamespaceError> {
+    let target = root.join(rule.logical().as_str().trim_start_matches('/'));
+    match rule.kind() {
+        MappingKind::File => {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if !target.exists() {
+                fs::File::create(target)?;
+            }
+        }
+        MappingKind::Subtree => fs::create_dir_all(target)?,
+    }
+    Ok(())
 }
 
 fn mount_tmpfs(target: &Path) -> Result<(), NamespaceError> {
