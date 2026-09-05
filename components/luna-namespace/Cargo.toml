@@ -5,6 +5,6 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
-landlock = "0.4.5"
+landlock = "0.4.7"
 luna-root-mapping = { path = "../luna-root-mapping" }
 libc = "0.2"
