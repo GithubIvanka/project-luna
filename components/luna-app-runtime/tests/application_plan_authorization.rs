@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use luna_app_runtime::{ApplicationPlan, ExecutableSpec, PlanError};
 use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource};
-use luna_common::{BundleId, RuntimeSpec, UserId, Version};
+use luna_common::{BundleId, ResourceAccess, RuntimeSpec, UserId, Version};
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
 use luna_security::{
     AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
@@ -24,14 +24,19 @@ fn plan(requests: Vec<AuthorizationRequest>) -> ApplicationPlan {
         Version::new(1, 0, 0),
         BundleKind::Application,
     ));
-    manifest.add_resource(BundleResource::new("/bin/app", "bin/app"));
+    manifest.add_resource(
+        BundleResource::new("/bin/app", "bin/app").with_access([ResourceAccess::Execute]),
+    );
 
     let mut mapping = MappingTable::new();
     mapping
-        .insert(MappingRule::file(
-            LogicalPath::new("/bin/app").unwrap(),
-            PhysicalPath::new("/data/apps/example/bin/app"),
-        ))
+        .insert(
+            MappingRule::file(
+                LogicalPath::new("/bin/app").unwrap(),
+                PhysicalPath::new("/data/apps/example/bin/app"),
+            )
+            .with_access([ResourceAccess::Execute]),
+        )
         .unwrap();
 
     ApplicationPlan::new(
