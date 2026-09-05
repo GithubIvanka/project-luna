@@ -1,10 +1,11 @@
 # Контракт System Image
 
-**Статус:** черновик для Phase 0; не изменяет принятые архитектурные решения, пока не принят отдельным решением.
+**Статус:** черновик для Phase 0; детали materialization/hydration уточняются отдельной реализацией.
+**Scope:** System Image → `luna-init` → running RAM-backed system
 
 ## 1. Назначение
 
-Этот контракт определяет границу между версионированным System Image, его manifest-файлом, загрузчиком, `luna-init` и подсистемами обновления.
+Этот контракт определяет границу между версионированным System Image, его manifest-файлом, загрузчиком, `luna-init`, runtime materialization и подсистемами обновления.
 
 ## 2. Инвариант формата
 
@@ -72,11 +73,36 @@ System Image и kernel — независимые сущности. Manifest з�
 допускается в retention policy
 ```
 
-Удаление активного, factory или необходимого fallback-образа запрещено.
+Удаление active, factory или необходимого fallback-образа запрещено до прохождения materialization/lifetime checks.
 
-## 8. Загрузка
+## 8. Загрузка и материализация
 
-`luna-boot.efi` не монтирует SquashFS. Он выбирает образ и передаёт его контекст Linux. `luna-init` на раннем этапе userspace находит SYSTEM, открывает выбранный SquashFS и строит логический `/`.
+`luna-boot.efi` выбирает образ и передаёт kernel контекст. Он не обязан монтировать SquashFS как Linux `/`.
+
+`luna-init` использует выбранный image как **immutable source** для построения рабочего окружения:
+
+```text
+SYSTEM/images/luna-X.Y.Z.squashfs
+          │
+          ▼
+      luna-init
+          │
+          ├── RAM: boot-critical system base
+          ├── RAM: runtime directories and pseudo-filesystems
+          └── lazy hydration of additional immutable system content
+                       ↓
+               RAM-backed logical `/`
+```
+
+SquashFS **не является долгосрочным backing store для `/`**.
+
+На раннем этапе в RAM материализуется минимальный системный base, необходимый для запуска `luna-system-runtime` и базовой работоспособности. Псевдофайловые системы и volatile directories (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) создаются отдельно в runtime memory.
+
+Остальной immutable system content может материализоваться лениво по требованию. Lazy hydration должна приводить к обычным объектам logical root и не должна раскрывать приложению физические `SYSTEM/...` paths.
+
+Уже материализованный content не должен становиться недоступным только из-за удаления исходного image. Перед удалением active image update/retention layer обязан подтвердить, что все ещё необходимые runtime resources либо уже materialized в RAM/другом валидном источнике, либо больше не требуются.
+
+Таким образом рабочая система не является mounted SquashFS root: System Image — источник первоначальной материализации и последующей hydration, а не runtime root.
 
 ## 9. Независимость от DATA
 
@@ -84,4 +110,9 @@ System Image и kernel — независимые сущности. Manifest з�
 
 ## 10. Открытые вопросы
 
-До отдельного решения нужно зафиксировать точную схему manifest, представление identity/integrity, формат boot metadata и точные правила определения usable image.
+- точная схема manifest;
+- точный набор boot-critical RAM base;
+- формат и владелец lazy-hydration cache/index;
+- механизм materialization без прямого раскрытия SYSTEM приложению;
+- проверка "image no longer required" перед retention removal;
+- точный переход от early userspace к `luna-system-runtime`.
