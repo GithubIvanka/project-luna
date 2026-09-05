@@ -31,6 +31,7 @@ pub struct ApplicationLaunchContext {
     namespace: LinuxMountNamespace,
     base_root: PathBuf,
     staging_parent: PathBuf,
+    trusted_source_roots: Vec<PathBuf>,
 }
 
 impl ApplicationLaunchContext {
@@ -43,7 +44,15 @@ impl ApplicationLaunchContext {
             namespace,
             base_root: base_root.into(),
             staging_parent: staging_parent.into(),
+            trusted_source_roots: Vec::new(),
         }
+    }
+
+    /// Add a system-selected physical source root from which application
+    /// mappings may be mounted. The root is validated before launch.
+    pub fn with_trusted_source_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.trusted_source_roots.push(root.into());
+        self
     }
 
     pub fn namespace(&self) -> LinuxMountNamespace {
@@ -58,12 +67,17 @@ impl ApplicationLaunchContext {
         &self.staging_parent
     }
 
+    pub fn trusted_source_roots(&self) -> &[PathBuf] {
+        &self.trusted_source_roots
+    }
+
     /// Validate filesystem roots before any staging directory or child process
     /// is created.
     ///
     /// Both roots must be absolute and lexically normalized. Runtime staging
     /// must live outside the immutable System Image tree and must never target
-    /// the host root.
+    /// the host root. Physical mapping roots are also system-selected and must
+    /// be explicit; they are never inferred from bundle-supplied paths.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
             return Err(RuntimeError::Staging(
@@ -91,11 +105,28 @@ impl ApplicationLaunchContext {
                 "staging parent must be outside base root".into(),
             ));
         }
+        for root in &self.trusted_source_roots {
+            if root == Path::new("/") || root.starts_with(&self.staging_parent) {
+                return Err(RuntimeError::Staging(
+                    "trusted source root must not be host root or staging content".into(),
+                ));
+            }
+            if !root.is_absolute() || has_navigation_syntax(root) {
+                return Err(RuntimeError::Staging(
+                    "trusted source roots must be absolute and normalized".into(),
+                ));
+            }
+        }
         Ok(())
     }
 
     fn has_navigation_components(&self) -> bool {
-        has_navigation_syntax(&self.base_root) || has_navigation_syntax(&self.staging_parent)
+        has_navigation_syntax(&self.base_root)
+            || has_navigation_syntax(&self.staging_parent)
+            || self
+                .trusted_source_roots
+                .iter()
+                .any(|root| has_navigation_syntax(root))
     }
 }
 
@@ -152,6 +183,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
 
         let mapping = plan.mapping().clone();
         let base_root = context.base_root().to_path_buf();
+        let trusted_source_roots = context.trusted_source_roots().to_vec();
         let root_for_child = root.clone();
         let args = plan.executable().args().to_vec();
         let namespace = context.namespace();
@@ -163,6 +195,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 &namespace,
                 &root_for_child,
                 &base_root,
+                &trusted_source_roots,
                 &mapping,
                 &profile,
             )
@@ -343,5 +376,35 @@ mod tests {
             Path::new("/"),
         );
         assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_rejects_implicit_source_roots() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/data/runtime"),
+        )
+        .with_trusted_source_root(Path::new("/"));
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/data/runtime"),
+        )
+        .with_trusted_source_root(Path::new("/luna/data/../apps"));
+        assert!(matches!(context.validate(), Err(RuntimeError::Staging(_))));
+    }
+
+    #[test]
+    fn launch_context_accepts_explicit_trusted_source_root() {
+        let context = ApplicationLaunchContext::new(
+            LinuxMountNamespace,
+            Path::new("/luna/system"),
+            Path::new("/luna/data/runtime"),
+        )
+        .with_trusted_source_root(Path::new("/luna/data/apps"));
+        assert!(context.validate().is_ok());
     }
 }
