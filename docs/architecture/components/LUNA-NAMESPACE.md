@@ -44,14 +44,14 @@ System Image остаётся внутренним immutable source. В logical 
 
 ## Безопасное подключение физических ресурсов
 
-Физический source path не должен проверяться через обычный `Path::is_file()`/`is_dir()` с последующим независимым `mount()`: между проверкой и операцией возможна pathname TOCTOU.
+Для production mappings physical source должен принадлежать явно выбранному system-runtime trusted source root. Bundle не может сам объявить новый trust root.
 
-Текущий secure path использует:
+Проверка и подключение выполняются через FD-based path resolution:
 
 ```text
-trusted source pathname
+trusted source root fd
         ↓
-openat2()
+openat2(relative source)
 RESOLVE_BENEATH
 RESOLVE_NO_SYMLINKS
 RESOLVE_NO_MAGICLINKS
@@ -60,12 +60,20 @@ O_PATH fd
         ↓
 open_tree(... AT_EMPTY_PATH | OPEN_TREE_CLONE)
         ↓
+mount_setattr(... MOUNT_ATTR_RDONLY)   [если read-only]
+        ↓
 detached mount fd
         ↓
-move_mount(... MOVE_MOUNT_F_EMPTY_PATH)
+openat2(target relative to host root)
+        ↓
+target O_PATH fd
+        ↓
+move_mount(... MOVE_MOUNT_F_EMPTY_PATH | MOVE_MOUNT_T_EMPTY_PATH)
 ```
 
-Тем самым source object фиксируется kernel-level file descriptor до attach operation. Target path всё ещё должен иметь отдельный containment/trust-domain hardening.
+Таким образом source и target не проходят отдельную pathname-проверку перед attach: kernel objects фиксируются FD до операции монтирования. Read-only применяется к detached mount object до attachment, без pathname-based remount.
+
+Низкоуровневый `secure_bind_mount()` сохраняется только для совместимости с внутренними/legacy callers; production profile path обязан использовать explicit trusted source root.
 
 ## Filesystem permissions
 
@@ -79,7 +87,7 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Linux mechanisms
 
-В основе используются существующие kernel primitives: mount namespaces, tmpfs, bind mounts, `openat2`, `open_tree`, `move_mount`, chroot и Landlock. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
+В основе используются существующие kernel primitives: mount namespaces, tmpfs, bind mounts, `openat2`, `open_tree`, `mount_setattr`, `move_mount`, chroot и Landlock. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
 
 ## Ошибки
 
@@ -91,4 +99,6 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Открыто
 
-Target-side containment для mount attachment, trust-domain validation физических source paths, полноценный filtered `/dev`, cleanup guarantees для всех mount objects и production handling ошибок mount.
+- fully transactional cleanup всех mount objects и промежуточного состояния при частично неуспешной materialization;
+- полноценный filtered `/dev`;
+- production handling ошибок mount и восстановления после аварийного завершения.
