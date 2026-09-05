@@ -8,11 +8,12 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use luna_bundle::{BundleKind, BundleManifest, validate_manifest};
+use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
 use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
+    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
+    SecurityError,
 };
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -99,7 +100,7 @@ impl ApplicationPlan {
                 requested: self.runtime.kind(),
             });
         }
-        Self::validate_executable(&self.executable, &self.mapping)?;
+        Self::validate_executable(&self.executable, &self.manifest, &self.mapping)?;
         for resource in self.manifest.resources() {
             let logical = LogicalPath::new(resource.logical_path()).map_err(PlanError::Mapping)?;
             self.mapping.resolve(&logical).map_err(PlanError::Mapping)?;
@@ -119,6 +120,7 @@ impl ApplicationPlan {
 
     fn validate_executable(
         executable: &ExecutableSpec,
+        manifest: &BundleManifest,
         mapping: &MappingTable,
     ) -> Result<(), PlanError> {
         let path = executable.path();
@@ -135,7 +137,46 @@ impl ApplicationPlan {
         mapping
             .resolve(&logical)
             .map_err(|_| PlanError::ExecutableNotMapped(path.display().to_string()))?;
+        let resource = manifest
+            .resources()
+            .iter()
+            .find(|resource| resource.logical_path() == path.to_string_lossy())
+            .ok_or_else(|| PlanError::ExecutableNotDeclared(path.display().to_string()))?;
+        if !resource.access().contains(&ResourceAccess::Execute) {
+            return Err(PlanError::ExecutableNotExecutable(path.display().to_string()));
+        }
         Ok(())
+    }
+
+    fn declared_requests(&self) -> Vec<AuthorizationRequest> {
+        let principal = Principal::Application(self.application.clone());
+        let mut requests = Vec::new();
+
+        for resource in self.manifest.resources() {
+            let resource_id = Resource::FilesystemPath(resource.logical_path().to_owned());
+            for access in resource.access() {
+                let permission = match access {
+                    ResourceAccess::Read => Permission::Read,
+                    ResourceAccess::Write => Permission::Write,
+                    ResourceAccess::Execute => Permission::Execute,
+                };
+                requests.push(AuthorizationRequest {
+                    principal: principal.clone(),
+                    resource: resource_id.clone(),
+                    permission,
+                });
+            }
+        }
+
+        for capability in self.manifest.capabilities() {
+            requests.push(AuthorizationRequest {
+                principal: principal.clone(),
+                resource: Resource::Capability(capability.to_owned()),
+                permission: Permission::Use,
+            });
+        }
+
+        requests
     }
 
     pub fn authorize(
@@ -148,6 +189,9 @@ impl ApplicationPlan {
             permission: Permission::Use,
         };
         require_allow(policy, &runtime_request)?;
+        for request in self.declared_requests() {
+            require_allow(policy, &request)?;
+        }
         for request in &self.requests {
             require_allow(policy, request)?;
         }
@@ -238,6 +282,8 @@ pub enum PlanError {
     Mapping(MappingError),
     InvalidExecutable(String),
     ExecutableNotMapped(String),
+    ExecutableNotDeclared(String),
+    ExecutableNotExecutable(String),
     RuntimeMismatch {
         mapping: Option<RuntimeKind>,
         requested: RuntimeKind,
@@ -259,6 +305,12 @@ impl fmt::Display for PlanError {
             Self::Mapping(error) => write!(f, "mapping error: {error}"),
             Self::InvalidExecutable(path) => write!(f, "invalid executable: {path}"),
             Self::ExecutableNotMapped(path) => write!(f, "executable is not mapped: {path}"),
+            Self::ExecutableNotDeclared(path) => {
+                write!(f, "executable is not declared as a bundle resource: {path}")
+            }
+            Self::ExecutableNotExecutable(path) => {
+                write!(f, "executable resource lacks execute access: {path}")
+            }
             Self::RuntimeMismatch { mapping, requested } => write!(
                 f,
                 "runtime mismatch: mapping={mapping:?}, requested={requested}"
@@ -296,7 +348,9 @@ fn require_allow(
 #[cfg(test)]
 mod tests {
     use super::{ApplicationPlan, ExecutableSpec, PlanError};
-    use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource};
+    use luna_bundle::{
+        BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
+    };
     use luna_common::{BundleId, RuntimeSpec, UserId, Version};
     use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
     use luna_security::{
@@ -320,7 +374,10 @@ mod tests {
             Version::new(1, 0, 0),
             BundleKind::Application,
         ));
-        manifest.add_resource(BundleResource::new("/bin/app", "bin/app"));
+        manifest.add_resource(
+            BundleResource::new("/bin/app", "bin/app")
+                .with_access([ResourceAccess::Execute]),
+        );
         manifest
     }
 
@@ -393,6 +450,28 @@ mod tests {
     }
 
     #[test]
+    fn executable_requires_execute_access() {
+        let mut manifest = BundleManifest::new(BundleMetadata::new(
+            BundleId::from("example.app"),
+            Version::new(1, 0, 0),
+            BundleKind::Application,
+        ));
+        manifest.add_resource(BundleResource::new("/bin/app", "bin/app"));
+        let result = ApplicationPlan::new(
+            manifest,
+            valid_mapping(),
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/app"),
+            vec![],
+        );
+        assert!(matches!(
+            result,
+            Err(PlanError::ExecutableNotExecutable(path)) if path == "/bin/app"
+        ));
+    }
+
+    #[test]
     fn executable_must_be_normalized() {
         let result = ApplicationPlan::new(
             valid_manifest(),
@@ -436,6 +515,57 @@ mod tests {
     fn authorization_is_fail_closed() {
         let result = plan().authorize(&Deny);
         assert!(matches!(result, Err(PlanError::Security(_))));
+    }
+
+    #[test]
+    fn declared_filesystem_access_and_capabilities_are_authorized() {
+        let mut manifest = valid_manifest();
+        manifest.add_resource(
+            BundleResource::new("/home/alice/config", "config")
+                .with_access([ResourceAccess::Read, ResourceAccess::Write]),
+        );
+        manifest.add_capability("network");
+        let plan = ApplicationPlan::new(
+            manifest,
+            valid_mapping(),
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/app"),
+            vec![],
+        )
+        .unwrap();
+        assert!(plan.authorize(&Deny).is_err());
+
+        struct RecordingAllow {
+            seen: std::cell::RefCell<Vec<AuthorizationRequest>>,
+        }
+        impl PolicyAuthority for RecordingAllow {
+            fn authorize(
+                &self,
+                request: &AuthorizationRequest,
+            ) -> Result<Decision, SecurityError> {
+                self.seen.borrow_mut().push(request.clone());
+                Ok(Decision::Allow)
+            }
+        }
+
+        let policy = RecordingAllow {
+            seen: std::cell::RefCell::new(Vec::new()),
+        };
+        plan.authorize(&policy).unwrap();
+        let seen = policy.seen.borrow();
+        assert!(seen.iter().any(|request| {
+            request.resource == Resource::FilesystemPath("/home/alice/config".into())
+                && request.permission == Permission::Read
+        }));
+        assert!(seen.iter().any(|request| {
+            request.resource == Resource::FilesystemPath("/home/alice/config".into())
+                && request.permission == Permission::Write
+        }));
+        assert!(seen.iter().any(|request| {
+            request.resource == Resource::Capability("network".into())
+                && request.permission == Permission::Use
+        }));
     }
 
     #[test]
