@@ -10,9 +10,9 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
-use landlock::{Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetStatus, ABI};
-use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
+use landlock::{Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetStatus};
 use luna_common::ResourceAccess;
+use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
 #[derive(Debug)]
 pub enum NamespaceError {
@@ -204,10 +204,10 @@ impl LinuxMountNamespace {
 
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
     ///
-    /// The ruleset is deliberately created with a complete ABI-v3 filesystem
+    /// The ruleset is deliberately created with an explicit ABI-v3 filesystem
     /// access set and hard compatibility requirements: a partially-supported
-    /// kernel cannot silently weaken Luna's policy. A successful call therefore
-    /// means that the process and all future children are actually restricted.
+    /// kernel cannot silently weaken Luna's policy. A successful call means the
+    /// process and its future children are actually restricted.
     pub fn enforce_filesystem_access(
         &self,
         mappings: &MappingTable,
@@ -301,7 +301,7 @@ impl LogicalRoot {
 }
 
 fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, NamespaceError> {
-    let mut access = AccessFs::Execute.into();
+    let mut access: landlock::BitFlags<AccessFs> = AccessFs::EMPTY.into();
     if rule.access().contains(&ResourceAccess::Read) {
         access |= AccessFs::ReadFile;
         if rule.kind() == MappingKind::Subtree {
@@ -320,6 +320,11 @@ fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, N
     }
     if rule.access().contains(&ResourceAccess::Execute) {
         access |= AccessFs::Execute;
+    }
+    if access.is_empty() {
+        return Err(NamespaceError::FilesystemAccess(
+            "mapping access produced an empty Landlock rule".into(),
+        ));
     }
     Ok(access)
 }
