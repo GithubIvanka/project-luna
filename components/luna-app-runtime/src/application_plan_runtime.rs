@@ -7,7 +7,7 @@
 //! filesystem enforcement, and registers the supervised process.
 
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use luna_common::RuntimeProfile;
 use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
@@ -95,11 +95,14 @@ impl ApplicationLaunchContext {
     }
 
     fn has_navigation_components(&self) -> bool {
-        self.base_root
-            .components()
-            .chain(self.staging_parent.components())
-            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        has_navigation_syntax(&self.base_root) || has_navigation_syntax(&self.staging_parent)
     }
+}
+
+fn has_navigation_syntax(path: &Path) -> bool {
+    path.to_string_lossy()
+        .split('/')
+        .any(|component| component == "." || component == "..")
 }
 
 #[cfg(unix)]
