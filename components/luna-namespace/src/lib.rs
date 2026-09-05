@@ -18,6 +18,7 @@ use luna_common::ResourceAccess;
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
 mod profile;
+mod secure_mount;
 pub use profile::materialize_profiled_logical_root;
 
 #[derive(Debug)]
@@ -346,20 +347,7 @@ fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), Namespace
 }
 
 fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    if mount(Some(source), target, None, libc::MS_BIND)? == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    if read_only
-        && mount(
-            None,
-            target,
-            None,
-            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-        )? == -1
-    {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
+    secure_mount::secure_bind_mount(source, target, read_only)
 }
 
 fn mount_overlay(

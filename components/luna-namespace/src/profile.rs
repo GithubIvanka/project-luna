@@ -109,16 +109,7 @@ pub fn materialize_profiled_logical_root(
 }
 
 fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
-    mount_filesystem_path(Some(source), target, libc::MS_BIND, None)?;
-    if read_only {
-        mount_filesystem_path(
-            None,
-            target,
-            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-            None,
-        )?;
-    }
-    Ok(())
+    crate::secure_mount::secure_bind_mount(source, target, read_only)
 }
 
 fn mount_tmpfs(target: &Path) -> Result<(), NamespaceError> {
