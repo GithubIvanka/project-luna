@@ -3,7 +3,7 @@
 //! This crate also exposes the RFC-0002 transport codec as `lbp`. The domain
 //! model remains independent from the on-disk `.lbp` representation.
 
-use luna_common::{BundleId, ResourceAccess, Version};
+use luna_common::{BundleId, Version};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -11,7 +11,7 @@ use std::fmt;
 #[path = "lbp_v1.rs"]
 pub mod lbp;
 
-pub use luna_common::ResourceAccess as BundleResourceAccess;
+pub use luna_common::ResourceAccess;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum BundleKind {
@@ -162,7 +162,10 @@ pub fn validate_manifest(manifest: &BundleManifest) -> Result<(), BundleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BundleError, BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess, validate_manifest};
+    use super::{
+        BundleError, BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
+        validate_manifest,
+    };
     use luna_common::{BundleId, Version};
 
     fn manifest() -> BundleManifest {
