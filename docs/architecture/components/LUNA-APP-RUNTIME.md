@@ -64,7 +64,7 @@ luna-namespace / process launch
 
 Capability identity также отделена от authorization: `CapabilityRegistry` определяет известный capability и provider, а `CapabilityGrant` появляется только после успешной authorization. Provider не принимает policy decision и не может расширить выданный grant.
 
-## RuntimeProfile
+## RuntimeProfile и logical root
 
 `RuntimeProfile` — явный набор trusted logical resources, которые система предоставляет execution environment независимо от пользовательских DATA mapping.
 
@@ -77,20 +77,20 @@ Capability identity также отделена от authorization: `CapabilityR
 /usr
 ```
 
-Профиль является контрактом уровня values. Фактическое bind/mount materialization принадлежит `luna-namespace`; capability/device exposure не становится implicit частью RuntimeProfile.
+`luna-namespace` материализует этот профиль в отдельный RAM-backed logical root. Production launch path не использует полный System Image как OverlayFS lower и не создаёт persistent upper/work слой для `/`.
 
-Важно: текущий namespace backend всё ещё использует полный System Image как OverlayFS lower layer. Это не считается финальной реализацией A3 и является отдельным hardening item: production path должен перейти на profile-driven system view, а не раскрывать весь SYSTEM.
+Физический System Image остаётся immutable источником системных ресурсов. Он не становится application `/` и не раскрывается приложению целиком. Требуемые ресурсы подключаются явно через RuntimeProfile и authorized mapping; остальные ресурсы System Image остаются вне logical root приложения.
 
 ## Executable boundary
 
 Executable path является частью plan и должен:
 
 1. быть абсолютным;
-2. не содержать parent traversal;
+2. не содержать parent/current-directory traversal syntax;
 3. быть представлен в `MappingTable`;
 4. иметь `Execute` access в Bundle declaration.
 
-Это предотвращает замену разрешённого logical executable произвольным physical path на launch boundary.
+Проверка navigation syntax выполняется по исходному pathname до возможной нормализации `Path`, чтобы `.` и `..` не исчезали из security check.
 
 ## Launch context boundary
 
@@ -100,11 +100,15 @@ Executable path является частью plan и должен:
 - immutable System Image base root;
 - отдельный staging parent для runtime state.
 
-До создания staging directory context проверяется. Оба filesystem roots должны быть абсолютными, а staging parent должен находиться вне System Image base-root tree. Runtime state не должен записываться в immutable lower layer.
+До создания staging directory context проверяется. Оба filesystem roots должны быть абсолютными, без `.`/`..`, а staging parent должен находиться вне System Image base-root tree. Runtime state не должен записываться в immutable System Image.
 
 ## Namespace materialization
 
-`luna-namespace` получает только authorized execution context и mapping policy. Физические пути DATA остаются внутренней реализацией. Приложение работает через logical root.
+`luna-namespace` получает только authorized execution context и mapping policy. Физические пути DATA/SYSTEM остаются внутренней реализацией. Приложение работает через logical root.
+
+Logical root создаётся как tmpfs в private mount namespace; staging directory на persistent storage является только mountpoint и не является backing store для `/`.
+
+Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount()`. Это устраняет pathname TOCTOU между проверкой source и bind operation. Target-side containment и trust-domain validation физического source ещё являются отдельным hardening item.
 
 Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
 
@@ -149,6 +153,7 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - невалидный bundle отклоняется;
 - runtime/mapping mismatch отклоняется до authorization;
 - executable вне mapping отклоняется;
+- navigation syntax `.`/`..` отклоняется;
 - foreign principal отклоняется;
 - `Deny` не создаёт authorized plan;
 - `Allow` создаёт typed `AuthorizedApplicationPlan`;
@@ -163,4 +168,4 @@ Linux integration дополнительно проверяет cleanup staging 
 
 ## Открыто
 
-Profile-driven System Image view вместо полного OverlayFS lower tree; фактический capability IPC/provider invocation; physical symlink/containment hardening; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; filtered `/dev`; полноценный kernel enforcement.
+Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; filtered `/dev`; полноценный kernel enforcement.
