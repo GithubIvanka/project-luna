@@ -1,6 +1,6 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan` и authorized-process launch boundary реализованы; production lifecycle integration продолжается.
+**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
 
 ## Назначение
 
@@ -25,13 +25,13 @@ Bundle declaration
   ↓
 ApplicationPlan
   ↓
-MappingPlan
+validate
   ↓
 luna-security
   ↓
 AuthorizedApplicationPlan
   ↓
-ApplicationLaunchContext
+ApplicationLaunchContext + RuntimeProfile
   ↓
 luna-namespace
   ↓
@@ -62,17 +62,35 @@ luna-namespace / process launch
 
 `Deny`, policy errors и неподдержанные `Constrained` decisions являются fail-closed. Launcher не принимает обычный `ApplicationPlan`, только уже авторизованный тип.
 
+Capability identity также отделена от authorization: `CapabilityRegistry` определяет известный capability и provider, а `CapabilityGrant` появляется только после успешной authorization. Provider не принимает policy decision и не может расширить выданный grant.
+
+## RuntimeProfile
+
+`RuntimeProfile` — явный набор trusted logical resources, которые система предоставляет execution environment независимо от пользовательских DATA mapping.
+
+Текущий baseline-профиль `minimal` описывает:
+
+```text
+/etc
+/lib
+/lib64
+/usr
+```
+
+Профиль является контрактом уровня values. Фактическое bind/mount materialization принадлежит `luna-namespace`; capability/device exposure не становится implicit частью RuntimeProfile.
+
+Важно: текущий namespace backend всё ещё использует полный System Image как OverlayFS lower layer. Это не считается финальной реализацией A3 и является отдельным hardening item: production path должен перейти на profile-driven system view, а не раскрывать весь SYSTEM.
+
 ## Executable boundary
 
 Executable path является частью plan и должен:
 
 1. быть абсолютным;
 2. не содержать parent traversal;
-3. быть представлен в `MappingTable`.
+3. быть представлен в `MappingTable`;
+4. иметь `Execute` access в Bundle declaration.
 
 Это предотвращает замену разрешённого logical executable произвольным physical path на launch boundary.
-
-Полная спецификация схемы executable declaration в Bundle остаётся отдельным design question; текущий plan получает уже выбранный executable от orchestration layer.
 
 ## Launch context boundary
 
@@ -86,7 +104,7 @@ Executable path является частью plan и должен:
 
 ## Namespace materialization
 
-`luna-namespace` получает только authorized execution context. Физические пути DATA остаются внутренней реализацией. Приложение работает через logical root.
+`luna-namespace` получает только authorized execution context и mapping policy. Физические пути DATA остаются внутренней реализацией. Приложение работает через logical root.
 
 Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
 
@@ -100,6 +118,8 @@ Executable path является частью plan и должен:
 - runtime specification;
 - lifecycle state;
 - supervised process identity, если процесс создан.
+
+`ApplicationInstance` не принимает security decisions. Authorization, mapping validation и capability approval должны завершиться до запуска процесса.
 
 Состояние `Running` выставляется только после успешного создания и attach supervised process для production launcher.
 
@@ -136,10 +156,11 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - отказ останавливает дальнейшую authorization pipeline;
 - invalid launch context отклоняет запуск до создания staging directory;
 - staging внутри System Image root отклоняется;
-- launcher принимает только authorized plan type.
+- launcher принимает только authorized plan type;
+- capability names неизвестные Registry не могут получить grant.
 
 Linux integration дополнительно проверяет cleanup staging root и lifecycle процесса.
 
 ## Открыто
 
-Migration legacy `launch_authorized` path на typed `ApplicationPlan` boundary; production integration с IPC, полноценным lifecycle reconciliation, resource limits/cgroups, restart policy, user confirmation IPC и полным kernel enforcement.
+Profile-driven System Image view вместо полного OverlayFS lower tree; фактический capability IPC/provider invocation; physical symlink/containment hardening; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; filtered `/dev`; полноценный kernel enforcement.
