@@ -1,10 +1,11 @@
 //! File-descriptor-based secure bind mounting for trusted runtime sources.
 //!
-//! Source resolution is performed with `openat2(2)` using `RESOLVE_BENEATH`,
-//! `RESOLVE_NO_SYMLINKS`, and `RESOLVE_NO_MAGICLINKS`. The resulting O_PATH
-//! descriptor is converted into a detached mount object with `open_tree(2)`
-//! and attached with `move_mount(2)`. This closes the pathname-check versus
-//! mount time-of-check/time-of-use window for source resources.
+//! Source and target resolution are performed relative to O_PATH directory
+//! descriptors. `openat2(2)` is used with `RESOLVE_BENEATH`,
+//! `RESOLVE_NO_SYMLINKS`, and `RESOLVE_NO_MAGICLINKS`; the selected source is
+//! cloned with `open_tree(2)` and attached with `move_mount(2)`. Read-only is
+//! applied to the detached mount object with `mount_setattr(2)` before attach.
+//! This keeps both sides out of pathname-based TOCTOU windows.
 
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -19,34 +20,56 @@ pub(crate) fn secure_bind_mount(
     target: &Path,
     read_only: bool,
 ) -> Result<(), NamespaceError> {
-    if !source.is_absolute() || source == Path::new("/") {
+    secure_bind_mount_from_root(Path::new("/"), source, target, read_only)
+}
+
+/// Bind mount `source` only when it is lexically beneath `trusted_root`.
+///
+/// The final source lookup is still performed with `openat2`, so a source
+/// symlink, magic-link, or `..` escape cannot cross the trusted-root FD.
+#[cfg(target_os = "linux")]
+pub(crate) fn secure_bind_mount_from_root(
+    trusted_root: &Path,
+    source: &Path,
+    target: &Path,
+    read_only: bool,
+) -> Result<(), NamespaceError> {
+    if !trusted_root.is_absolute()
+        || trusted_root == Path::new("/")
+        || !source.is_absolute()
+        || source == Path::new("/")
+        || !target.is_absolute()
+        || target == Path::new("/")
+    {
         return Err(NamespaceError::InvalidPath);
     }
 
-    let root_fd = open_path(Path::new("/"))?;
+    let root_fd = open_path(trusted_root)?;
     let relative = source
-        .strip_prefix("/")
-        .map_err(|_| NamespaceError::InvalidPath)?;
-    let source_fd = open_beneath(root_fd.as_raw_fd(), relative)?;
+        .strip_prefix(trusted_root)
+        .map_err(|_| NamespaceError::UntrustedSource)?;
+    let source_fd = if relative.as_os_str().is_empty() {
+        root_fd.try_clone().map_err(NamespaceError::Io)?
+    } else {
+        open_beneath(root_fd.as_raw_fd(), relative)?
+    };
     let mount_fd = clone_mount(source_fd.as_raw_fd())?;
-    attach_mount(mount_fd.as_raw_fd(), target)?;
 
     if read_only {
-        let target = path_cstring(target)?;
-        let status = unsafe {
-            libc::mount(
-                std::ptr::null(),
-                target.as_ptr(),
-                std::ptr::null(),
-                libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-                std::ptr::null(),
-            )
-        };
-        if status == -1 {
-            return Err(io::Error::last_os_error().into());
-        }
+        set_mount_read_only(mount_fd.as_raw_fd())?;
     }
 
+    let target_root_fd = open_path(Path::new("/"))?;
+    let target_relative = target
+        .strip_prefix("/")
+        .map_err(|_| NamespaceError::InvalidPath)?;
+    let target_fd = if target_relative.as_os_str().is_empty() {
+        return Err(NamespaceError::InvalidPath);
+    } else {
+        open_beneath(target_root_fd.as_raw_fd(), target_relative)?
+    };
+
+    attach_mount(mount_fd.as_raw_fd(), target_fd.as_raw_fd())?;
     Ok(())
 }
 
@@ -123,17 +146,40 @@ fn clone_mount(source_fd: libc::c_int) -> Result<OwnedFd, NamespaceError> {
 }
 
 #[cfg(target_os = "linux")]
-fn attach_mount(mount_fd: libc::c_int, target: &Path) -> Result<(), NamespaceError> {
+fn set_mount_read_only(mount_fd: libc::c_int) -> Result<(), NamespaceError> {
+    let mut attr = MountAttr {
+        attr_set: MOUNT_ATTR_RDONLY,
+        attr_clr: 0,
+        propagation: 0,
+        userns_fd: 0,
+    };
+    let status = unsafe {
+        libc::syscall(
+            libc::SYS_mount_setattr,
+            mount_fd,
+            [0_u8].as_ptr(),
+            AT_EMPTY_PATH,
+            &mut attr as *mut MountAttr,
+            std::mem::size_of::<MountAttr>(),
+        ) as libc::c_int
+    };
+    if status == -1 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn attach_mount(mount_fd: libc::c_int, target_fd: libc::c_int) -> Result<(), NamespaceError> {
     let empty = [0_u8];
-    let target = path_cstring(target)?;
     let status = unsafe {
         libc::syscall(
             libc::SYS_move_mount,
             mount_fd,
             empty.as_ptr(),
-            libc::AT_FDCWD,
-            target.as_ptr(),
-            MOVE_MOUNT_F_EMPTY_PATH,
+            target_fd,
+            empty.as_ptr(),
+            (MOVE_MOUNT_F_EMPTY_PATH | MOVE_MOUNT_T_EMPTY_PATH) as libc::c_uint,
         ) as libc::c_int
     };
     if status == -1 {
@@ -156,6 +202,15 @@ struct OpenHow {
 }
 
 #[cfg(target_os = "linux")]
+#[repr(C)]
+struct MountAttr {
+    attr_set: u64,
+    attr_clr: u64,
+    propagation: u64,
+    userns_fd: u64,
+}
+
+#[cfg(target_os = "linux")]
 const AT_EMPTY_PATH: u32 = 0x1000;
 #[cfg(target_os = "linux")]
 const OPEN_TREE_CLONE: u32 = 0x0000_0001;
@@ -163,6 +218,10 @@ const OPEN_TREE_CLONE: u32 = 0x0000_0001;
 const OPEN_TREE_CLOEXEC: u32 = libc::O_CLOEXEC as u32;
 #[cfg(target_os = "linux")]
 const MOVE_MOUNT_F_EMPTY_PATH: u32 = 0x0000_0004;
+#[cfg(target_os = "linux")]
+const MOVE_MOUNT_T_EMPTY_PATH: u32 = 0x0000_0040;
+#[cfg(target_os = "linux")]
+const MOUNT_ATTR_RDONLY: u64 = 0x0000_0001;
 #[cfg(target_os = "linux")]
 const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
 #[cfg(target_os = "linux")]
