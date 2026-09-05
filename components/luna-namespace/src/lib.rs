@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 
 use landlock::{
     Access, AccessFs, ABI, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetStatus,
+    RulesetCreatedAttr, RulesetStatus,
 };
 use luna_common::ResourceAccess;
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
@@ -302,7 +302,7 @@ impl LogicalRoot {
 fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, NamespaceError> {
     let mut access: Option<landlock::BitFlags<AccessFs>> = None;
     let mut add = |right: AccessFs| {
-        let flags = right.into();
+        let flags: landlock::BitFlags<AccessFs> = right.into();
         access = Some(access.take().unwrap_or_default() | flags);
     };
 
