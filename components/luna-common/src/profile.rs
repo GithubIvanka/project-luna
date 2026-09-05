@@ -113,21 +113,34 @@ mod tests {
         assert_eq!(resources[1].0, "/lib");
         assert_eq!(resources[2].0, "/lib64");
         assert_eq!(resources[3].0, "/usr");
-        assert_eq!(resources[0].1.iter().copied().collect::<Vec<_>>(), vec![ResourceAccess::Read]);
+        assert_eq!(
+            resources[0].1.iter().copied().collect::<Vec<_>>(),
+            vec![ResourceAccess::Read]
+        );
     }
 
     #[test]
     fn profile_rejects_traversal_and_root() {
         let mut profile = RuntimeProfile::new("test").unwrap();
-        assert!(profile.add_resource("usr/bin", [ResourceAccess::Read]).is_err());
-        assert!(profile.add_resource("/usr/../etc", [ResourceAccess::Read]).is_err());
+        assert!(
+            profile
+                .add_resource("usr/bin", [ResourceAccess::Read])
+                .is_err()
+        );
+        assert!(
+            profile
+                .add_resource("/usr/../etc", [ResourceAccess::Read])
+                .is_err()
+        );
         assert!(profile.add_resource("/", [ResourceAccess::Read]).is_err());
     }
 
     #[test]
     fn duplicate_resources_replace_with_explicit_access() {
         let mut profile = RuntimeProfile::new("test").unwrap();
-        profile.add_resource("/usr", [ResourceAccess::Read]).unwrap();
+        profile
+            .add_resource("/usr", [ResourceAccess::Read])
+            .unwrap();
         profile
             .add_resource("/usr", [ResourceAccess::Read, ResourceAccess::Execute])
             .unwrap();
