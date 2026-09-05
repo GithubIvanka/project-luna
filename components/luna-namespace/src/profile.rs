@@ -1,10 +1,10 @@
-//! Profile-driven System Image materialization.
+//! Profile-driven logical-root materialization.
 //!
-//! The legacy `materialize_logical_root` API creates a full System Image
-//! lower layer. The production launch path must not expose that entire tree;
-//! this module overlays an empty runtime root and explicitly binds only the
-//! resources named by `RuntimeProfile` plus already-authorized application
-//! mappings.
+//! The production launch path creates the Linux-compatible `/` as a fresh
+//! tmpfs root. System Image content remains physically on the hidden SYSTEM
+//! partition and is exposed only through explicit read-only bind mappings
+//! selected by `RuntimeProfile`. No System Image tree is copied or overlaid
+//! into a persistent filesystem tree.
 
 use std::ffi::CString;
 use std::fs;
@@ -24,11 +24,17 @@ pub fn materialize_profiled_logical_root(
     mappings: &MappingTable,
     profile: &RuntimeProfile,
 ) -> Result<LogicalRoot, NamespaceError> {
-    let logical = namespace.materialize_logical_root(root, base_root, mappings)?;
+    if !base_root.is_dir() {
+        return Err(NamespaceError::MissingBaseRoot);
+    }
 
-    // Hide the full legacy lower tree behind a fresh empty tmpfs root. The
-    // resulting root is populated only by explicit profile and application
-    // mounts below.
+    fs::create_dir_all(root)?;
+    if fs::read_dir(root)?.next().is_some() {
+        return Err(NamespaceError::RootNotEmpty);
+    }
+
+    // The logical Linux `/` is RAM-backed. `root` is only a mountpoint on the
+    // host filesystem; all visible root contents live in this tmpfs mount.
     mount_tmpfs(root)?;
 
     for (logical_path, access) in profile.resources() {
@@ -94,7 +100,15 @@ pub fn materialize_profiled_logical_root(
         Some("mode=1777"),
     )?;
 
-    Ok(logical)
+    Ok(LogicalRoot {
+        path: root.to_path_buf(),
+        // There is deliberately no persistent OverlayFS upper/work tree for
+        // this root. `support` is the mountpoint parent for lifecycle/cleanup.
+        support: root
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| Path::new("/").to_path_buf()),
+    })
 }
 
 fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
