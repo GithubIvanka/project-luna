@@ -188,8 +188,11 @@ mod tests {
 
     #[test]
     fn resource_access_is_explicit_and_deterministic() {
-        let resource = BundleResource::new("/data/file", "data/file")
-            .with_access([ResourceAccess::Write, ResourceAccess::Read, ResourceAccess::Read]);
+        let resource = BundleResource::new("/data/file", "data/file").with_access([
+            ResourceAccess::Write,
+            ResourceAccess::Read,
+            ResourceAccess::Read,
+        ]);
         assert_eq!(
             resource.access().iter().copied().collect::<Vec<_>>(),
             vec![ResourceAccess::Read, ResourceAccess::Write]
