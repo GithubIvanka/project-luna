@@ -2,8 +2,8 @@
 //!
 //! Authorization is intentionally completed before this module is entered.
 //! The launcher only consumes an `AuthorizedApplicationPlan`, validates that
-//! its mapping/capability declarations still match execution policy, builds a
-//! profile-driven logical root in a private mount namespace, installs
+//! its mapping/capability declarations still match execution policy, builds
+//! a profile-driven logical root in a private mount namespace, installs
 //! filesystem enforcement, and registers the supervised process.
 
 use std::fs;
@@ -192,7 +192,6 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             LinuxMountNamespace::enter_private()
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             let logical = materialize_profiled_logical_root(
-                &namespace,
                 &root_for_child,
                 &base_root,
                 &trusted_source_roots,
