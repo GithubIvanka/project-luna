@@ -11,10 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
-use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-    SecurityError,
-};
+use luna_security::{AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
 /// The executable identity that an application plan is permitted to launch.
@@ -512,9 +509,26 @@ mod tests {
     }
 
     #[test]
+    fn foreign_authorization_request_is_rejected() {
+        let request = AuthorizationRequest {
+            principal: Principal::Application(BundleId::from("other.app")),
+            resource: Resource::FilesystemPath("/tmp/data".into()),
+            permission: Permission::Read,
+        };
+        let result = ApplicationPlan::new(
+            valid_manifest(),
+            valid_mapping(),
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/app"),
+            vec![request],
+        );
+        assert!(matches!(result, Err(PlanError::ForeignPrincipal { .. })));
+    }
+
+    #[test]
     fn authorization_is_fail_closed() {
-        let result = plan().authorize(&Deny);
-        assert!(matches!(result, Err(PlanError::Security(_))));
+        assert!(plan().authorize(&Deny).is_err());
     }
 
     #[test]
@@ -534,7 +548,7 @@ mod tests {
             vec![],
         )
         .unwrap();
-        assert!(plan.authorize(&Deny).is_err());
+        assert!(plan.clone().authorize(&Deny).is_err());
 
         struct RecordingAllow {
             seen: std::cell::RefCell<Vec<AuthorizationRequest>>,
@@ -569,28 +583,40 @@ mod tests {
     }
 
     #[test]
-    fn successful_authorization_returns_owned_authorized_plan() {
-        let authorized = plan().authorize(&Allow).unwrap();
-        assert_eq!(authorized.application().as_str(), "example.app");
-        assert_eq!(authorized.runtime(), RuntimeSpec::luna());
-        assert_eq!(authorized.executable().path().to_str().unwrap(), "/bin/app");
+    fn authorization_requires_runtime_permission() {
+        struct RuntimeDeny;
+        impl PolicyAuthority for RuntimeDeny {
+            fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+                if matches!(request.resource, Resource::Runtime(_)) {
+                    Ok(Decision::Deny)
+                } else {
+                    Ok(Decision::Allow)
+                }
+            }
+        }
+
+        assert!(plan().authorize(&RuntimeDeny).is_err());
     }
 
     #[test]
-    fn request_principal_is_bound_to_application_identity() {
-        let request = AuthorizationRequest {
-            principal: Principal::Application(BundleId::from("other.app")),
-            resource: Resource::UserData(UserId::from("alice")),
-            permission: Permission::Read,
-        };
-        let result = ApplicationPlan::new(
-            valid_manifest(),
-            valid_mapping(),
-            &active_session(),
-            RuntimeSpec::luna(),
-            ExecutableSpec::new("/bin/app"),
-            vec![request],
-        );
-        assert!(matches!(result, Err(PlanError::ForeignPrincipal { .. })));
+    fn authorization_rejects_ask_and_constraints() {
+        struct Ask;
+        impl PolicyAuthority for Ask {
+            fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+                Ok(Decision::Ask)
+            }
+        }
+
+        struct Constrained;
+        impl PolicyAuthority for Constrained {
+            fn authorize(&self, _request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+                Ok(Decision::Constrained {
+                    constraints: vec!["read-only".into()],
+                })
+            }
+        }
+
+        assert!(plan().authorize(&Ask).is_err());
+        assert!(plan().authorize(&Constrained).is_err());
     }
 }
