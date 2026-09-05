@@ -1,14 +1,15 @@
 //! Logical filesystem mapping primitives for Project Luna.
 //!
 //! A mapping table belongs to one logical filesystem namespace. Rules map
-//! logical resources to backing paths; authorization is deliberately outside
+//! logical resources to backing paths and carry the declarative access mode
+//! that the execution layer must enforce. Authorization is deliberately outside
 //! this crate and belongs to `luna-security`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use luna_common::RuntimeKind;
+use luna_common::{ResourceAccess, RuntimeKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct LogicalPath(String);
@@ -99,6 +100,7 @@ pub struct MappingRule {
     logical: LogicalPath,
     physical: PhysicalPath,
     kind: MappingKind,
+    access: BTreeSet<ResourceAccess>,
 }
 
 impl MappingRule {
@@ -111,6 +113,7 @@ impl MappingRule {
             logical,
             physical,
             kind: MappingKind::File,
+            access: BTreeSet::new(),
         }
     }
 
@@ -119,7 +122,16 @@ impl MappingRule {
             logical,
             physical,
             kind: MappingKind::Subtree,
+            access: BTreeSet::new(),
         }
+    }
+
+    pub fn with_access<I>(mut self, access: I) -> Self
+    where
+        I: IntoIterator<Item = ResourceAccess>,
+    {
+        self.access.extend(access);
+        self
     }
 
     pub fn logical(&self) -> &LogicalPath {
@@ -132,6 +144,10 @@ impl MappingRule {
 
     pub fn kind(&self) -> MappingKind {
         self.kind
+    }
+
+    pub fn access(&self) -> &BTreeSet<ResourceAccess> {
+        &self.access
     }
 }
 
@@ -214,8 +230,8 @@ impl MappingTable {
     }
 
     /// Returns whether this plan is compatible with the requested runtime.
-    /// Runtime-neutral plans are accepted so legacy mapping construction can be
-    /// migrated incrementally; a bound plan must match exactly.
+    /// Runtime-neutral plans are accepted so mapping construction can remain
+    /// reusable until an execution plan binds the runtime.
     pub fn accepts_runtime(&self, runtime: RuntimeKind) -> bool {
         self.runtime.is_none() || self.runtime == Some(runtime)
     }
@@ -329,8 +345,10 @@ fn path_depth(path: &Path) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath};
-    use luna_common::RuntimeKind;
+    use super::{
+        LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath,
+    };
+    use luna_common::{ResourceAccess, RuntimeKind};
     use std::path::Path;
 
     #[test]
@@ -351,6 +369,17 @@ mod tests {
             .insert(MappingRule::new(logical.clone(), physical.clone()))
             .unwrap();
         assert_eq!(table.resolve(&logical).unwrap(), physical);
+    }
+
+    #[test]
+    fn mapping_access_is_explicit_and_deterministic() {
+        let logical = LogicalPath::new("/data/file").unwrap();
+        let rule = MappingRule::file(logical, PhysicalPath::new("/data/file"))
+            .with_access([ResourceAccess::Write, ResourceAccess::Read, ResourceAccess::Read]);
+        assert_eq!(
+            rule.access().iter().copied().collect::<Vec<_>>(),
+            vec![ResourceAccess::Read, ResourceAccess::Write]
+        );
     }
 
     #[test]
