@@ -181,9 +181,7 @@ impl fmt::Display for MappingError {
             Self::RuntimeConflict {
                 existing,
                 requested,
-            } => {
-                return write!(f, "mapping runtime conflict: {existing} vs {requested}");
-            }
+            } => return write!(f, "mapping runtime conflict: {existing} vs {requested}"),
         };
         f.write_str(message)
     }
@@ -220,7 +218,10 @@ impl MappingTable {
                 Ok(())
             }
             Some(existing) if existing == runtime => Ok(()),
-            Some(existing) => Err(MappingError::RuntimeConflict { existing, requested: runtime }),
+            Some(existing) => Err(MappingError::RuntimeConflict {
+                existing,
+                requested: runtime,
+            }),
         }
     }
 
@@ -446,7 +447,7 @@ mod tests {
             table.bind_runtime(RuntimeKind::Bundle),
             Err(MappingError::RuntimeConflict {
                 existing: RuntimeKind::Glibc,
-                requested: RuntimeKind::Bundle
+                requested: RuntimeKind::Bundle,
             })
         );
         let materialized = table.materialize().unwrap();
