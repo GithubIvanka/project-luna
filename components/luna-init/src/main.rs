@@ -34,8 +34,6 @@ const BOOTSTRAP_PATHS: &[&str] = &[
     "/usr/bin/setpriv",
 ];
 
-const BOOTSTRAP_DIRECTORIES: &[&str] = &["/etc/luna"];
-
 fn main() -> ! {
     if let Err(error) = run() {
         eprintln!("luna-init: {error}");
@@ -133,11 +131,8 @@ fn prepare_root() -> Result<(), String> {
             .parent()
             .ok_or_else(|| format!("bootstrap destination has no parent: {destination:?}"))?;
         mkdir(&parent.to_string_lossy())?;
-
-        if BOOTSTRAP_DIRECTORIES.contains(path) {
-            mkdir(&destination.to_string_lossy())?;
-        }
     }
+
     for directory in ["proc", "sys", "dev", "run", "tmp"] {
         mkdir(&format!("{NEWROOT}/{directory}"))?;
     }
@@ -277,7 +272,7 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_DIRECTORIES, BOOTSTRAP_PATHS};
+    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS};
 
     #[test]
     fn parses_boot_device_from_cmdline() {
@@ -303,7 +298,6 @@ mod tests {
     #[test]
     fn bootstrap_is_an_explicit_subset() {
         assert!(BOOTSTRAP_PATHS.contains(&"/sbin/luna-system-runtime"));
-        assert!(BOOTSTRAP_DIRECTORIES.contains(&"/etc/luna"));
         assert!(!BOOTSTRAP_PATHS.contains(&"/usr/share"));
     }
 }
