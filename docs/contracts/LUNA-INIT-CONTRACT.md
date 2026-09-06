@@ -46,6 +46,8 @@ SYSTEM/images/luna-X.Y.Z.toml
 
 It does not make that SquashFS the final Linux root and does not use classic `switch_root` to turn it into `/`.
 
+The SYSTEM filesystem and selected image remain mounted as internal runtime sources after bootstrap. Their mount points live inside the runtime `/run` tree so they survive the final `chroot`. `luna-init` transfers responsibility for their lifetime to `luna-system-runtime` and the future hydration layer; it must not eagerly unmount them merely because initial materialization has completed.
+
 ## 4. Runtime root
 
 The final logical `/` is backed by a dedicated tmpfs mounted on the root staging point before DATA is attached.
@@ -89,9 +91,13 @@ active process
 
 A resource that has been materialized into the active runtime must remain usable independently of the lifetime of the original System Image mount.
 
+The original source is therefore kept available while runtime state may still require hydration from it. Source unmounting is a lifecycle decision made by the runtime/hydration layer, not by `luna-init` immediately after bootstrap.
+
 Lazy hydration must not expose SYSTEM paths to applications.
 
 The exact request/lookup protocol for lazy hydration is a separate implementation task, but it must use the same trust and path-validation rules as the boot path.
+
+Lazy eviction is a separate concern: it may only reclaim RAM-backed resources after the runtime has a complete strategy for open file descriptors, mappings, process dependencies, and rehydration. It is not implied by source unmounting.
 
 ## 7. Runtime pseudo-filesystems
 
@@ -117,12 +123,14 @@ Its physical hierarchy is hidden behind the logical runtime mapping model.
 
 ## 9. Transfer of control
 
-Once the logical root and required runtime filesystems are ready, `luna-init` validates `/sbin/init`, unmounts the immutable source and SYSTEM mounts, and executes BusyBox `chroot` into the RAM-backed root. The chroot then executes `/sbin/init`, which is the `luna-system-runtime` binary in the materialized root.
+Once the logical root and required runtime filesystems are ready, `luna-init` validates `/sbin/init`, leaves the SYSTEM and image source mounts attached, and executes BusyBox `chroot` into the RAM-backed root. The chroot then executes `/sbin/init`, which is the `luna-system-runtime` binary in the materialized root.
 
 The intended steady-state model is:
 
 ```text
 PID 1 → luna-system-runtime
+       │
+       └── owns source/hydration lifecycle
 ```
 
 `luna-init` is a bootstrap component, not a second long-lived system manager.
@@ -157,7 +165,7 @@ A PID namespace is not mandatory for ApplicationInstance isolation. By default a
 
 A mandatory bootstrap failure must stop normal boot and enter the appropriate recovery/emergency path.
 
-The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path. The current implementation performs source unmounts before the final chroot; complete rollback/recovery cleanup remains a hardening item.
+The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path. After successful handoff, source mount lifetime belongs to the runtime/hydration layer rather than `luna-init`.
 
 ## 12. Current implementation status
 
@@ -167,10 +175,10 @@ Current implementation provides:
 
 - dedicated tmpfs root;
 - explicit bootstrap subset rather than whole-image copy;
-- immutable SquashFS mounted only at an internal source location;
+- immutable SquashFS kept as an internal source;
 - independent DATA attachment under logical `/data`;
 - runtime-generated `/dev`, `/proc`, `/sys`, `/run` and `/tmp`;
-- source/SYSTEM unmount before control transfer;
+- SYSTEM and selected image mounted inside the runtime root so they survive `chroot`;
 - final `chroot` to the RAM-backed root;
 - preservation of `luna-system-runtime` as PID 1.
 
@@ -178,7 +186,8 @@ Remaining implementation work includes:
 
 - manifest-driven boot-critical materialization/dependency closure;
 - secure file/tree materialization for all supported object types;
-- lazy hydration service/protocol;
+- lazy hydration service/protocol and source lifetime manager;
 - final `/dev` policy;
 - privileged end-to-end boot tests;
-- integration of image-retirement checks with runtime materialization state.
+- integration of image-retirement checks with runtime materialization state;
+- lazy eviction with complete FD/mmap/process dependency tracking.
