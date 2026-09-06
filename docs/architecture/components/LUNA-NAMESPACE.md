@@ -8,14 +8,16 @@
 
 ## Владеет
 
-- создание и настройкой private mount namespace;
+- созданием и настройкой private mount namespace;
 - controlled bind mounts;
 - подготовкой RAM-backed logical root;
 - transactional cleanup materialized resources при ошибке;
 - низкоуровневой materialization части Root Mapping;
 - kernel-level filesystem enforcement через Landlock;
 - безопасным FD-based подключением доверенных физических источников;
-- PID-namespace boundary, когда она включена в execution profile.
+- policy-driven Linux isolation primitives, когда они явно включены в execution profile.
+
+`luna-namespace` не владеет отдельным application init/supervisor process. `luna-app-runtime` запускает приложение непосредственно как `ApplicationInstance`, а `luna-system-runtime` остаётся единственным системным supervisor/PID 1.
 
 ## Обязательный порядок
 
@@ -45,19 +47,23 @@ System Image остаётся внутренним immutable source. В logical 
 
 Boot/runtime system materialization использует ту же принципиальную модель: boot-critical immutable system content предварительно materializes в RAM, дополнительные immutable resources могут быть hydrated lazily, а volatile paths (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) создаются runtime-механизмами. Ни один application process не получает физический SYSTEM path как свой `/`.
 
-## PID namespace
+## Process/PID model
 
-При включённой PID isolation приложение не становится PID 1.
+PID isolation не является обязательной частью текущей модели ApplicationInstance.
 
 ```text
-application PID namespace
-├── PID 1 → Luna namespace supervisor/init
-└── PID 2+ → application process tree
+system PID namespace
+└── PID 1 → luna-system-runtime
+    ├── system/runtime processes
+    ├── UserSession processes
+    └── ApplicationInstance → application process
 ```
 
-PID 1 используется для child reaping, signal/lifecycle boundary и удержания namespace supervisor semantics. Реальный application executable запускается как PID 2 или выше.
+`luna-app-runtime` — архитектурный runtime-компонент, а не дополнительный PID 1. Нет `luna-app-init` и нет отдельного namespace supervisor process между `luna-app-runtime` и приложением.
 
-Это не security-through-obscurity механизм: приложение всё равно не должно полагаться на конкретные PID values для security. Требование PID 2+ существует как правильная Linux lifecycle/supervision модель и исключает назначение application процесса специальной роли PID 1.
+Приложение запускается непосредственно как обычный process, поэтому ему не назначается специальная роль PID 1 и оно получает обычный системный PID. Это также не является security-through-obscurity механизмом: изоляция обеспечивается mount namespace, policy-driven namespaces, cgroups и kernel security controls, а не сокрытием PID.
+
+Если отдельный PID namespace когда-либо понадобится для конкретного требования, его семантика должна быть оформлена отдельным архитектурным решением и не должна автоматически создавать новый runtime layer.
 
 ## Безопасное подключение физических ресурсов
 
@@ -110,11 +116,11 @@ Declared `Read`, `Write` и `Execute` permissions преобразуются в 
 
 ## Не владеет
 
-Authorization policy, Bundle parsing, UserSession lifecycle, process supervision, UEFI или пользовательским UI.
+Authorization policy, Bundle parsing, UserSession lifecycle, system process supervision, UEFI или пользовательским UI.
 
 ## Linux mechanisms
 
-В основе используются существующие kernel primitives: mount namespaces, PID namespaces where enabled, tmpfs, bind mounts, `openat2`, `open_tree`, `mount_setattr`, `move_mount`, chroot и Landlock. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
+В основе используются существующие kernel primitives: mount namespaces, policy-driven Linux namespaces, tmpfs, bind mounts, `openat2`, `open_tree`, `mount_setattr`, `move_mount`, chroot и Landlock. `cgroups v2`, seccomp и дополнительные namespaces подключаются только через соответствующие contracts.
 
 ## Ошибки
 
@@ -126,9 +132,8 @@ Authorization policy, Bundle parsing, UserSession lifecycle, process supervision
 
 ## Открыто
 
-- PID namespace supervisor/child-spawn implementation;
-- точная signal/reaping semantics PID 1 supervisor;
 - lazy System Image hydration/materialization implementation;
 - полноценный filtered `/dev`;
+- production child-creation primitive для namespace setup, если текущий `pre_exec` path будет заменён;
 - production handling ошибок mount и восстановления после аварийного завершения процесса;
-- privileged Linux integration tests для реального unshare/mount/chroot/Landlock/PID path.
+- privileged Linux integration tests для реального unshare/mount/chroot/Landlock path.
