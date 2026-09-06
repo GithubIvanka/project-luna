@@ -1,10 +1,10 @@
 # Project Luna — Runtime Integration Decisions
 
-**Дата:** 2026-09-01  
-**Статус:** принято как текущая реализационная фиксация  
+**Дата исходного решения:** 2026-09-01  
+**Статус:** частично SUPERSEDED  
 **Архитектурный SoT:** `docs/ARCHITECTURE.md`
 
-Этот файл фиксирует решения текущего перехода к интегрированному runtime/bootable userspace. Он не заменяет Source of Truth.
+Этот файл сохраняет решения текущего перехода к интегрированному runtime. Формулировки boot path, которые зависели от `switch_root`, заменены принятой RAM-backed `luna-init` моделью. Файл не заменяет Source of Truth.
 
 ## 1. Единственный владелец process supervision
 
@@ -15,13 +15,24 @@
 
 `ApplicationInstanceId` не равен PID. Процесс — технический runtime resource, `ApplicationInstance` — доменная сущность Luna. Текущий bring-up использует один основной process handle; модель допускает несколько процессов в одном instance.
 
+Принятая текущая PID-модель:
+
+```text
+PID 1 → luna-system-runtime
+ApplicationInstance → обычный system process с non-1 PID
+```
+
+Отдельного `luna-app-init` нет. PID namespace не является обязательным механизмом isolation.
+
 ## 3. Namespace boundary
 
 Security authorization и Mapping validation завершаются до materialization. Текущий child-side namespace setup — временный integration backend; до production/multithreaded use он должен быть заменён безопасным dedicated child-creation primitive.
 
+Mount namespace isolation остаётся обязательной. Другие namespaces выбираются policy/runtime profile.
+
 ## 4. Bootable userspace
 
-Разработческий QEMU путь проверяет:
+Старый путь:
 
 ```text
 luna-boot.efi
@@ -36,9 +47,22 @@ luna-boot.efi
 → shell
 ```
 
+**Устарел.** Принятый путь:
+
+```text
+luna-boot.efi
+→ Linux kernel
+→ luna-init
+→ internal immutable SquashFS source
+→ RAM-backed logical /
+→ luna-system-runtime (PID 1)
+→ UserSession
+→ shell / graphical session
+```
+
 ## 5. Development storage
 
-Тестовый QEMU disk содержит отдельные EFI, SYSTEM и DATA области. DATA монтируется как `/data` внутри logical root.
+Тестовый QEMU disk содержит отдельные EFI, SYSTEM и DATA области. DATA подключается в logical runtime root согласно текущему mapping/bootstrap contract.
 
 ## 6. Runtime process lifecycle
 
@@ -58,7 +82,7 @@ Staging namespace resources удаляются после завершения �
 
 ## 7. PID 1 development behaviour
 
-`luna-system-runtime` как development init поддерживает продолжение runtime после завершения пользовательского shell и может создать новую UserSession/shell. `LUNA_NO_RESPAWN=1` разрешена только для bring-up/debugging.
+`luna-system-runtime` как system PID 1 владеет основным process supervision lifecycle. Development-поведение с respawn пользовательского shell допускается только как bring-up/debugging механизм и не изменяет архитектурную модель application execution.
 
 ## 8. Status discipline
 
@@ -66,7 +90,7 @@ Staging namespace resources удаляются после завершения �
 
 ## 9. Rust ownership rule
 
-Владелец системного процесса один — `system-runtime`. Остальные компоненты работают через typed API и не дублируют ownership системных процессов.
+Владелец системного process supervision один — `system-runtime`. Остальные компоненты работают через typed API и не дублируют ownership системных процессов.
 
 ## 10. Scope
 
