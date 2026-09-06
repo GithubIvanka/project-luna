@@ -48,7 +48,7 @@ It does not make that SquashFS the final Linux root and does not use classic `sw
 
 ## 4. Runtime root
 
-The final logical `/` is backed by RAM, normally by a dedicated tmpfs inside the Luna runtime mount namespace.
+The final logical `/` is backed by a dedicated tmpfs mounted on the root staging point before DATA is attached.
 
 The initial root must contain at least:
 
@@ -67,11 +67,11 @@ Physical SYSTEM and DATA paths are not part of the application-facing filesystem
 
 The selected System Image is the source for an explicit boot-critical materialization set.
 
+The current implementation keeps this set as an explicit bootstrap list in `luna-init` rather than copying the complete System Image. The set includes the native system supervisor, its bootstrap configuration, and the graphical-session entry points required by the current PC development image.
+
+For each resource, `luna-init` validates presence in the mounted immutable source and copies it into the RAM-backed root while preserving normal file/symlink semantics through BusyBox `cp -a`. The complete dependency closure is still an open hardening requirement for production images.
+
 The implementation must not copy the entire System Image into RAM merely to simplify bootstrap.
-
-The boot-critical set must be deterministic for a given System Image manifest/runtime profile and must include the complete dependency closure required to start `luna-system-runtime` and the initial required system path.
-
-Materialization must preserve the semantics required by the boot-critical files, including regular-file contents, executable mode and required ownership/permissions. Unsafe or unsupported filesystem object types must fail closed rather than being silently converted.
 
 ## 6. Lazy hydration
 
@@ -117,7 +117,7 @@ Its physical hierarchy is hidden behind the logical runtime mapping model.
 
 ## 9. Transfer of control
 
-Once the logical root and required runtime filesystems are ready, `luna-init` starts `luna-system-runtime` as the normal userspace supervisor.
+Once the logical root and required runtime filesystems are ready, `luna-init` validates `/sbin/init`, unmounts the immutable source and SYSTEM mounts, and executes BusyBox `chroot` into the RAM-backed root. The chroot then executes `/sbin/init`, which is the `luna-system-runtime` binary in the materialized root.
 
 The intended steady-state model is:
 
@@ -157,18 +157,28 @@ A PID namespace is not mandatory for ApplicationInstance isolation. By default a
 
 A mandatory bootstrap failure must stop normal boot and enter the appropriate recovery/emergency path.
 
-The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path.
+The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path. The current implementation performs source unmounts before the final chroot; complete rollback/recovery cleanup remains a hardening item.
 
 ## 12. Current implementation status
 
-The repository currently contains a historical `switch_root` prototype in `components/luna-init/src/main.rs`. That code is explicitly not the final architecture described by this contract.
+The historical `switch_root` implementation has been replaced on `develop` by the first RAM-root bootstrap implementation.
+
+Current implementation provides:
+
+- dedicated tmpfs root;
+- explicit bootstrap subset rather than whole-image copy;
+- immutable SquashFS mounted only at an internal source location;
+- independent DATA attachment under logical `/data`;
+- runtime-generated `/dev`, `/proc`, `/sys`, `/run` and `/tmp`;
+- source/SYSTEM unmount before control transfer;
+- final `chroot` to the RAM-backed root;
+- preservation of `luna-system-runtime` as PID 1.
 
 Remaining implementation work includes:
 
-- boot-critical materialization manifest/dependency closure;
-- RAM-root constructor;
-- secure file/tree materialization from the internal System Image source;
+- manifest-driven boot-critical materialization/dependency closure;
+- secure file/tree materialization for all supported object types;
 - lazy hydration service/protocol;
 - final `/dev` policy;
 - privileged end-to-end boot tests;
-- removal of the historical `switch_root` path after the replacement is integrated into the PC/QEMU image builder.
+- integration of image-retirement checks with runtime materialization state.
