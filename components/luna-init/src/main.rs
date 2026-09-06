@@ -1,17 +1,37 @@
 //! Native Luna early-userspace initializer.
 //!
-//! `luna-init` prepares the final root and replaces itself with the final
-//! `/sbin/init`. The final init is `luna-system-runtime`.
+//! `luna-init` owns only early bootstrap. It constructs a RAM-backed logical
+//! root from a selected immutable System Image, mounts runtime pseudo-filesystems
+//! and then execs `luna-system-runtime` from that RAM root.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 const BUSYBOX: &str = "/bin/busybox";
 const SYSTEM_MOUNT: &str = "/run/luna-system";
 const NEWROOT: &str = "/newroot";
 const DATA_MOUNT: &str = "/newroot/data";
+
+/// The first userspace base is deliberately explicit rather than a copy of the
+/// complete System Image. Later resources can be hydrated by the runtime layer.
+const BOOTSTRAP_PATHS: &[&str] = &[
+    "/bin/busybox",
+    "/sbin/luna-system-runtime",
+    "/sbin/init",
+    "/etc/os-release",
+    "/etc/hostname",
+    "/etc/passwd",
+    "/etc/group",
+    "/etc/shadow",
+    "/etc/profile",
+    "/etc/luna",
+    "/usr/bin/luna-login",
+    "/usr/bin/niri-session",
+    "/usr/bin/setpriv",
+];
 
 fn main() -> ! {
     if let Err(error) = run() {
@@ -28,15 +48,8 @@ fn run() -> Result<(), String> {
         .or_else(|_| mount("devtmpfs", "/dev", "tmpfs", "mode=0755,nosuid"))?;
 
     mkdir(SYSTEM_MOUNT)?;
+    mkdir(NEWROOT)?;
     mkdir(DATA_MOUNT)?;
-    for path in [
-        &format!("{NEWROOT}/proc"),
-        &format!("{NEWROOT}/sys"),
-        &format!("{NEWROOT}/dev"),
-        &format!("{NEWROOT}/run"),
-    ] {
-        mkdir(path)?;
-    }
 
     let content = fs::read_to_string("/proc/cmdline").unwrap_or_default();
     let system_device = cmdline_value(&content, "luna.system_device")
@@ -53,19 +66,119 @@ fn run() -> Result<(), String> {
         return Err(format!("selected System Image not found: {image_path}"));
     }
 
-    mount_loop_squashfs(&image_path, NEWROOT)?;
+    let image_mount = "/run/luna-image";
+    mkdir(image_mount)?;
+    mount_loop_squashfs(&image_path, image_mount)?;
 
-    move_mount("/dev", &format!("{NEWROOT}/dev"))?;
-    move_mount("/proc", &format!("{NEWROOT}/proc"))?;
-    move_mount("/sys", &format!("{NEWROOT}/sys"))?;
-    move_mount(SYSTEM_MOUNT, &format!("{NEWROOT}/run/luna-system"))?;
+    prepare_root()?;
+    materialize_bootstrap(image_mount, NEWROOT)?;
+
+    mount("proc", &format!("{NEWROOT}/proc"), "proc", "nosuid,nodev,noexec")?;
+    mount(
+        "sysfs",
+        &format!("{NEWROOT}/sys"),
+        "sysfs",
+        "ro,nosuid,nodev,noexec",
+    )?;
+    mount(
+        "devtmpfs",
+        &format!("{NEWROOT}/dev"),
+        "devtmpfs",
+        "mode=0755,nosuid",
+    )
+    .or_else(|_| {
+        mount(
+            "devtmpfs",
+            &format!("{NEWROOT}/dev"),
+            "tmpfs",
+            "mode=0755,nosuid",
+        )
+    })?;
+    mount(
+        "tmpfs",
+        &format!("{NEWROOT}/run"),
+        "tmpfs",
+        "mode=0755,nosuid,nodev",
+    )?;
+    mount(
+        "tmpfs",
+        &format!("{NEWROOT}/tmp"),
+        "tmpfs",
+        "mode=1777,nosuid,nodev",
+    )?;
+
+    unmount(image_mount)?;
+    unmount(SYSTEM_MOUNT)?;
+    unmount("/proc")?;
+    unmount("/sys")?;
+    unmount("/dev")?;
 
     let init = format!("{NEWROOT}/sbin/init");
     if !is_executable(&init) {
-        return Err("final System Image has no executable /sbin/init".to_owned());
+        return Err("RAM-backed root has no executable /sbin/init".to_owned());
     }
 
-    exec_switch_root(NEWROOT, "/sbin/init")
+    exec_chroot(NEWROOT, "/sbin/init")
+}
+
+fn prepare_root() -> Result<(), String> {
+    for path in BOOTSTRAP_PATHS {
+        let relative = path.strip_prefix('/').unwrap_or(path);
+        let destination = Path::new(NEWROOT).join(relative);
+        if path == &"/bin/busybox"
+            || path == &"/sbin/luna-system-runtime"
+            || path == &"/sbin/init"
+            || path == &"/etc/os-release"
+            || path == &"/etc/hostname"
+            || path == &"/etc/passwd"
+            || path == &"/etc/group"
+            || path == &"/etc/shadow"
+            || path == &"/etc/profile"
+        {
+            if let Some(parent) = destination.parent() {
+                mkdir(&parent.to_string_lossy())?;
+            }
+        } else {
+            mkdir(&destination.to_string_lossy())?;
+        }
+    }
+    for directory in ["proc", "sys", "dev", "run", "tmp", "data"] {
+        mkdir(&format!("{NEWROOT}/{directory}"))?;
+    }
+    Ok(())
+}
+
+fn materialize_bootstrap(source_root: &str, destination_root: &str) -> Result<(), String> {
+    for path in BOOTSTRAP_PATHS {
+        let source = format!("{source_root}{path}");
+        let destination = PathBuf::from(destination_root).join(
+            path.strip_prefix('/')
+                .ok_or_else(|| format!("invalid bootstrap path: {path}"))?,
+        );
+
+        if !fs::symlink_metadata(&source).is_ok() {
+            return Err(format!("bootstrap resource missing from System Image: {path}"));
+        }
+
+        let destination_parent = destination
+            .parent()
+            .ok_or_else(|| format!("bootstrap destination has no parent: {destination:?}"))?;
+        mkdir(&destination_parent.to_string_lossy())?;
+        copy_recursive(&source, &destination)?;
+    }
+    Ok(())
+}
+
+fn copy_recursive(source: &str, destination: &Path) -> Result<(), String> {
+    let status = Command::new(BUSYBOX)
+        .args(["cp", "-a", source])
+        .arg(destination)
+        .status()
+        .map_err(|e| format!("copy {source} -> {}: {e}", destination.display()))?;
+    require_success(
+        status,
+        &format!("copy {source} -> {}", destination.display()),
+    )
 }
 
 fn mkdir(path: &str) -> Result<(), String> {
@@ -138,19 +251,19 @@ fn mount_loop_squashfs(image: &str, target: &str) -> Result<(), String> {
     mount(image, target, "squashfs", "ro,loop")
 }
 
-fn move_mount(source: &str, target: &str) -> Result<(), String> {
+fn unmount(target: &str) -> Result<(), String> {
     let status = Command::new(BUSYBOX)
-        .args(["mount", "--move", source, target])
+        .args(["umount", "-l", target])
         .status()
-        .map_err(|e| format!("move mount {source} -> {target}: {e}"))?;
-    require_success(status, &format!("move mount {source} -> {target}"))
+        .map_err(|e| format!("unmount {target}: {e}"))?;
+    require_success(status, &format!("unmount {target}"))
 }
 
-fn exec_switch_root(newroot: &str, init: &str) -> Result<(), String> {
+fn exec_chroot(newroot: &str, init: &str) -> Result<(), String> {
     let error = Command::new(BUSYBOX)
-        .args(["switch_root", "-c", "/dev/console", newroot, init])
+        .args(["chroot", newroot, init])
         .exec();
-    Err(format!("exec switch_root failed: {error}"))
+    Err(format!("exec chroot failed: {error}"))
 }
 
 fn require_success(status: ExitStatus, operation: &str) -> Result<(), String> {
@@ -168,7 +281,7 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_value, system_image_from_cmdline};
+    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS};
 
     #[test]
     fn parses_boot_device_from_cmdline() {
@@ -189,5 +302,12 @@ mod tests {
     fn rejects_path_traversal_in_system_image() {
         let error = system_image_from_cmdline("luna.system_image=/images/../data/x.squashfs");
         assert!(error.is_err());
+    }
+
+    #[test]
+    fn bootstrap_is_an_explicit_subset() {
+        assert!(BOOTSTRAP_PATHS.contains(&"/sbin/luna-system-runtime"));
+        assert!(BOOTSTRAP_PATHS.contains(&"/etc/luna"));
+        assert!(!BOOTSTRAP_PATHS.contains(&"/usr/share"));
     }
 }
