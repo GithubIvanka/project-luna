@@ -1,6 +1,6 @@
 # Project Luna — план разработки операционной системы
 
-**Статус:** рабочий план на ветке `develop`.
+**Статус:** рабочий план на ветке `develop`.  
 **Архитектурный источник истины:** `docs/ARCHITECTURE.md`.
 
 Этот документ переводит текущую архитектуру в порядок инженерной реализации. Он не создаёт новые архитектурные границы сам по себе. Если выполнение пункта требует изменения принятого решения, сначала оформляется отдельное архитектурное решение.
@@ -20,9 +20,9 @@ luna-boot.efi
   ↓
 luna-init
   ↓
-logical /
+RAM-backed logical /
   ↓
-luna-system-runtime
+luna-system-runtime (PID 1)
   ↓
 graphical login
   ↓
@@ -49,9 +49,10 @@ shutdown / reboot / resume
 - `KERNEL-CONTRACT.md`;
 - `BOOT-STATE-CONTRACT.md`;
 - `BOOT-HANDOFF-CONTRACT.md`;
-- `FAILURE-RECOVERY-CONTRACT.md`.
+- `FAILURE-RECOVERY-CONTRACT.md`;
+- `LUNA-INIT-CONTRACT.md`.
 
-Все они пока являются черновиками.
+Контракт `LUNA-INIT-CONTRACT.md` фиксирует RAM-backed root bootstrap, внутренний immutable System Image source и отсутствие `switch_root` как целевой модели.
 
 ## Этап 1 — загрузка
 
@@ -69,16 +70,25 @@ shutdown / reboot / resume
 
 ## Этап 2 — ранний userspace и logical root
 
-Цель: `luna-init` подготавливает SYSTEM/DATA и передаёт управление `luna-system-runtime` после `switch_root`.
+Цель: `luna-init` создаёт RAM-backed logical `/`, подготавливает минимальный runtime и передаёт управление `luna-system-runtime` без превращения SquashFS в постоянный `/`.
 
-Нужно проверить:
+Нужно реализовать и проверить:
 
 - поиск SYSTEM/DATA;
-- доступ к SquashFS;
-- построение logical `/`;
-- подключение DATA;
-- минимальный `/dev`, `/proc`, `/sys`;
-- устойчивый handoff.
+- валидацию selected System Image и adjacent manifest;
+- подключение System Image как внутреннего read-only source;
+- deterministic boot-critical materialization set;
+- RAM-backed logical `/`;
+- runtime `/dev`, `/proc`, `/sys`, `/run`, `/tmp`;
+- controlled DATA exposure;
+- отсутствие classic `switch_root` handoff;
+- устойчивый handoff в `luna-system-runtime` PID 1.
+
+Отдельно:
+
+- lazy hydration дополнительных immutable resources;
+- проверка независимости materialized resources от lifetime source image;
+- privileged end-to-end tests.
 
 ## Этап 3 — system runtime и состояние
 
@@ -125,19 +135,21 @@ shutdown / reboot / resume
 Bundle declaration
   ↓
 ApplicationPlan
-  ↓
-MappingPlan
-  ↓
+  ↓ validate
 luna-security
+  ↓ Allow
+AuthorizedApplicationPlan
+  ↓
+ApplicationLaunchContext + RuntimeProfile
   ↓
 luna-namespace
-  ↓
-luna-app-runtime
   ↓
 ApplicationInstance
 ```
 
 Security обязателен до materialization. Ошибка policy — fail closed.
+
+`luna-app-runtime` не создаёт отдельный `luna-app-init`. ApplicationInstance запускается непосредственно как application process. PID namespace не является обязательной частью текущего execution model; mount namespace и остальные isolation primitives определяются policy/runtime profile.
 
 ## Этап 8 — обновление и восстановление
 
@@ -149,7 +161,8 @@ Security обязателен до materialization. Ошибка policy — fail
 - soft fallback;
 - Factory;
 - Recovery;
-- retention.
+- retention;
+- proof that active runtime resources are independent from an image before image removal.
 
 ## Этап 9 — production hardware
 
