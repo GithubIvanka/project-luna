@@ -1,9 +1,10 @@
 //! Native Luna early-userspace initializer.
 //!
 //! `luna-init` owns only early bootstrap. It constructs the RAM-backed logical
-//! root directly, attaches DATA at logical `/data`, and keeps SYSTEM/SquashFS
-//! as hidden immutable source mounts outside the future logical root.
+//! root directly, attaches DATA at logical `/`, and keeps SYSTEM/SquashFS as
+//! hidden immutable source mounts outside the future logical root.
 
+use std::ffi::CString;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
@@ -298,8 +299,8 @@ fn clear_cloexec(fd: i32) -> Result<(), String> {
 }
 
 fn pivot_root() -> Result<(), String> {
-    let new_root = std::ffi::CString::new("/").map_err(|_| "invalid new root".to_owned())?;
-    let put_old = std::ffi::CString::new(OLDROOT)
+    let new_root = CString::new(NEWROOT).map_err(|_| "invalid new root".to_owned())?;
+    let put_old = CString::new(OLDROOT)
         .map_err(|_| "invalid old root path".to_owned())?;
 
     unsafe extern "C" {
@@ -311,13 +312,9 @@ fn pivot_root() -> Result<(), String> {
         return Err(format!("pivot_root failed: errno {}", -result));
     }
 
-    let status = Command::new(BUSYBOX)
-        .args(["sh", "-c", "cd / && true"])
-        .status()
-        .map_err(|e| format!("set logical root cwd: {e}"))?;
-    require_success(status, "set logical root cwd")?;
+    std::env::set_current_dir("/").map_err(|e| format!("set logical root cwd: {e}"))?;
 
-    let old_root = std::ffi::CString::new("/.luna-oldroot")
+    let old_root = CString::new("/.luna-oldroot")
         .map_err(|_| "invalid old root path".to_owned())?;
     let result = unsafe { syscall(SYS_UMOUNT2, old_root.as_ptr(), MNT_DETACH) };
     if result != 0 {
