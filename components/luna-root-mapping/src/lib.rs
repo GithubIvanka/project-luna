@@ -178,10 +178,9 @@ impl fmt::Display for MappingError {
             Self::DuplicateLogicalPath => "logical path is already mapped",
             Self::NotMapped => "logical path is not mapped",
             Self::ConflictingPhysicalPath => "logical path has conflicting physical mappings",
-            Self::RuntimeConflict {
-                existing,
-                requested,
-            } => return write!(f, "mapping runtime conflict: {existing} vs {requested}"),
+            Self::RuntimeConflict { existing, requested } => {
+                return write!(f, "mapping runtime conflict: {existing} vs {requested}");
+            }
         };
         f.write_str(message)
     }
@@ -246,7 +245,17 @@ impl MappingTable {
 
     /// Resolves a logical resource to its physical backing path.
     pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
-        Ok(self.resolve_rule(logical)?.physical.clone())
+        let rule = self.resolve_rule(logical)?;
+        match rule.kind {
+            MappingKind::File => Ok(rule.physical.clone()),
+            MappingKind::Subtree => {
+                let relative = logical
+                    .as_path()
+                    .strip_prefix(rule.logical.as_path())
+                    .map_err(|_| MappingError::NotMapped)?;
+                Ok(PhysicalPath::new(rule.physical.as_path().join(relative)))
+            }
+        }
     }
 
     /// Resolves a logical resource to the mapping rule responsible for it.
