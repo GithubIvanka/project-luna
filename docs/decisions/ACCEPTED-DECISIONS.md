@@ -1,7 +1,7 @@
 # Project Luna — Accepted Architecture Decisions
 
 **Status:** canonical accepted-decision ledger  
-**Current through:** 2026-09-05  
+**Current through:** 2026-09-06  
 **Authoritative current architecture:** `docs/ARCHITECTURE.md`  
 **Purpose:** one compact record of the accepted outcomes from the architecture discussion. Historical phase files and ADRs remain traceability records; they do not override this ledger or the Source of Truth.
 
@@ -88,7 +88,7 @@ DATA/
 - `luna-boot.efi` is a separate boot-specific component outside the normal userspace workspace.
 - Normal boot is quiet and does not wait for a persistent menu.
 - Pressing `B` during the boot window opens the boot menu.
-- The normal boot path is UEFI → `luna-boot.efi` → compatible kernel → Luna System Image → RAM/logical root → `luna-system-runtime` → UserSession(s).
+- The normal boot path is UEFI → `luna-boot.efi` → compatible kernel → `luna-init` → RAM-backed logical `/` → `luna-system-runtime` → UserSession(s).
 - Boot selection uses System Image manifests and kernel compatibility metadata.
 - Boot state is separate from System State and Recovery State.
 - Boot state changes only on relevant events, not on every ordinary boot.
@@ -234,12 +234,14 @@ luna-system-runtime
 - Each ApplicationInstance receives an isolated filesystem/mount namespace.
 - Linux namespaces are implementation primitives, not the user-facing architecture.
 - Mount namespace isolation is mandatory for application filesystem separation.
-- User namespace, network namespace, IPC/UTS/time isolation and other primitives remain policy-driven according to the application's resource/security profile.
-- A PID namespace is part of the application isolation/supervision boundary where process isolation is enabled.
-- Application isolation must preserve the appearance of a conventional Linux filesystem rather than expose container implementation details.
-- The application process must never intentionally run as PID 1 in its application PID namespace.
-- PID 1 is reserved for the Luna namespace supervisor/init, which owns child reaping, namespace lifetime and supervision duties.
-- The actual application starts at PID 2 or a later PID in that namespace.
+- User namespace, network namespace, IPC/UTS/time isolation and other primitives are policy-driven according to the application's resource/security profile.
+- A PID namespace is **not required by default** for ApplicationInstance isolation.
+- `luna-system-runtime` is the single system-wide supervisor and is PID 1 of the normal Luna userspace process namespace.
+- `luna-app-runtime` is an architectural/runtime component, not an additional init process or application PID-1 supervisor.
+- The application is launched directly as the process represented by `ApplicationInstance`; under the default model it remains in the normal system PID namespace and receives an ordinary non-1 host PID.
+- There is no `luna-app-init` component.
+- If a PID namespace is later introduced for a specific requirement, that change requires a separate architecture decision; it must not silently add a new runtime layer.
+- Application isolation must preserve the appearance of a conventional Linux filesystem/process environment rather than expose container implementation details.
 - The application must not receive `CAP_SYS_ADMIN` or equivalent host-level privilege by default.
 - `cgroups v2` is the accepted resource-control primitive.
 
@@ -406,4 +408,5 @@ Phase 1.4 — accepted
 Phase 1.5 — accepted
 Phase 1.6 — accepted through the HZ decision set and subsequent accepted clarifications
 RFC-0002 Bundle Format v1 — accepted
+RAM-backed logical root / luna-init bootstrap — accepted architecture; implementation still in progress
 ```
