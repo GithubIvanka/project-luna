@@ -1,10 +1,157 @@
-use std::collections::BTreeMap;
+//! Logical filesystem mapping primitives for Project Luna.
+//!
+//! A mapping table belongs to one logical filesystem namespace. Rules map
+//! logical resources to backing paths and carry the declarative access mode
+//! that the execution layer must enforce. Authorization is deliberately outside
+//! this crate and belongs to `luna-security`.
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use luna_common::{ResourceAccess, RuntimeKind};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct LogicalPath(String);
+
+impl LogicalPath {
+    /// Creates a canonical Linux-style logical path.
+    ///
+    /// This performs lexical normalization only. It never follows symlinks or
+    /// consults the host filesystem.
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, MappingError> {
+        let path = path.as_ref();
+        if !path.is_absolute() {
+            return Err(MappingError::NotAbsolute);
+        }
+
+        let mut normalized = String::from("/");
+        let mut first = true;
+
+        for component in path.components() {
+            match component {
+                Component::RootDir => {}
+                Component::CurDir => {}
+                Component::ParentDir => return Err(MappingError::ParentTraversal),
+                Component::Normal(value) => {
+                    let value = value.to_str().ok_or(MappingError::NonUtf8Path)?;
+                    if !first {
+                        normalized.push('/');
+                    }
+                    normalized.push_str(value);
+                    first = false;
+                }
+                Component::Prefix(_) => return Err(MappingError::InvalidPrefix),
+            }
+        }
+
+        if first {
+            normalized.clear();
+            normalized.push('/');
+        }
+
+        Ok(Self(normalized))
+    }
+
+    pub fn root() -> Self {
+        Self("/".to_owned())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn as_path(&self) -> &Path {
+        Path::new(&self.0)
+    }
+}
+
+impl fmt::Display for LogicalPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct PhysicalPath(PathBuf);
+
+impl PhysicalPath {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum MappingKind {
+    File,
+    Subtree,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MappingRule {
+    logical: LogicalPath,
+    physical: PhysicalPath,
+    kind: MappingKind,
+    access: BTreeSet<ResourceAccess>,
+}
+
+impl MappingRule {
+    pub fn new(logical: LogicalPath, physical: PhysicalPath) -> Self {
+        Self::file(logical, physical)
+    }
+
+    pub fn file(logical: LogicalPath, physical: PhysicalPath) -> Self {
+        Self {
+            logical,
+            physical,
+            kind: MappingKind::File,
+            access: BTreeSet::new(),
+        }
+    }
+
+    pub fn subtree(logical: LogicalPath, physical: PhysicalPath) -> Self {
+        Self {
+            logical,
+            physical,
+            kind: MappingKind::Subtree,
+            access: BTreeSet::new(),
+        }
+    }
+
+    pub fn with_access<I>(mut self, access: I) -> Self
+    where
+        I: IntoIterator<Item = ResourceAccess>,
+    {
+        self.access.extend(access);
+        self
+    }
+
+    pub fn logical(&self) -> &LogicalPath {
+        &self.logical
+    }
+
+    pub fn physical(&self) -> &PhysicalPath {
+        &self.physical
+    }
+
+    pub fn kind(&self) -> MappingKind {
+        self.kind
+    }
+
+    pub fn access(&self) -> &BTreeSet<ResourceAccess> {
+        &self.access
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MappingError {
     NotAbsolute,
     TrailingSlash,
@@ -44,104 +191,9 @@ impl fmt::Display for MappingError {
 
 impl std::error::Error for MappingError {}
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LogicalPath(PathBuf);
-
-impl LogicalPath {
-    pub fn new(path: impl Into<PathBuf>) -> Result<Self, MappingError> {
-        let path = path.into();
-        if !path.is_absolute() {
-            return Err(MappingError::NotAbsolute);
-        }
-        if path.to_string_lossy().ends_with('/') && path != Path::new("/") {
-            return Err(MappingError::TrailingSlash);
-        }
-        if path.components().any(|component| matches!(component, Component::ParentDir)) {
-            return Err(MappingError::ParentTraversal);
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, Component::Prefix(_)))
-        {
-            return Err(MappingError::InvalidPrefix);
-        }
-        if path.to_str().is_none() {
-            return Err(MappingError::NonUtf8Path);
-        }
-        Ok(Self(path))
-    }
-
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl fmt::Display for LogicalPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.display().fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PhysicalPath(PathBuf);
-
-impl PhysicalPath {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self(path.into())
-    }
-
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl fmt::Display for PhysicalPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.display().fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MappingKind {
-    File,
-    Subtree,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MappingRule {
-    pub logical: LogicalPath,
-    pub physical: PhysicalPath,
-    pub kind: MappingKind,
-    pub access: std::collections::BTreeSet<ResourceAccess>,
-}
-
-impl MappingRule {
-    pub fn new(
-        logical: LogicalPath,
-        physical: PhysicalPath,
-        kind: MappingKind,
-    ) -> Self {
-        Self {
-            logical,
-            physical,
-            kind,
-            access: std::collections::BTreeSet::new(),
-        }
-    }
-
-    pub fn with_access(mut self, access: impl IntoIterator<Item = ResourceAccess>) -> Self {
-        self.access.extend(access);
-        self
-    }
-
-    pub fn access(&self) -> &std::collections::BTreeSet<ResourceAccess> {
-        &self.access
-    }
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MappingTable {
-    rules: BTreeMap<LogicalPath, MappingRule>,
+    rules: Vec<MappingRule>,
     runtime: Option<RuntimeKind>,
 }
 
@@ -150,45 +202,45 @@ impl MappingTable {
         Self::default()
     }
 
-    pub fn with_runtime(mut self, runtime: RuntimeKind) -> Self {
-        self.runtime = Some(runtime);
-        self
+    pub fn with_runtime(runtime: RuntimeKind) -> Self {
+        Self {
+            rules: Vec::new(),
+            runtime: Some(runtime),
+        }
+    }
+
+    /// Bind this mapping plan to exactly one execution runtime.
+    ///
+    /// A mapping plan may be runtime-neutral while it is being assembled. Once
+    /// accepted for execution, changing its runtime is rejected.
+    pub fn bind_runtime(&mut self, runtime: RuntimeKind) -> Result<(), MappingError> {
+        match self.runtime {
+            None => {
+                self.runtime = Some(runtime);
+                Ok(())
+            }
+            Some(existing) if existing == runtime => Ok(()),
+            Some(existing) => Err(MappingError::RuntimeConflict { existing, requested: runtime }),
+        }
+    }
+
+    pub fn runtime(&self) -> Option<RuntimeKind> {
+        self.runtime
+    }
+
+    /// Returns whether this plan is compatible with the requested runtime.
+    /// Runtime-neutral plans are accepted so mapping construction can remain
+    /// reusable until an execution plan binds the runtime.
+    pub fn accepts_runtime(&self, runtime: RuntimeKind) -> bool {
+        self.runtime.is_none() || self.runtime == Some(runtime)
     }
 
     pub fn insert(&mut self, rule: MappingRule) -> Result<(), MappingError> {
-        if self.rules.contains_key(&rule.logical) {
+        if self.rules.iter().any(|item| item.logical == rule.logical) {
             return Err(MappingError::DuplicateLogicalPath);
         }
-        if let Some(existing_runtime) = self.runtime {
-            let requested_runtime = self.runtime_for_rule(&rule);
-            if requested_runtime != existing_runtime {
-                return Err(MappingError::RuntimeConflict {
-                    existing: existing_runtime,
-                    requested: requested_runtime,
-                });
-            }
-        }
-        self.rules.insert(rule.logical.clone(), rule);
+        self.rules.push(rule);
         Ok(())
-    }
-
-    fn runtime_for_rule(&self, _rule: &MappingRule) -> RuntimeKind {
-        self.runtime.unwrap_or(RuntimeKind::Luna)
-    }
-
-    pub fn resolve_rule(&self, logical: &LogicalPath) -> Result<&MappingRule, MappingError> {
-        if let Some(rule) = self.rules.get(logical) {
-            return Ok(rule);
-        }
-
-        self.rules
-            .values()
-            .filter(|rule| {
-                matches!(rule.kind, MappingKind::Subtree)
-                    && logical.as_path().starts_with(rule.logical.as_path())
-            })
-            .max_by_key(|rule| rule.logical.as_path().components().count())
-            .ok_or(MappingError::NotMapped)
     }
 
     /// Resolves a logical resource to its physical backing path.
@@ -206,91 +258,226 @@ impl MappingTable {
         }
     }
 
-    pub fn rules(&self) -> impl Iterator<Item = &MappingRule> {
-        self.rules.values()
+    /// Resolves a logical resource to the mapping rule responsible for it.
+    pub fn resolve_rule(&self, logical: &LogicalPath) -> Result<&MappingRule, MappingError> {
+        if let Some(rule) = self.rules.iter().find(|rule| rule.logical == *logical) {
+            return Ok(rule);
+        }
+
+        self.rules
+            .iter()
+            .filter(|rule| rule.kind == MappingKind::Subtree)
+            .filter(|rule| is_descendant(logical.as_path(), rule.logical.as_path()))
+            .max_by_key(|rule| path_depth(rule.logical.as_path()))
+            .ok_or(MappingError::NotMapped)
     }
 
-    pub fn materialize(&self) -> Result<(), MappingError> {
-        for rule in self.rules.values() {
-            if rule.logical.as_path() == Path::new("/") && matches!(rule.kind, MappingKind::File) {
+    /// Produces a deterministic namespace description without making Linux
+    /// mount calls. The OS-specific backend lives in `luna-namespace`.
+    pub fn materialize(&self) -> Result<MaterializedNamespace, MappingError> {
+        let mut entries = BTreeMap::new();
+        for rule in &self.rules {
+            if entries
+                .insert(rule.logical.clone(), rule.physical.clone())
+                .is_some()
+            {
                 return Err(MappingError::ConflictingPhysicalPath);
             }
         }
-        Ok(())
+        Ok(MaterializedNamespace {
+            entries,
+            runtime: self.runtime,
+        })
     }
 
-    pub fn accepts_runtime(&self, runtime: RuntimeKind) -> bool {
-        self.runtime.is_none_or(|expected| expected == runtime)
+    pub fn remove(&mut self, logical: &LogicalPath) -> Result<MappingRule, MappingError> {
+        let index = self
+            .rules
+            .iter()
+            .position(|rule| rule.logical == *logical)
+            .ok_or(MappingError::NotMapped)?;
+        Ok(self.rules.remove(index))
     }
+
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &MappingRule> {
+        self.rules.iter()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MaterializedNamespace {
+    entries: BTreeMap<LogicalPath, PhysicalPath>,
+    runtime: Option<RuntimeKind>,
+}
+
+impl MaterializedNamespace {
+    pub fn resolve(&self, logical: &LogicalPath) -> Result<&PhysicalPath, MappingError> {
+        self.entries.get(logical).ok_or(MappingError::NotMapped)
+    }
+
+    pub fn runtime(&self) -> Option<RuntimeKind> {
+        self.runtime
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&LogicalPath, &PhysicalPath)> {
+        self.entries.iter()
+    }
+}
+
+fn is_descendant(candidate: &Path, parent: &Path) -> bool {
+    candidate != parent && candidate.starts_with(parent)
+}
+
+fn path_depth(path: &Path) -> usize {
+    path.components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LogicalPath, MappingKind, MappingRule, MappingTable, PhysicalPath};
+    use super::{LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath};
     use luna_common::{ResourceAccess, RuntimeKind};
+    use std::path::Path;
 
-    fn logical(path: &str) -> LogicalPath {
-        LogicalPath::new(path).unwrap()
+    #[test]
+    fn logical_path_is_lexically_normalized() {
+        let path = LogicalPath::new("/etc//./app/../config");
+        assert_eq!(path, Err(MappingError::ParentTraversal));
+
+        let path = LogicalPath::new("/etc//./app").unwrap();
+        assert_eq!(path.as_str(), "/etc/app");
     }
 
     #[test]
-    fn explicit_file_mapping_resolves() {
-        let mut table = MappingTable::new().with_runtime(RuntimeKind::Luna);
+    fn exact_file_mapping_resolves() {
+        let logical = LogicalPath::new("/bin/app").unwrap();
+        let physical = PhysicalPath::new("/data/system/apps/example/resources/bin/app");
+        let mut table = MappingTable::new();
         table
-            .insert(
-                MappingRule::new(
-                    logical("/bin/app"),
-                    PhysicalPath::new("/data/apps/app/bin"),
-                    MappingKind::File,
-                )
-                .with_access([ResourceAccess::Execute]),
-            )
+            .insert(MappingRule::new(logical.clone(), physical.clone()))
             .unwrap();
+        assert_eq!(table.resolve(&logical).unwrap(), physical);
+    }
 
+    #[test]
+    fn mapping_access_is_explicit_and_deterministic() {
+        let logical = LogicalPath::new("/data/file").unwrap();
+        let rule = MappingRule::file(logical, PhysicalPath::new("/data/file")).with_access([
+            ResourceAccess::Write,
+            ResourceAccess::Read,
+            ResourceAccess::Read,
+        ]);
         assert_eq!(
-            table.resolve(&logical("/bin/app")).unwrap().as_path(),
-            std::path::Path::new("/data/apps/app/bin")
+            rule.access().iter().copied().collect::<Vec<_>>(),
+            vec![ResourceAccess::Read, ResourceAccess::Write]
         );
+    }
+
+    #[test]
+    fn resolve_rule_returns_most_specific_subtree() {
+        let mut table = MappingTable::new();
+        table
+            .insert(MappingRule::subtree(
+                LogicalPath::new("/data").unwrap(),
+                PhysicalPath::new("/one"),
+            ))
+            .unwrap();
+        table
+            .insert(MappingRule::subtree(
+                LogicalPath::new("/data/app").unwrap(),
+                PhysicalPath::new("/two"),
+            ))
+            .unwrap();
+        let rule = table
+            .resolve_rule(&LogicalPath::new("/data/app/file").unwrap())
+            .unwrap();
+        assert_eq!(rule.physical().as_path(), Path::new("/two"));
     }
 
     #[test]
     fn explicit_subtree_mapping_resolves_descendants() {
+        let logical = LogicalPath::new("/lib/gtk").unwrap();
+        let child = LogicalPath::new("/lib/gtk/libgtk.so").unwrap();
+        let nested = LogicalPath::new("/lib/gtk/themes/default.ini").unwrap();
+        let outside = LogicalPath::new("/lib/gtk4.so").unwrap();
+        let physical = PhysicalPath::new("/data/system/libs/gtk/4");
         let mut table = MappingTable::new();
         table
-            .insert(MappingRule::new(
-                logical("/lib/gtk"),
-                PhysicalPath::new("/data/system/libs/gtk/4"),
-                MappingKind::Subtree,
-            ))
+            .insert(MappingRule::subtree(logical, physical))
             .unwrap();
-
+        assert_eq!(table.iter().next().unwrap().kind(), MappingKind::Subtree);
         assert_eq!(
-            table.resolve(&logical("/lib/gtk/libgtk.so")).unwrap().as_path(),
-            std::path::Path::new("/data/system/libs/gtk/4/libgtk.so")
+            table.resolve(&child).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/libgtk.so")
+        );
+        assert_eq!(
+            table.resolve(&nested).unwrap().as_path(),
+            Path::new("/data/system/libs/gtk/4/themes/default.ini")
+        );
+        assert_eq!(table.resolve(&outside), Err(MappingError::NotMapped));
+    }
+
+    #[test]
+    fn runtime_binding_is_immutable_after_first_choice() {
+        let mut table = MappingTable::new();
+        assert_eq!(table.runtime(), None);
+        table.bind_runtime(RuntimeKind::Glibc).unwrap();
+        assert!(table.accepts_runtime(RuntimeKind::Glibc));
+        assert!(!table.accepts_runtime(RuntimeKind::Luna));
+        table.bind_runtime(RuntimeKind::Glibc).unwrap();
+        assert_eq!(
+            table.bind_runtime(RuntimeKind::Bundle),
+            Err(MappingError::RuntimeConflict {
+                existing: RuntimeKind::Glibc,
+                requested: RuntimeKind::Bundle
+            })
+        );
+        let materialized = table.materialize().unwrap();
+        assert_eq!(materialized.runtime(), Some(RuntimeKind::Glibc));
+    }
+
+    #[test]
+    fn unsafe_logical_paths_are_rejected() {
+        assert_eq!(LogicalPath::new("etc/app"), Err(MappingError::NotAbsolute));
+        assert_eq!(
+            LogicalPath::new("/etc/../secret"),
+            Err(MappingError::ParentTraversal)
         );
     }
 
     #[test]
-    fn narrower_subtree_wins() {
+    fn namespace_materialization_is_deterministic() {
         let mut table = MappingTable::new();
+        let a = LogicalPath::new("/a").unwrap();
+        let b = LogicalPath::new("/b").unwrap();
         table
-            .insert(MappingRule::new(
-                logical("/lib"),
-                PhysicalPath::new("/data/lib"),
-                MappingKind::Subtree,
-            ))
+            .insert(MappingRule::new(a.clone(), PhysicalPath::new("/data/a")))
             .unwrap();
         table
-            .insert(MappingRule::new(
-                logical("/lib/gtk"),
-                PhysicalPath::new("/data/gtk"),
-                MappingKind::Subtree,
-            ))
+            .insert(MappingRule::new(b, PhysicalPath::new("/data/b")))
             .unwrap();
-
+        let namespace = table.materialize().unwrap();
+        assert_eq!(namespace.len(), 2);
         assert_eq!(
-            table.resolve(&logical("/lib/gtk/libgtk.so")).unwrap().as_path(),
-            std::path::Path::new("/data/gtk/libgtk.so")
+            namespace.resolve(&a).unwrap().as_path(),
+            Path::new("/data/a")
         );
     }
 }
