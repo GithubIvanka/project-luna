@@ -84,10 +84,25 @@ A resource already materialized into the active runtime remains valid independen
 - System Image content is materialized eagerly only for the boot-critical base and lazily thereafter where appropriate.
 - System Image paths remain internal implementation details.
 
+## Implementation status
+
+The current `develop` implementation has completed the early-userspace RAM-root handoff described by this ADR:
+
+- `luna-init` creates a dedicated tmpfs at `/newroot` for the logical `/`.
+- SYSTEM and the selected SquashFS image are mounted as internal read-only sources.
+- DATA is mounted independently at logical `/data`.
+- A bounded boot-critical resource set is copied into the RAM root before handoff.
+- `/proc`, `/sys`, `/dev`, `/run` and `/tmp` are created as runtime state.
+- The immutable image source and SYSTEM are detached before control is transferred into the RAM root.
+- `luna-init` finishes with a `chroot` into the RAM root and executes `/sbin/init`, which is `luna-system-runtime`.
+
+This is intentionally not the final implementation of hydration. The current bootstrap set is explicit and conservative; it does not yet provide a complete manifest-driven dependency closure for every runtime binary or desktop component.
+
 ## Open implementation work
 
-- replace the current early-userspace `switch_root` prototype with the RAM-root materialization path;
-- define the exact boot-critical materialization manifest and dependency closure;
+- define a versioned, manifest-driven boot-critical materialization contract;
+- compute and validate the required dependency closure so every bootstrap executable is independently runnable from the RAM root;
 - implement lazy immutable resource hydration without exposing SYSTEM paths;
+- preserve file metadata and object types for the full supported materialization set and make rollback transactional;
 - add privileged integration tests for RAM-root construction and application mount isolation;
 - integrate image-retirement checks with update/retention state.
