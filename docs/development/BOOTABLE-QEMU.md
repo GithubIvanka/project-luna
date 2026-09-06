@@ -14,24 +14,28 @@ Linux bzImage
  ↓
 CPIO/gzip early userspace
  ↓
-SYSTEM ext4
+luna-init
  ↓
-selected SquashFS System Image
+SYSTEM ext4 + selected SquashFS immutable source
+ ↓
+RAM-backed logical /
  ↓
 DATA ext4
- ↓
-switch_root
  ↓
 luna-system-runtime
  ↓
 UserSession
  ↓
-interactive shell
+interactive shell / graphical session
 ```
 
-Linux initramfs is explicitly intended to provide a first userspace that mounts
-the eventual root filesystem and then switches to it; this is the two-stage
-model used by the current Luna handoff.
+Luna uses initramfs as early userspace, but the final system root is not a
+persistent filesystem on disk. `luna-init` constructs a RAM-backed logical root
+from controlled sources and then starts `luna-system-runtime`.
+
+The selected System Image is mounted only as an internal immutable source while
+boot-critical resources are materialized. The architecture does not use a
+classic `switch_root` to make the SquashFS itself the final `/`.
 
 ## Host requirements
 
@@ -45,13 +49,12 @@ Install:
 - `mtools` (`mcopy`, `mmd`);
 - `mksquashfs`;
 - `cpio` and `gzip`;
-- a static x86_64 BusyBox binary with `mount`, `switch_root`, `sh` and the
-  normal filesystem utilities enabled.
+- a static x86_64 BusyBox binary with `mount`, `sh` and the normal early-userspace
+  filesystem utilities enabled.
 
 A static BusyBox is useful here because it can provide the small set of early
-userspace utilities without requiring a separate libc tree. BusyBox provides a
-`switch_root` applet specifically for replacing the initramfs root with the new
-root.
+userspace utilities without requiring a separate libc tree. It is an early
+bootstrap dependency, not the final system init architecture.
 
 ## Environment
 
@@ -98,31 +101,37 @@ kernels/test/initramfs.img
 images/luna-test.squashfs
 ```
 
-The DATA partition is mounted as `/data` after the selected System Image is
-mounted. The test image therefore exercises the same physical SYSTEM/DATA
-separation used by the architecture.
+The DATA partition remains physically separate from SYSTEM. The runtime view of
+DATA is assembled into the logical root according to Luna's mapping/runtime
+rules; physical SYSTEM/DATA paths are not the application-facing contract.
 
 ## Current early userspace
 
-`boot/luna-boot/tests/ovmf/luna-init` is deliberately a small shell-based
-bring-up implementation. It:
+The dedicated `components/luna-init` implementation is the canonical early
+userspace boundary. Its target behavior is:
 
-1. mounts `/proc`, `/sys` and `/dev`;
-2. mounts SYSTEM read-only;
-3. reads `luna.system_image=` from `/proc/cmdline`;
-4. loop-mounts the selected SquashFS image read-only;
-5. mounts DATA at `/newroot/data`;
-6. moves the early-userspace virtual filesystems into the new root;
-7. uses BusyBox `switch_root` to execute `/sbin/init` from the System Image.
+1. prepare `/proc`, `/sys`, `/dev`, `/run` and `/tmp` runtime filesystems;
+2. discover SYSTEM and DATA from `/proc/cmdline` / boot context;
+3. validate and mount SYSTEM read-only;
+4. locate and validate the selected SquashFS System Image;
+5. mount that image at an internal source location rather than making it the
+   final `/`;
+6. create the RAM-backed logical root;
+7. materialize the boot-critical system base into RAM;
+8. make DATA and other approved resources available through controlled runtime
+   mappings;
+9. start `luna-system-runtime` as the normal userspace supervisor/PID 1.
 
-The final dedicated `luna-init` implementation remains a later hardening step;
-the current script exists so the whole architecture can be exercised now.
+Additional immutable resources may be hydrated lazily after the initial base is
+ready. The exact boot-critical manifest/dependency closure and fully independent
+lazy hydration mechanism are still implementation work governed by the accepted
+RAM-hydration decision.
 
 ## Expected result
 
-After the kernel and boot messages, `luna-system-runtime` starts, creates the
-initial `UserSession`, and launches `/bin/sh` with inherited serial stdio.
-The QEMU terminal should therefore become an interactive Luna development shell.
+After the kernel and boot messages, `luna-system-runtime` starts and creates the
+initial `UserSession`. The QEMU terminal should therefore become the configured
+Luna development shell or graphical session path, depending on the test image.
 
 ## Important limitation
 
@@ -132,6 +141,12 @@ post-fork environment and warns against complex non-async-signal-safe work there
 It is acceptable for this single-process bring-up prototype, but it is **not**
 the final production process-launch mechanism.
 
-The next hardening step is a dedicated Linux child-creation primitive that can
-create the required namespace before normal runtime execution without relying
-on complex post-fork Rust operations.
+Application isolation does not use a separate `luna-app-init` component. The
+system-wide `luna-system-runtime` remains PID 1, while `luna-app-runtime` owns
+ApplicationInstance lifecycle and launches the application directly through the
+namespace/materialization boundary. A PID namespace is not required by the
+default application-isolation model.
+
+The next hardening step is a dedicated Linux child-creation/process setup
+primitive for the namespace operations that remain necessary, without creating
+an additional application init layer.
