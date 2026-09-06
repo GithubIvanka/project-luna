@@ -1,21 +1,27 @@
 //! Native Luna early-userspace initializer.
 //!
-//! `luna-init` owns only early bootstrap. It constructs a RAM-backed logical
-//! root from a selected immutable System Image, mounts runtime pseudo-filesystems
-//! and then execs `luna-system-runtime` from that RAM root.
+//! `luna-init` owns only early bootstrap. It constructs the RAM-backed logical
+//! root directly, attaches DATA at logical `/data`, and keeps SYSTEM/SquashFS
+//! as hidden immutable source mounts outside the future logical root.
 
-use std::fs;
+use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 const BUSYBOX: &str = "/bin/busybox";
 const NEWROOT: &str = "/newroot";
+const OLDROOT: &str = "/newroot/.luna-oldroot";
 const DATA_MOUNT: &str = "/newroot/data";
-const SOURCE_ROOT: &str = "/newroot/run/luna-source";
-const SYSTEM_MOUNT: &str = "/newroot/run/luna-source/system";
-const IMAGE_MOUNT: &str = "/newroot/run/luna-source/image";
+const SYSTEM_MOUNT: &str = "/luna-source/system";
+const IMAGE_MOUNT: &str = "/luna-source/image";
+const SYSTEM_SOURCE_FD_ENV: &str = "LUNA_SYSTEM_SOURCE_FD";
+const IMAGE_SOURCE_FD_ENV: &str = "LUNA_IMAGE_SOURCE_FD";
+const SYS_PIVOT_ROOT: usize = 155;
+const SYS_UMOUNT2: usize = 166;
+const MNT_DETACH: usize = 2;
 
 /// The first userspace base is deliberately explicit rather than a copy of the
 /// complete System Image. Later resources can be hydrated by the runtime layer.
@@ -57,10 +63,12 @@ fn run() -> Result<(), String> {
         "mode=0755,nosuid,nodev",
     )?;
     mkdir(DATA_MOUNT)?;
-    mkdir(SOURCE_ROOT)?;
+    mkdir("/luna-source")?;
+    mkdir(SYSTEM_MOUNT)?;
+    mkdir(IMAGE_MOUNT)?;
 
-    // `/run` is created before SYSTEM/image are mounted below it so the fresh
-    // runtime tmpfs does not hide the immutable source mounts later on.
+    // `/run` is normal volatile runtime state. It is not used as a container for
+    // SYSTEM or System Image sources; those sources remain outside the future `/`.
     mkdir(&format!("{NEWROOT}/run"))?;
     mount(
         "tmpfs",
@@ -68,9 +76,6 @@ fn run() -> Result<(), String> {
         "tmpfs",
         "mode=0755,nosuid,nodev",
     )?;
-    mkdir(SOURCE_ROOT)?;
-    mkdir(SYSTEM_MOUNT)?;
-    mkdir(IMAGE_MOUNT)?;
 
     let content = fs::read_to_string("/proc/cmdline").unwrap_or_default();
     let system_device = cmdline_value(&content, "luna.system_device")
@@ -78,6 +83,8 @@ fn run() -> Result<(), String> {
     let data_device = cmdline_value(&content, "luna.data_device")
         .unwrap_or_else(|| "LABEL=LUNA-DATA".to_owned());
 
+    // SYSTEM is physical immutable storage, never the logical root. DATA is
+    // independently attached to the RAM root and becomes logical `/data`.
     mount_device_spec(&system_device, SYSTEM_MOUNT, "ro")?;
     mount_device_spec(&data_device, DATA_MOUNT, "rw")?;
 
@@ -120,9 +127,16 @@ fn run() -> Result<(), String> {
         "mode=1777,nosuid,nodev",
     )?;
 
-    // The SYSTEM and selected image mounts intentionally survive bootstrap and
-    // the final chroot. They are internal immutable sources for later runtime
-    // hydration. Their lifetime is transferred to the runtime/hydration layer.
+    // Keep directory FDs for the immutable physical sources. After pivot_root
+    // the old initramfs tree is detached and inaccessible by path, while these
+    // FDs remain available only to the trusted system runtime for later hydration.
+    let system_source = File::open(SYSTEM_MOUNT)
+        .map_err(|e| format!("open SYSTEM source for runtime handoff: {e}"))?;
+    let image_source = File::open(IMAGE_MOUNT)
+        .map_err(|e| format!("open System Image source for runtime handoff: {e}"))?;
+    clear_cloexec(system_source.as_raw_fd())?;
+    clear_cloexec(image_source.as_raw_fd())?;
+
     let init = format!("{NEWROOT}/sbin/init");
     if !is_executable(&init) {
         return Err("RAM-backed root has no executable /sbin/init".to_owned());
@@ -131,8 +145,15 @@ fn run() -> Result<(), String> {
     unmount("/proc")?;
     unmount("/sys")?;
     unmount("/dev")?;
+    pivot_root()?
 
-    exec_chroot(NEWROOT, "/sbin/init")
+    // Source mounts are intentionally no longer reachable through a path from
+    // the logical root. The open FDs above keep the trusted source objects alive.
+    exec_init(
+        "/sbin/init",
+        system_source.as_raw_fd(),
+        image_source.as_raw_fd(),
+    )
 }
 
 fn prepare_root() -> Result<(), String> {
@@ -147,9 +168,10 @@ fn prepare_root() -> Result<(), String> {
         mkdir(&parent.to_string_lossy())?;
     }
 
-    for directory in ["proc", "sys", "dev", "tmp"] {
+    for directory in ["proc", "sys", "dev", "run", "tmp"] {
         mkdir(&format!("{NEWROOT}/{directory}"))?;
     }
+    mkdir(OLDROOT)?;
     Ok(())
 }
 
@@ -256,19 +278,61 @@ fn mount_loop_squashfs(image: &str, target: &str) -> Result<(), String> {
     mount(image, target, "squashfs", "ro,loop")
 }
 
-fn unmount(target: &str) -> Result<(), String> {
-    let status = Command::new(BUSYBOX)
-        .args(["umount", "-l", target])
-        .status()
-        .map_err(|e| format!("unmount {target}: {e}"))?;
-    require_success(status, &format!("unmount {target}"))
+fn clear_cloexec(fd: i32) -> Result<(), String> {
+    const F_GETFD: i32 = 1;
+    const F_SETFD: i32 = 2;
+    const FD_CLOEXEC: i32 = 1;
+
+    unsafe extern "C" {
+        fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    }
+
+    let flags = unsafe { fcntl(fd, F_GETFD) };
+    if flags < 0 {
+        return Err(format!("get fd flags for {fd} failed"));
+    }
+    if unsafe { fcntl(fd, F_SETFD, flags & !FD_CLOEXEC) } < 0 {
+        return Err(format!("clear close-on-exec for fd {fd} failed"));
+    }
+    Ok(())
 }
 
-fn exec_chroot(newroot: &str, init: &str) -> Result<(), String> {
-    let error = Command::new(BUSYBOX)
-        .args(["chroot", newroot, init])
+fn pivot_root() -> Result<(), String> {
+    let new_root = std::ffi::CString::new("/").map_err(|_| "invalid new root".to_owned())?;
+    let put_old = std::ffi::CString::new(OLDROOT)
+        .map_err(|_| "invalid old root path".to_owned())?;
+
+    unsafe extern "C" {
+        fn syscall(number: usize, ...) -> isize;
+    }
+
+    let result = unsafe { syscall(SYS_PIVOT_ROOT, new_root.as_ptr(), put_old.as_ptr()) };
+    if result != 0 {
+        return Err(format!("pivot_root failed: errno {}", -result));
+    }
+
+    let status = Command::new(BUSYBOX)
+        .args(["sh", "-c", "cd / && true"])
+        .status()
+        .map_err(|e| format!("set logical root cwd: {e}"))?;
+    require_success(status, "set logical root cwd")?;
+
+    let old_root = std::ffi::CString::new("/.luna-oldroot")
+        .map_err(|_| "invalid old root path".to_owned())?;
+    let result = unsafe { syscall(SYS_UMOUNT2, old_root.as_ptr(), MNT_DETACH) };
+    if result != 0 {
+        return Err(format!("detach old initramfs root failed: errno {}", -result));
+    }
+
+    Ok(())
+}
+
+fn exec_init(init: &str, system_fd: i32, image_fd: i32) -> Result<(), String> {
+    let error = Command::new(init)
+        .env(SYSTEM_SOURCE_FD_ENV, system_fd.to_string())
+        .env(IMAGE_SOURCE_FD_ENV, image_fd.to_string())
         .exec();
-    Err(format!("exec chroot failed: {error}"))
+    Err(format!("exec {init} failed: {error}"))
 }
 
 fn require_success(status: ExitStatus, operation: &str) -> Result<(), String> {
@@ -279,6 +343,14 @@ fn require_success(status: ExitStatus, operation: &str) -> Result<(), String> {
     }
 }
 
+fn unmount(target: &str) -> Result<(), String> {
+    let status = Command::new(BUSYBOX)
+        .args(["umount", "-l", target])
+        .status()
+        .map_err(|e| format!("unmount {target}: {e}"))?;
+    require_success(status, &format!("unmount {target}"))
+}
+
 fn emergency_shell() -> ! {
     let _ = Command::new(BUSYBOX).arg("sh").status();
     std::process::exit(1)
@@ -286,7 +358,9 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS, IMAGE_MOUNT, SOURCE_ROOT, SYSTEM_MOUNT};
+    use super::{
+        cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS, IMAGE_MOUNT, SYSTEM_MOUNT,
+    };
 
     #[test]
     fn parses_boot_device_from_cmdline() {
@@ -316,9 +390,10 @@ mod tests {
     }
 
     #[test]
-    fn immutable_sources_live_inside_runtime_run() {
-        assert!(SOURCE_ROOT.starts_with("/newroot/run/"));
-        assert!(SYSTEM_MOUNT.starts_with(SOURCE_ROOT));
-        assert!(IMAGE_MOUNT.starts_with(SOURCE_ROOT));
+    fn physical_sources_stay_outside_logical_root() {
+        assert!(SYSTEM_MOUNT.starts_with("/luna-source/"));
+        assert!(IMAGE_MOUNT.starts_with("/luna-source/"));
+        assert!(!SYSTEM_MOUNT.starts_with("/newroot/"));
+        assert!(!IMAGE_MOUNT.starts_with("/newroot/"));
     }
 }
