@@ -56,8 +56,9 @@ SYSTEM/images/luna-X.Y.Z.squashfs
           ├── create RAM-backed logical /
           ├── create runtime pseudo-filesystems
           ├── materialize boot-critical system content into RAM
-          └── hydrate additional immutable resources lazily
-          │
+          └── keep source available for runtime hydration
+                    │
+                    └── hydrate additional resources lazily
           ▼
        RAM-backed logical /
           │
@@ -68,9 +69,11 @@ SYSTEM/images/luna-X.Y.Z.squashfs
 
 The initial RAM base contains the resources required to start `luna-system-runtime` and the boot-critical system path. Additional immutable system resources may be materialized lazily as they become required. Materialized resources become ordinary filesystem objects in the active runtime root; applications never receive the physical SYSTEM path as their root.
 
-Pseudo-filesystems and volatile paths such as `/dev`, `/proc`, `/sys`, `/run` and `/tmp` are generated/mounted as runtime state rather than copied from SYSTEM.
+The SYSTEM filesystem and selected image remain mounted as internal read-only sources through the initial runtime handoff. Their mount points are placed inside the runtime `/run` tree so the source remains reachable after `chroot`. `luna-init` transfers source-lifetime responsibility to `luna-system-runtime` and the hydration layer instead of eagerly unmounting the source.
 
-A resource already materialized into the active runtime remains valid independently of the lifetime of the source System Image. An image may be retired only after the system/update layer has established that no still-required runtime content depends on it.
+A resource already materialized into the active runtime remains valid independently of the lifetime of the source System Image. An image may be retired only after the update/runtime layer has established that no still-required hydration dependency remains.
+
+Lazy eviction is a separate mechanism from image unmounting. It requires explicit handling for open file descriptors, memory mappings, process dependencies, and later rehydration before a RAM-backed resource can be reclaimed.
 
 ## Consequences
 
@@ -82,6 +85,7 @@ A resource already materialized into the active runtime remains valid independen
 - PID namespaces are not required by default for application isolation.
 - The active logical `/` is RAM-backed rather than a mounted System Image root.
 - System Image content is materialized eagerly only for the boot-critical base and lazily thereafter where appropriate.
+- The selected System Image remains available as an internal immutable source while runtime hydration may still need it.
 - System Image paths remain internal implementation details.
 
 ## Implementation status
@@ -93,7 +97,7 @@ The current `develop` implementation has completed the early-userspace RAM-root 
 - DATA is mounted independently at logical `/data`.
 - A bounded boot-critical resource set is copied into the RAM root before handoff.
 - `/proc`, `/sys`, `/dev`, `/run` and `/tmp` are created as runtime state.
-- The immutable image source and SYSTEM are detached before control is transferred into the RAM root.
+- SYSTEM and the selected image remain attached inside the runtime `/run` source tree across the `chroot` handoff.
 - `luna-init` finishes with a `chroot` into the RAM root and executes `/sbin/init`, which is `luna-system-runtime`.
 
 This is intentionally not the final implementation of hydration. The current bootstrap set is explicit and conservative; it does not yet provide a complete manifest-driven dependency closure for every runtime binary or desktop component.
@@ -103,6 +107,8 @@ This is intentionally not the final implementation of hydration. The current boo
 - define a versioned, manifest-driven boot-critical materialization contract;
 - compute and validate the required dependency closure so every bootstrap executable is independently runnable from the RAM root;
 - implement lazy immutable resource hydration without exposing SYSTEM paths;
+- add a source-lifecycle manager that decides when SYSTEM/image can be safely detached;
 - preserve file metadata and object types for the full supported materialization set and make rollback transactional;
 - add privileged integration tests for RAM-root construction and application mount isolation;
-- integrate image-retirement checks with update/retention state.
+- integrate image-retirement checks with update/retention state;
+- design lazy eviction with complete FD/mmap/process dependency tracking.
