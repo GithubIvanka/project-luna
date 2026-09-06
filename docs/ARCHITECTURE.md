@@ -5,7 +5,7 @@
 **Язык разработки:** Rust  
 **Лицензия:** Apache License 2.0  
 **Статус:** текущий архитектурный Source of Truth  
-**Редакция:** консолидация архитектуры и подготовки Phase 0, 2026-09-03
+**Редакция:** консолидация архитектуры и подготовки Phase 0, 2026-09-06
 
 > **Правило:** сначала проектирование, затем код.
 
@@ -289,9 +289,9 @@ GUI boot splash
   ↓
 luna-init
   ↓
-logical /
+RAM-backed logical /
   ↓
-luna-system-runtime
+luna-system-runtime (PID 1)
   ↓
 graphical login
   ↓
@@ -358,12 +358,12 @@ luna-init
    ↓
 SYSTEM
    ↓
-выбранный .squashfs
+внутренний immutable source выбранного .squashfs
    ↓
-logical /
+RAM-backed logical /
 ```
 
-Это оставляет filesystem/root construction в Linux userspace и не превращает UEFI-загрузчик во вторую ОС.
+`luna-init` монтирует выбранный System Image только как внутренний источник и строит из него рабочий runtime root. Это не классический `switch_root` к дисковому root и не превращение SquashFS в долгоживущий `/`.
 
 ---
 
@@ -399,20 +399,23 @@ Kernel panic и другие kernel-level failures могут потребова
 
 `luna-init` — минимальный standalone musl binary раннего userspace.
 
-Он не является обычным system supervisor.
+Он не является обычным system supervisor. Его зона ответственности заканчивается передачей полностью подготовленного runtime root системе.
 
 Основные обязанности:
 
 - ранняя подготовка окружения;
+- получение и валидация boot context;
 - поиск/подключение SYSTEM;
-- открытие выбранного SquashFS;
-- построение logical root;
-- подключение DATA;
-- подготовка минимальных kernel filesystems;
-- `switch_root`;
-- запуск `luna-system-runtime`.
+- открытие выбранного SquashFS как внутреннего immutable source;
+- создание RAM-backed logical `/`;
+- первоначальная materialization boot-critical system content;
+- подготовка `/dev`, `/proc`, `/sys`, `/run` и `/tmp`;
+- подключение DATA через контролируемые runtime mappings;
+- запуск `luna-system-runtime` как normal userspace PID 1.
 
-`luna-init` намеренно остаётся отдельным компонентом и не обязан становиться обычным workspace crate.
+`luna-init` **не** выполняет classic `switch_root` к persistent disk-backed root.
+
+`luna-init` намеренно остаётся отдельным компонентом standalone early userspace.
 
 ---
 
@@ -420,19 +423,23 @@ Kernel panic и другие kernel-level failures могут потребова
 
 Физическое дерево разделов не является Linux root приложения или пользователя.
 
-Luna строит logical `/`:
+Luna строит logical `/` непосредственно в runtime:
 
 ```text
 physical SYSTEM + DATA
         ↓
-logical-root mapping
+selected immutable System Image source
         ↓
-logical Linux /
+boot-critical materialization / lazy hydration
+        ↓
+RAM-backed logical Linux /
 ```
 
-Приложение затем получает ещё более ограниченное представление через собственный mount namespace.
+Пользовательская и application-facing система работает с RAM-backed `/`, а не с самим SquashFS.
 
-Архитектура допускает hybrid/lazy доступ к SquashFS вместо обязательной полной копии image в RAM. Это направление должно оставаться совместимым с ограничениями памяти и lifetime materialization.
+Начальная часть System Image materializes в RAM до запуска зависимого от неё runtime. Дополнительные immutable resources могут materialize/hydrate лениво. Уже материализованный resource должен оставаться валиден независимо от lifetime исходного image.
+
+Pseudo-filesystems и volatile paths (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) создаются runtime-механизмами и не являются копией физических разделов.
 
 ---
 
@@ -495,12 +502,12 @@ OS-managed mutable driver entities. Точная граница между kerne
 
 # 20. `luna-system-runtime`
 
-`luna-system-runtime` — единственный system-wide supervisor Luna.
+`luna-system-runtime` — единственный system-wide supervisor Luna и PID 1 нормального userspace.
 
 Архитектурная иерархия:
 
 ```text
-luna-system-runtime
+luna-system-runtime (PID 1)
 └── UserSession
     └── luna-app-runtime
         └── ApplicationInstance
@@ -915,6 +922,12 @@ namespace    → как материализовать
 Для приложений используются существующие kernel mechanisms, прежде всего mount namespaces, bind mounts и Root Mapping.
 
 После materialization приложение получает controlled filesystem view и по умолчанию не видит весь host filesystem.
+
+PID namespace не является обязательной частью текущей application isolation model. `luna-system-runtime` остаётся PID 1 нормального system userspace, а `luna-app-runtime` не создаёт дополнительный init/supervisor process.
+
+Application process запускается непосредственно как `ApplicationInstance` в нормальном system PID namespace и получает обычный non-1 PID.
+
+Если отдельный PID namespace понадобится для конкретного будущего требования, это оформляется отдельным архитектурным решением; автоматическое добавление `luna-app-init` запрещено.
 
 Namespace layer не является владельцем Bundle policy.
 
@@ -1342,9 +1355,9 @@ System Image + compatible kernel
  ↓
 luna-init
  ↓
-logical /
+RAM-backed logical /
  ↓
-system runtime
+system runtime (PID 1)
  ↓
 graphical authentication
  ↓
@@ -1379,6 +1392,9 @@ shutdown / reboot / resume
 - `luna-system-runtime` уже работает с реальными Linux child processes и UserSession/process lifecycle;
 - `luna-app-runtime` владеет ApplicationInstance lifecycle и execution setup;
 - `luna-init` реализован как standalone musl early-userspace binary и используется как `/init` в initramfs;
+- принятой архитектурой является RAM-backed logical `/`: выбранный System Image служит immutable source для initial materialization и lazy hydration, а не final disk-backed root;
+- `luna-system-runtime` является единственным system-wide supervisor и normal userspace PID 1;
+- отдельного `luna-app-init` нет и создавать его не требуется;
 - существует reproducible x86_64 UEFI/GPT PC development image и QEMU/OVMF bring-up path;
 - desktop payload уже включает native niri/Noctalia stack, graphical login, Ghostty, fish, Yazi, audio, network, Bluetooth и removable-media service payload;
 - hardware seat/input/GPU validation и часть production integration остаются работой.
@@ -1470,7 +1486,8 @@ Phase 10 → installer / release engineering
 - удалять factory ordinary retention policy;
 - переписывать boot state на каждом обычном boot;
 - считать наличие файла доказательством совместимости;
-- создавать новый crate только ради будущей идеи без реальной разработки.
+- создавать новый crate только ради будущей идеи без реальной разработки;
+- добавлять `luna-app-init` или иной дополнительный application PID-1 supervisor без отдельного архитектурного решения.
 
 ---
 
@@ -1491,9 +1508,11 @@ Phase 10 → installer / release engineering
 - device/volume backend contract;
 - firmware lifecycle;
 - signing/trust/repository policy для System Images;
-- installer contract.
+- installer contract;
+- boot-critical materialization manifest/dependency closure;
+- production lazy System Image hydration mechanism.
 
-Ни одно из этих решений нельзя молча считать уже принятым только потому, что оно удобно реализации.
+Отдельный PID namespace также не считается необходимым до появления конкретного требования; при необходимости он оформляется отдельным решением.
 
 ---
 
@@ -1512,9 +1531,9 @@ Linux kernel
   ↓
 luna-init
   ↓
-logical /
+RAM-backed logical /
   ↓
-luna-system-runtime
+luna-system-runtime (PID 1)
   ↓
 UserSession
   ↓
@@ -1532,11 +1551,15 @@ ApplicationPlan
   ↓
 MappingPlan
   ↓
-Security
+Authorization
   ↓
-Namespace materialization
+ApplicationLaunchContext
+  ↓
+luna-namespace
   ↓
 ApplicationInstance
 ```
+
+Приложение запускается непосредственно как ApplicationInstance; дополнительного `luna-app-init` слоя нет.
 
 Это архитектурный позвоночник Project Luna.
