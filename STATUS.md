@@ -1,6 +1,6 @@
 # Project Luna — текущее состояние
 
-**Последнее обновление:** 2026-09-05
+**Последнее обновление:** 2026-09-06
 
 > `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
 
@@ -21,13 +21,13 @@
 | Capability contract | `CapabilityName` / `CapabilityRegistry` / `CapabilityGrant` / `CapabilityProvider` добавлены; provider invocation ещё не подключён |
 | Generic `luna-runtime` | явно отклонён и удалён |
 | Runtime ↔ mapping ↔ Security | contract реализован; authorization предшествует namespace materialization |
-| Linux namespace/materialization | development backend реализован; profile-driven system view и production child-creation hardening продолжаются |
+| Linux namespace/materialization | development backend реализован; RAM-backed logical root/profile-driven system view и production child-creation hardening продолжаются |
 | Persistent state | durable `redb` backend в `DATA/system/state` реализован |
 | Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
 | Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
 | `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
 | `luna-app-runtime` | ApplicationInstance lifecycle, ApplicationPlan и typed execution boundary реализованы |
-| `luna-init` | native musl early-userspace реализован и упаковывается как `/init` |
+| `luna-init` | native musl early-userspace реализован как `/init`; RAM-backed bootstrap архитектурно принята, текущий код ещё требует замены исторического `switch_root` prototype |
 | `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
 | Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
 | External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
@@ -49,9 +49,11 @@ Linux kernel
  ↓
 luna-init
  ↓
-System Image + DATA
+internal immutable System Image source
  ↓
-luna-system-runtime
+RAM-backed logical /
+ ↓
+luna-system-runtime (PID 1)
  ↓
 UserSession
  ↓
@@ -77,7 +79,7 @@ Noctalia Shell
 Владение:
 
 ```text
-luna-system-runtime
+luna-system-runtime (PID 1)
 ├── UserSession
 │   └── luna-app-runtime
 │       └── ApplicationInstance
@@ -126,11 +128,9 @@ Capabilities:
 
 `luna-security` решает, разрешён ли запрос. `luna-namespace` и provider backends должны применять уже авторизованный результат.
 
-### Текущее ограничение namespace
+### Текущее состояние namespace
 
-Текущий development backend создаёт OverlayFS с полным System Image как lower layer. Поэтому `RuntimeProfile` уже существует как контракт, но ещё не является фактическим ограничителем видимости SYSTEM.
-
-Это зафиксировано как hardening gap, а не как завершённая A3 implementation. Production path должен материализовать только profile-selected trusted resources плюс явно разрешённые application mappings.
+Production materialization уже использует RAM-backed logical root и profile-selected trusted resources вместо полного System Image OverlayFS lower layer. Открыты hardening/integration задачи для privileged Linux tests, filtered `/dev`, child-creation primitive и полной lazy hydration.
 
 ## System initialization
 
@@ -141,28 +141,51 @@ initramfs
     ↓
 /init = luna-init
     ↓
-prepare SYSTEM + DATA + selected System Image
+prepare SYSTEM + DATA + selected System Image source
     ↓
-switch_root
+RAM-backed logical /
     ↓
-/sbin/init = luna-system-runtime
+/sbin/luna-system-runtime = system PID 1
 ```
+
+Классический `switch_root` к SquashFS root не является целевой архитектурой и должен быть удалён из prototype implementation.
+
+## Process/PID model
+
+```text
+system PID namespace
+└── PID 1 luna-system-runtime
+    ├── system services
+    ├── UserSession
+    │   └── luna-app-runtime / ApplicationInstance
+    └── application processes
+```
+
+`luna-app-init` отсутствует. PID namespace не требуется по умолчанию для application isolation. Приложение запускается непосредственно как `ApplicationInstance` и получает обычный non-1 system PID.
 
 ## Ближайшие технические приоритеты
 
-1. Перевести namespace materialization на profile-driven System Image view без раскрытия всего SYSTEM.
-2. Завершить physical symlink/containment hardening для mapping roots и staging paths.
-3. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
-4. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
-5. Завершить graphical login + niri + Noctalia integration.
-6. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
-7. Завершить durable boot/update success/failure state.
-8. Завершить LBP1 conformance и Ed25519 trust binding.
-9. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
-10. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
+1. Заменить prototype `switch_root` implementation в `luna-init` на RAM-backed root construction.
+2. Зафиксировать boot-critical materialization manifest/dependency closure и реализовать безопасную материализацию из внутреннего System Image source.
+3. Реализовать lazy System Image hydration так, чтобы materialized resources не зависели от lifetime image.
+4. Завершить physical symlink/containment hardening для mapping roots и staging paths.
+5. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
+6. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
+7. Завершить graphical login + niri + Noctalia integration.
+8. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
+9. Завершить durable boot/update success/failure state.
+10. Завершить LBP1 conformance и Ed25519 trust binding.
+11. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
+12. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
 
 ## Phase 0 documentation
 
-Черновики новых архитектурных контрактов находятся в `docs/contracts/`.
+Канонические документы bootstrap:
 
-Они уточняют существующие архитектурные границы и не считаются принятыми до отдельного решения.
+```text
+docs/architecture/components/LUNA-INIT.md
+docs/contracts/LUNA-INIT-CONTRACT.md
+docs/decisions/0008-pid-namespace-and-ram-hydration.md
+```
+
+Они описывают принятую модель: `luna-init` строит RAM-backed logical `/`, `luna-system-runtime` является PID 1, а отдельного `luna-app-init` нет.
