@@ -37,7 +37,7 @@ UserSession(s)
 7. Создать runtime pseudo-filesystems и volatile paths (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`).
 8. Материализовать boot-critical system base в RAM.
 9. Передать DATA и другие разрешённые ресурсы через контролируемые runtime mappings.
-10. Запустить `luna-system-runtime`, который становится PID 1 нормального userspace.
+10. Передать runtime ownership жизненного цикла immutable source и запустить `luna-system-runtime`, который становится PID 1 нормального userspace.
 
 ## Root model
 
@@ -61,9 +61,11 @@ SYSTEM/images/luna-X.Y.Z.squashfs
 
 Luna не копирует весь System Image в RAM при старте и не использует SquashFS как долгоживущий lower/root filesystem для рабочей системы. Начальный набор определяется boot-critical contract; дополнительные immutable resources materialize по мере необходимости.
 
-Текущая реализация уже создаёт tmpfs root, materializes явный bootstrap subset и отсоединяет внутренний System Image source до передачи управления runtime. Полная manifest-driven dependency closure и lazy hydration ещё не завершены.
+Текущая реализация уже создаёт tmpfs root и materializes явный bootstrap subset. SYSTEM и selected System Image остаются подключёнными как внутренний immutable source и размещаются внутри runtime `/run`, поэтому источник доступен после `chroot` для последующей lazy hydration. Жизненный цикл source после передачи управления принадлежит `luna-system-runtime` и будущему hydration layer, а не `luna-init`.
 
 После materialization рабочий resource должен быть независим от того, остаётся ли исходный System Image подключённым. Отсоединение/удаление image допускается только после проверки, что все ещё необходимые runtime resources уже materialized либо иным образом гарантированно доступны.
+
+Lazy eviction не следует автоматически из source unmount: это отдельный механизм, который должен учитывать open file descriptors, mappings, process dependencies и возможность повторной hydration.
 
 ## Process model
 
@@ -88,7 +90,7 @@ luna-system-runtime
 
 Ошибка любого обязательного bootstrap шага должна останавливать нормальную загрузку и переводить систему в recovery/emergency path, а не оставлять частично сформированный logical root.
 
-Внутренняя materialization должна быть транзакционной: уже созданные mounts/resources откатываются при ошибке до передачи управления `luna-system-runtime`. Полный rollback implementation для всех промежуточных ошибок остаётся hardening item.
+Внутренняя materialization должна быть транзакционной: уже созданные mounts/resources откатываются при ошибке до передачи управления `luna-system-runtime`. После успешного handoff `luna-init` не выполняет упреждающее отсоединение SYSTEM/image source.
 
 ## Current implementation status
 
@@ -102,7 +104,8 @@ luna-system-runtime
 - явный bootstrap subset вместо полной копии image;
 - materialization через `cp -a` с сохранением обычной семантики файлов и symlink;
 - runtime-generated `/dev`, `/proc`, `/sys`, `/run` и `/tmp`;
-- отсоединение System Image/SYSTEM source перед control transfer;
+- размещение SYSTEM и selected image source внутри runtime `/run` для сохранения доступа после `chroot`;
+- передача source lifetime ownership runtime/hydration layer;
 - `chroot` в RAM-backed root с последующим запуском `/sbin/init = luna-system-runtime`.
 
 Открыто:
@@ -110,6 +113,8 @@ luna-system-runtime
 - manifest-driven bootstrap manifest и dependency closure;
 - защищённая материализация всех поддерживаемых filesystem object types;
 - lazy hydration service/protocol;
+- lifecycle manager и безопасное определение момента, когда source можно отключить;
 - финальная политика `/dev`;
 - privileged QEMU/UEFI end-to-end tests;
-- image-retirement checks, связанные с фактическим runtime materialization state.
+- image-retirement checks, связанные с фактическим runtime materialization state;
+- lazy eviction с полным учётом FD/mmap/process dependencies.
