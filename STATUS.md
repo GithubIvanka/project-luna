@@ -27,7 +27,7 @@
 | Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
 | `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
 | `luna-app-runtime` | ApplicationInstance lifecycle, ApplicationPlan и typed execution boundary реализованы |
-| `luna-init` | native musl early-userspace реализован как `/init`; RAM-backed bootstrap архитектурно принята, текущий код ещё требует замены исторического `switch_root` prototype |
+| `luna-init` | native musl early-userspace с RAM-backed tmpfs root, explicit bootstrap subset, отдельными runtime pseudo-filesystems и финальным `chroot` в `luna-system-runtime` реализован; lazy hydration и dependency-closure ещё продолжаются |
 | `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
 | Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
 | External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
@@ -51,7 +51,7 @@ luna-init
  ↓
 internal immutable System Image source
  ↓
-RAM-backed logical /
+RAM-backed tmpfs logical /
  ↓
 luna-system-runtime (PID 1)
  ↓
@@ -141,14 +141,16 @@ initramfs
     ↓
 /init = luna-init
     ↓
-prepare SYSTEM + DATA + selected System Image source
+SYSTEM + DATA + selected System Image source
     ↓
-RAM-backed logical /
+/tmpfs logical /
+    ↓
+chroot
     ↓
 /sbin/luna-system-runtime = system PID 1
 ```
 
-Классический `switch_root` к SquashFS root не является целевой архитектурой и должен быть удалён из prototype implementation.
+Классический `switch_root` к SquashFS root больше не используется целевым `luna-init` path.
 
 ## Process/PID model
 
@@ -165,18 +167,17 @@ system PID namespace
 
 ## Ближайшие технические приоритеты
 
-1. Заменить prototype `switch_root` implementation в `luna-init` на RAM-backed root construction.
-2. Зафиксировать boot-critical materialization manifest/dependency closure и реализовать безопасную материализацию из внутреннего System Image source.
-3. Реализовать lazy System Image hydration так, чтобы materialized resources не зависели от lifetime image.
-4. Завершить physical symlink/containment hardening для mapping roots и staging paths.
-5. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
-6. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
-7. Завершить graphical login + niri + Noctalia integration.
-8. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
-9. Завершить durable boot/update success/failure state.
-10. Завершить LBP1 conformance и Ed25519 trust binding.
-11. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
-12. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
+1. Зафиксировать boot-critical materialization manifest/dependency closure и реализовать безопасную материализацию из внутреннего System Image source.
+2. Реализовать lazy System Image hydration так, чтобы materialized resources не зависели от lifetime image.
+3. Завершить physical symlink/containment hardening для mapping roots и staging paths.
+4. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
+5. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
+6. Завершить graphical login + niri + Noctalia integration.
+7. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
+8. Завершить durable boot/update success/failure state.
+9. Завершить LBP1 conformance и Ed25519 trust binding.
+10. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
+11. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
 
 ## Phase 0 documentation
 
