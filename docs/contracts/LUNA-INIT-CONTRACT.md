@@ -21,7 +21,28 @@ luna-system-runtime (PID 1)
 
 `luna-init` is the first Luna userspace bootstrap boundary after the kernel.
 
-## 2. Inputs
+## 2. Physical storage vs logical root
+
+Luna has two persistent physical filesystems relevant to normal system operation:
+
+```text
+SYSTEM  → immutable system images and kernels
+DATA    → mutable user/application/system data
+```
+
+The active Linux `/` is neither physical SYSTEM nor physical DATA. It is a RAM-backed runtime filesystem assembled by `luna-init`.
+
+The intended mapping is:
+
+```text
+physical SYSTEM ──┐
+                  ├── source / hydration ──→ RAM-backed logical /
+physical DATA ────┘                         └→ logical /data
+```
+
+SYSTEM is an implementation/storage boundary, not a user-visible filesystem.
+
+## 3. Inputs
 
 `luna-init` receives a boot context from the kernel command line and/or an equivalent future handoff mechanism. The context identifies:
 
@@ -33,7 +54,7 @@ luna-system-runtime (PID 1)
 
 The selected image must be validated before being used as a source.
 
-## 3. System Image handling
+## 4. System Image handling
 
 The canonical System Image is:
 
@@ -42,15 +63,17 @@ SYSTEM/images/luna-X.Y.Z.squashfs
 SYSTEM/images/luna-X.Y.Z.toml
 ```
 
-`luna-init` mounts SYSTEM read-only and opens the selected SquashFS as an **internal immutable source**.
+`luna-init` mounts SYSTEM read-only during bootstrap and mounts the selected SquashFS read-only as an immutable source.
 
-It does not make that SquashFS the final Linux root and does not use classic `switch_root` to turn it into `/`.
+Neither SYSTEM nor the selected System Image becomes the logical `/`.
 
-The SYSTEM filesystem and selected image remain mounted as internal runtime sources after bootstrap. Their mount points live inside the runtime `/run` tree so they survive the final `chroot`. `luna-init` transfers responsibility for their lifetime to `luna-system-runtime` and the future hydration layer; it must not eagerly unmount them merely because initial materialization has completed.
+There is no extra source layer such as `/run/luna-system`, `/run/luna-image`, or another path inside the logical root.
 
-## 4. Runtime root
+During the root transition the source mounts remain outside the future logical root. `luna-init` hands trusted directory FDs for those sources to `luna-system-runtime`; after the root transition the old initramfs tree is detached, so the sources are not reachable by pathname from the logical root.
 
-The final logical `/` is backed by a dedicated tmpfs mounted on the root staging point before DATA is attached.
+## 5. RAM-backed logical root
+
+`luna-init` creates the runtime root as a dedicated tmpfs and makes it the actual Linux root through `pivot_root`.
 
 The initial root must contain at least:
 
@@ -63,43 +86,54 @@ The initial root must contain at least:
 - `/run`;
 - `/tmp`.
 
-Physical SYSTEM and DATA paths are not part of the application-facing filesystem contract.
-
-## 5. Initial materialization
-
-The selected System Image is the source for an explicit boot-critical materialization set.
-
-The current implementation keeps this set as an explicit bootstrap list in `luna-init` rather than copying the complete System Image. The set includes the native system supervisor, its bootstrap configuration, and the graphical-session entry points required by the current PC development image.
-
-For each resource, `luna-init` validates presence in the mounted immutable source and copies it into the RAM-backed root while preserving normal file/symlink semantics through BusyBox `cp -a`. The complete dependency closure is still an open hardening requirement for production images.
+`DATA` is attached directly at `RAM-root/data`, which becomes logical `/data` after the root transition.
 
 The implementation must not copy the entire System Image into RAM merely to simplify bootstrap.
 
-## 6. Lazy hydration
+## 6. Initial materialization
+
+The selected System Image is the source for an explicit boot-critical materialization set.
+
+The current implementation keeps this set as an explicit bootstrap list in `luna-init` rather than copying the complete System Image. The complete dependency closure is still an open hardening requirement for production images.
+
+For each resource, `luna-init` validates presence in the mounted immutable source and copies it into the RAM-backed root while preserving ordinary file/symlink semantics through BusyBox `cp -a`.
+
+## 7. Lazy hydration and source lifetime
 
 After the initial boot-critical set is materialized, additional immutable System Image resources may be hydrated lazily.
 
-The long-term design must satisfy:
+The long-term design is:
 
 ```text
-System Image source
-      ↓ hydrate
+hidden SYSTEM/Image source
+          ↓ hydrate
 RAM-backed runtime resource
-      ↓
+          ↓
 active process
 ```
 
-A resource that has been materialized into the active runtime must remain usable independently of the lifetime of the original System Image mount.
+A materialized resource is independent of the lifetime of the source mount.
 
-The original source is therefore kept available while runtime state may still require hydration from it. Source unmounting is a lifecycle decision made by the runtime/hydration layer, not by `luna-init` immediately after bootstrap.
+The source itself must remain available to the trusted runtime/hydration layer until all still-required resources have either been materialized or otherwise made independently available. `luna-init` therefore does not decide the source retirement point.
 
-Lazy hydration must not expose SYSTEM paths to applications.
+Lazy eviction of already materialized RAM data is a separate mechanism. It must not be implemented by blindly unmounting the source or deleting active files; later work must account for open file descriptors, memory mappings, and process dependencies.
 
-The exact request/lookup protocol for lazy hydration is a separate implementation task, but it must use the same trust and path-validation rules as the boot path.
+## 8. SYSTEM access policy
 
-Lazy eviction is a separate concern: it may only reclaim RAM-backed resources after the runtime has a complete strategy for open file descriptors, mappings, process dependencies, and rehydration. It is not implied by source unmounting.
+SYSTEM is read-only for normal system operation and is not exposed as a user filesystem.
 
-## 7. Runtime pseudo-filesystems
+The intended authority model is:
+
+```text
+ordinary user        → no SYSTEM access
+applications         → no SYSTEM access
+normal runtime       → controlled read-only source access for hydration
+luna-updater         → sole component authorized to modify SYSTEM
+```
+
+The updater's write path is a separate privileged update mechanism. Boot-time source mounting remains read-only.
+
+## 9. Runtime pseudo-filesystems
 
 `luna-init` prepares runtime-generated filesystems/paths rather than copying persistent versions from SYSTEM:
 
@@ -113,29 +147,25 @@ Lazy eviction is a separate concern: it may only reclaim RAM-backed resources af
 
 The `/dev` view is controlled and must not become an unrestricted alias of the host device tree.
 
-## 8. DATA
+## 10. Transfer of control
 
-DATA is mounted/attached independently from SYSTEM and remains mutable persistent storage.
+Once the logical root and required runtime filesystems are ready, `luna-init`:
 
-Its physical hierarchy is hidden behind the logical runtime mapping model.
-
-`luna-init` prepares only the bootstrap-level DATA access needed before `luna-system-runtime` takes over. Normal application DATA mapping belongs to higher runtime/security layers.
-
-## 9. Transfer of control
-
-Once the logical root and required runtime filesystems are ready, `luna-init` validates `/sbin/init`, leaves the SYSTEM and image source mounts attached, and executes BusyBox `chroot` into the RAM-backed root. The chroot then executes `/sbin/init`, which is the `luna-system-runtime` binary in the materialized root.
+1. preserves trusted FDs for the SYSTEM and selected image sources;
+2. unmounts the temporary initramfs `/proc`, `/sys`, and `/dev` mounts;
+3. performs `pivot_root` to make the RAM-backed filesystem the actual `/`;
+4. detaches the old initramfs tree so its physical source paths are outside the logical root;
+5. executes `/sbin/init` directly from the RAM root.
 
 The intended steady-state model is:
 
 ```text
 PID 1 → luna-system-runtime
-       │
-       └── owns source/hydration lifecycle
 ```
 
 `luna-init` is a bootstrap component, not a second long-lived system manager.
 
-## 10. Application process model
+## 11. Application process model
 
 `luna-init` does not create `luna-app-init` and does not create an application PID-1 supervisor.
 
@@ -161,33 +191,32 @@ application process
 
 A PID namespace is not mandatory for ApplicationInstance isolation. By default applications remain ordinary processes in the system PID namespace and receive normal non-1 PIDs.
 
-## 11. Failure semantics
+## 12. Failure semantics
 
 A mandatory bootstrap failure must stop normal boot and enter the appropriate recovery/emergency path.
 
-The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path. After successful handoff, source mount lifetime belongs to the runtime/hydration layer rather than `luna-init`.
+The runtime root must be built transactionally: mounts and temporary resources created before an error are unwound before handing control to a failure path. Complete rollback/recovery cleanup remains a hardening item.
 
-## 12. Current implementation status
+## 13. Current implementation status
 
-The historical `switch_root` implementation has been replaced on `develop` by the first RAM-root bootstrap implementation.
+The current `develop` implementation provides:
 
-Current implementation provides:
-
-- dedicated tmpfs root;
+- dedicated RAM-backed logical `/`;
+- direct DATA attachment at logical `/data`;
+- SYSTEM mounted read-only for bootstrap;
+- selected SquashFS mounted read-only as an internal source outside the future logical root;
 - explicit bootstrap subset rather than whole-image copy;
-- immutable SquashFS kept as an internal source;
-- independent DATA attachment under logical `/data`;
+- trusted source FD handoff across the root transition;
 - runtime-generated `/dev`, `/proc`, `/sys`, `/run` and `/tmp`;
-- SYSTEM and selected image mounted inside the runtime root so they survive `chroot`;
-- final `chroot` to the RAM-backed root;
-- preservation of `luna-system-runtime` as PID 1.
+- `pivot_root` into the RAM-backed filesystem;
+- final execution of `/sbin/init = luna-system-runtime`.
 
 Remaining implementation work includes:
 
 - manifest-driven boot-critical materialization/dependency closure;
 - secure file/tree materialization for all supported object types;
-- lazy hydration service/protocol and source lifetime manager;
+- lazy hydration service/protocol over the trusted source FDs;
+- enforcement of the SYSTEM updater-only write authority;
 - final `/dev` policy;
 - privileged end-to-end boot tests;
-- integration of image-retirement checks with runtime materialization state;
-- lazy eviction with complete FD/mmap/process dependency tracking.
+- integration of image-retirement checks with runtime materialization state.
