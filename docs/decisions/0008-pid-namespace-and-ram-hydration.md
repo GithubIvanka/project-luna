@@ -1,31 +1,47 @@
-# ADR-0008 — Application PID Boundary and RAM System Hydration
+# ADR-0008 — Application PID Model and RAM System Hydration
 
-**Status:** Accepted
-**Date:** 2026-09-05
-**Supersedes:** the earlier wording that PID namespace use is optional for application presentation
+**Status:** Accepted  
+**Date:** 2026-09-06
 
 ## Decision
 
-Luna separates the process that acts as namespace supervisor from the application process itself.
+Luna does **not** introduce a separate `luna-app-init` component and does not add an extra application PID-1 supervisor layer.
 
-For an ApplicationInstance that uses a PID namespace:
+The system-wide process supervisor is `luna-system-runtime`. It is the system's PID 1 during normal userspace operation.
+
+The application runtime hierarchy remains:
 
 ```text
-PID namespace
-│
-├── PID 1  → Luna application namespace supervisor/init
-│            owns child reaping and namespace lifetime
-│
-└── PID 2+ → actual application process(es)
+luna-system-runtime
+    ↓
+UserSession
+    ↓
+luna-app-runtime
+    ↓
+ApplicationPlan
+    ↓
+AuthorizedApplicationPlan
+    ↓
+ApplicationLaunchContext
+    ↓
+luna-namespace
+    ↓
+ApplicationInstance
+    ↓
+application process
 ```
 
-The application process must **never intentionally run as PID 1** inside its application PID namespace. PID 1 is reserved for the namespace supervisor. This prevents the application from being given the special Linux PID-1 role and gives Luna an explicit place for child reaping, signal handling and lifecycle supervision.
+`luna-app-runtime` is an architectural/runtime component responsible for ApplicationInstance lifecycle and execution setup. It is not a second system supervisor and it does not require a dedicated init process between itself and the application.
 
-The application nevertheless receives a conventional Linux process environment. PID numbering is an implementation detail of the namespace and must not be exposed as a special "container mode" marker by Luna itself.
+The application is launched directly as the process represented by `ApplicationInstance`. Under the normal Luna isolation model it remains in the system PID namespace and therefore receives an ordinary host PID that is not 1 because `luna-system-runtime` owns PID 1.
+
+A PID namespace is **not a mandatory part of application isolation**. Mount namespace isolation is mandatory; other Linux namespaces and resource controls are policy-driven according to the ApplicationInstance security/resource profile. If Luna later requires a PID namespace for a concrete capability, that change requires a separate architecture decision and must not silently introduce a new `luna-app-init` component.
+
+The purpose of the application isolation boundary is not to make applications look like containers. Applications should receive a conventional Linux process/filesystem environment without exposure to Luna's physical storage layout or implementation details.
 
 ## `/` and System Image hydration
 
-The working Linux root is RAM-backed. System Image SquashFS is an immutable source, not the long-term backing filesystem for `/`.
+The working Linux root is RAM-backed. A System Image is a directly stored immutable SquashFS source on SYSTEM; it is not the long-term backing filesystem for the active `/`.
 
 Boot/runtime construction follows this model:
 
@@ -34,45 +50,44 @@ SYSTEM/images/luna-X.Y.Z.squashfs
           │
           │ selected immutable source
           ▼
-  early userspace / system materializer
+       luna-init
           │
-          ├── copy/materialize boot-critical system base into RAM
-          ├── create RAM-backed compatibility directories
-          └── lazily materialize additional immutable system resources
-                when they become part of the active runtime
+          ├── mount System Image at an internal source location
+          ├── create RAM-backed logical /
+          ├── create runtime pseudo-filesystems
+          ├── materialize boot-critical system content into RAM
+          └── hydrate additional immutable resources lazily
           │
           ▼
        RAM-backed logical /
           │
-          └── luna-system-runtime
+          └── luna-system-runtime (PID 1)
 ```
 
-The initial RAM base includes the resources required to boot and operate the system runtime. Pseudo-filesystems and volatile directories such as `/dev`, `/proc`, `/sys`, `/run` and `/tmp` are created/mounted in RAM rather than being persistent copies of SYSTEM.
+`luna-init` is therefore the bootstrap boundary between the Linux kernel and the normal Luna runtime. It does not switch the machine to a persistent disk-backed Linux root.
 
-Lazy materialization is permitted for immutable resources that are not needed by the boot-critical base. It must produce normal filesystem objects in the runtime root rather than expose the physical SYSTEM path to applications.
+The initial RAM base contains the resources required to start `luna-system-runtime` and the boot-critical system path. Additional immutable system resources may be materialized lazily as they become required. Materialized resources become ordinary filesystem objects in the active runtime root; applications never receive the physical SYSTEM path as their root.
 
-A resource that has already been materialized into the active runtime remains valid independently of the lifetime of the original System Image file. Removing an active System Image is allowed only after the system/update layer has established that no still-required runtime resource remains dependent on it.
+Pseudo-filesystems and volatile paths such as `/dev`, `/proc`, `/sys`, `/run` and `/tmp` are generated/mounted as runtime state rather than copied from SYSTEM.
 
-This means the running system is not conceptually a mounted SquashFS root. The System Image is a source for materialization and hydration of immutable system content.
-
-## `/dev`
-
-`/dev` is a runtime-generated Linux device namespace. It is not a direct view of the host `/dev` by default. Device nodes and device access are provided only according to the device/security policy.
+A resource already materialized into the active runtime remains valid independently of the lifetime of the source System Image. An image may be retired only after the system/update layer has established that no still-required runtime content depends on it.
 
 ## Consequences
 
-- application PID 1 is reserved for Luna's namespace supervisor;
-- ApplicationInstance lifecycle has a dedicated PID-namespace supervision boundary;
-- `/` remains RAM-backed;
-- boot-critical system content is materialized before normal system services depend on it;
-- remaining immutable system resources may be hydrated lazily;
-- an application never receives the physical SYSTEM filesystem as its root;
-- a System Image may be retired after runtime materialization proves that its active content is no longer required.
+- `luna-init` owns system bootstrap and construction of the RAM-backed logical root.
+- `luna-system-runtime` is the single system-wide supervisor and normal PID 1.
+- `luna-app-runtime` owns ApplicationInstance lifecycle; it is not an init process.
+- There is no `luna-app-init` architectural component.
+- Applications are launched directly by the application runtime through the namespace/materialization boundary.
+- PID namespaces are not required by default for application isolation.
+- The active logical `/` is RAM-backed rather than a mounted System Image root.
+- System Image content is materialized eagerly only for the boot-critical base and lazily thereafter where appropriate.
+- System Image paths remain internal implementation details.
 
 ## Open implementation work
 
-- implement the PID namespace supervisor/child-spawn path in `luna-system-runtime`/`luna-namespace`;
-- define the exact system-materialization manifest for the boot-critical RAM base;
+- replace the current early-userspace `switch_root` prototype with the RAM-root materialization path;
+- define the exact boot-critical materialization manifest and dependency closure;
 - implement lazy immutable resource hydration without exposing SYSTEM paths;
-- add privileged integration tests for PID namespace, `/proc` visibility, child reaping and RAM-root hydration;
+- add privileged integration tests for RAM-root construction and application mount isolation;
 - integrate image-retirement checks with update/retention state.
