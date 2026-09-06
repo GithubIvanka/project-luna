@@ -51,6 +51,12 @@ fn run() -> Result<(), String> {
     mkdir(SYSTEM_MOUNT)?;
     mkdir(IMAGE_MOUNT)?;
     mkdir(NEWROOT)?;
+    mount(
+        "tmpfs",
+        NEWROOT,
+        "tmpfs",
+        "mode=0755,nosuid,nodev",
+    )?;
     mkdir(DATA_MOUNT)?;
 
     let content = fs::read_to_string("/proc/cmdline").unwrap_or_default();
