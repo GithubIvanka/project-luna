@@ -58,6 +58,17 @@ fn run() -> Result<(), String> {
     )?;
     mkdir(DATA_MOUNT)?;
     mkdir(SOURCE_ROOT)?;
+
+    // `/run` is created before SYSTEM/image are mounted below it so the fresh
+    // runtime tmpfs does not hide the immutable source mounts later on.
+    mkdir(&format!("{NEWROOT}/run"))?;
+    mount(
+        "tmpfs",
+        &format!("{NEWROOT}/run"),
+        "tmpfs",
+        "mode=0755,nosuid,nodev",
+    )?;
+    mkdir(SOURCE_ROOT)?;
     mkdir(SYSTEM_MOUNT)?;
     mkdir(IMAGE_MOUNT)?;
 
@@ -104,12 +115,6 @@ fn run() -> Result<(), String> {
     })?;
     mount(
         "tmpfs",
-        &format!("{NEWROOT}/run"),
-        "tmpfs",
-        "mode=0755,nosuid,nodev",
-    )?;
-    mount(
-        "tmpfs",
         &format!("{NEWROOT}/tmp"),
         "tmpfs",
         "mode=1777,nosuid,nodev",
@@ -142,7 +147,7 @@ fn prepare_root() -> Result<(), String> {
         mkdir(&parent.to_string_lossy())?;
     }
 
-    for directory in ["proc", "sys", "dev", "run", "tmp"] {
+    for directory in ["proc", "sys", "dev", "tmp"] {
         mkdir(&format!("{NEWROOT}/{directory}"))?;
     }
     Ok(())
