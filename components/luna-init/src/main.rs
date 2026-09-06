@@ -11,10 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 const BUSYBOX: &str = "/bin/busybox";
-const SYSTEM_MOUNT: &str = "/run/luna-system";
 const NEWROOT: &str = "/newroot";
 const DATA_MOUNT: &str = "/newroot/data";
-const IMAGE_MOUNT: &str = "/run/luna-image";
+const SOURCE_ROOT: &str = "/newroot/run/luna-source";
+const SYSTEM_MOUNT: &str = "/newroot/run/luna-source/system";
+const IMAGE_MOUNT: &str = "/newroot/run/luna-source/image";
 
 /// The first userspace base is deliberately explicit rather than a copy of the
 /// complete System Image. Later resources can be hydrated by the runtime layer.
@@ -48,8 +49,6 @@ fn run() -> Result<(), String> {
     mount("devtmpfs", "/dev", "devtmpfs", "mode=0755,nosuid")
         .or_else(|_| mount("devtmpfs", "/dev", "tmpfs", "mode=0755,nosuid"))?;
 
-    mkdir(SYSTEM_MOUNT)?;
-    mkdir(IMAGE_MOUNT)?;
     mkdir(NEWROOT)?;
     mount(
         "tmpfs",
@@ -58,6 +57,9 @@ fn run() -> Result<(), String> {
         "mode=0755,nosuid,nodev",
     )?;
     mkdir(DATA_MOUNT)?;
+    mkdir(SOURCE_ROOT)?;
+    mkdir(SYSTEM_MOUNT)?;
+    mkdir(IMAGE_MOUNT)?;
 
     let content = fs::read_to_string("/proc/cmdline").unwrap_or_default();
     let system_device = cmdline_value(&content, "luna.system_device")
@@ -113,16 +115,17 @@ fn run() -> Result<(), String> {
         "mode=1777,nosuid,nodev",
     )?;
 
-    unmount(IMAGE_MOUNT)?;
-    unmount(SYSTEM_MOUNT)?;
-    unmount("/proc")?;
-    unmount("/sys")?;
-    unmount("/dev")?;
-
+    // The SYSTEM and selected image mounts intentionally survive bootstrap and
+    // the final chroot. They are internal immutable sources for later runtime
+    // hydration. Their lifetime is transferred to the runtime/hydration layer.
     let init = format!("{NEWROOT}/sbin/init");
     if !is_executable(&init) {
         return Err("RAM-backed root has no executable /sbin/init".to_owned());
     }
+
+    unmount("/proc")?;
+    unmount("/sys")?;
+    unmount("/dev")?;
 
     exec_chroot(NEWROOT, "/sbin/init")
 }
@@ -278,7 +281,7 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS};
+    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS, IMAGE_MOUNT, SOURCE_ROOT, SYSTEM_MOUNT};
 
     #[test]
     fn parses_boot_device_from_cmdline() {
@@ -305,5 +308,12 @@ mod tests {
     fn bootstrap_is_an_explicit_subset() {
         assert!(BOOTSTRAP_PATHS.contains(&"/sbin/luna-system-runtime"));
         assert!(!BOOTSTRAP_PATHS.contains(&"/usr/share"));
+    }
+
+    #[test]
+    fn immutable_sources_live_inside_runtime_run() {
+        assert!(SOURCE_ROOT.starts_with("/newroot/run/"));
+        assert!(SYSTEM_MOUNT.starts_with(SOURCE_ROOT));
+        assert!(IMAGE_MOUNT.starts_with(SOURCE_ROOT));
     }
 }
