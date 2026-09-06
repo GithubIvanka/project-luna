@@ -14,6 +14,7 @@ const BUSYBOX: &str = "/bin/busybox";
 const SYSTEM_MOUNT: &str = "/run/luna-system";
 const NEWROOT: &str = "/newroot";
 const DATA_MOUNT: &str = "/newroot/data";
+const IMAGE_MOUNT: &str = "/run/luna-image";
 
 /// The first userspace base is deliberately explicit rather than a copy of the
 /// complete System Image. Later resources can be hydrated by the runtime layer.
@@ -33,6 +34,8 @@ const BOOTSTRAP_PATHS: &[&str] = &[
     "/usr/bin/setpriv",
 ];
 
+const BOOTSTRAP_DIRECTORIES: &[&str] = &["/etc/luna"];
+
 fn main() -> ! {
     if let Err(error) = run() {
         eprintln!("luna-init: {error}");
@@ -48,6 +51,7 @@ fn run() -> Result<(), String> {
         .or_else(|_| mount("devtmpfs", "/dev", "tmpfs", "mode=0755,nosuid"))?;
 
     mkdir(SYSTEM_MOUNT)?;
+    mkdir(IMAGE_MOUNT)?;
     mkdir(NEWROOT)?;
     mkdir(DATA_MOUNT)?;
 
@@ -66,12 +70,10 @@ fn run() -> Result<(), String> {
         return Err(format!("selected System Image not found: {image_path}"));
     }
 
-    let image_mount = "/run/luna-image";
-    mkdir(image_mount)?;
-    mount_loop_squashfs(&image_path, image_mount)?;
+    mount_loop_squashfs(&image_path, IMAGE_MOUNT)?;
 
     prepare_root()?;
-    materialize_bootstrap(image_mount, NEWROOT)?;
+    materialize_bootstrap(IMAGE_MOUNT, NEWROOT)?;
 
     mount("proc", &format!("{NEWROOT}/proc"), "proc", "nosuid,nodev,noexec")?;
     mount(
@@ -107,7 +109,7 @@ fn run() -> Result<(), String> {
         "mode=1777,nosuid,nodev",
     )?;
 
-    unmount(image_mount)?;
+    unmount(IMAGE_MOUNT)?;
     unmount(SYSTEM_MOUNT)?;
     unmount("/proc")?;
     unmount("/sys")?;
@@ -123,26 +125,20 @@ fn run() -> Result<(), String> {
 
 fn prepare_root() -> Result<(), String> {
     for path in BOOTSTRAP_PATHS {
-        let relative = path.strip_prefix('/').unwrap_or(path);
+        let relative = path
+            .strip_prefix('/')
+            .ok_or_else(|| format!("invalid bootstrap path: {path}"))?;
         let destination = Path::new(NEWROOT).join(relative);
-        if path == &"/bin/busybox"
-            || path == &"/sbin/luna-system-runtime"
-            || path == &"/sbin/init"
-            || path == &"/etc/os-release"
-            || path == &"/etc/hostname"
-            || path == &"/etc/passwd"
-            || path == &"/etc/group"
-            || path == &"/etc/shadow"
-            || path == &"/etc/profile"
-        {
-            if let Some(parent) = destination.parent() {
-                mkdir(&parent.to_string_lossy())?;
-            }
-        } else {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| format!("bootstrap destination has no parent: {destination:?}"))?;
+        mkdir(&parent.to_string_lossy())?;
+
+        if BOOTSTRAP_DIRECTORIES.contains(path) {
             mkdir(&destination.to_string_lossy())?;
         }
     }
-    for directory in ["proc", "sys", "dev", "run", "tmp", "data"] {
+    for directory in ["proc", "sys", "dev", "run", "tmp"] {
         mkdir(&format!("{NEWROOT}/{directory}"))?;
     }
     Ok(())
@@ -156,7 +152,7 @@ fn materialize_bootstrap(source_root: &str, destination_root: &str) -> Result<()
                 .ok_or_else(|| format!("invalid bootstrap path: {path}"))?,
         );
 
-        if !fs::symlink_metadata(&source).is_ok() {
+        if fs::symlink_metadata(&source).is_err() {
             return Err(format!("bootstrap resource missing from System Image: {path}"));
         }
 
@@ -281,7 +277,7 @@ fn emergency_shell() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS};
+    use super::{cmdline_value, system_image_from_cmdline, BOOTSTRAP_DIRECTORIES, BOOTSTRAP_PATHS};
 
     #[test]
     fn parses_boot_device_from_cmdline() {
@@ -307,7 +303,7 @@ mod tests {
     #[test]
     fn bootstrap_is_an_explicit_subset() {
         assert!(BOOTSTRAP_PATHS.contains(&"/sbin/luna-system-runtime"));
-        assert!(BOOTSTRAP_PATHS.contains(&"/etc/luna"));
+        assert!(BOOTSTRAP_DIRECTORIES.contains(&"/etc/luna"));
         assert!(!BOOTSTRAP_PATHS.contains(&"/usr/share"));
     }
 }
