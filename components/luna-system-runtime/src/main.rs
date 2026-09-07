@@ -8,6 +8,43 @@ use luna_system_manager::{KernelRef, PersistentSystemManager, SystemImageRef, Sy
 use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeService};
 use luna_user_session::SessionState;
 
+const SYSTEM_SOURCE_FD_ENV: &str = "LUNA_SYSTEM_SOURCE_FD";
+const IMAGE_SOURCE_FD_ENV: &str = "LUNA_IMAGE_SOURCE_FD";
+
+fn secure_source_handoff_fds() -> Result<(), String> {
+    for variable in [SYSTEM_SOURCE_FD_ENV, IMAGE_SOURCE_FD_ENV] {
+        let Some(value) = std::env::var_os(variable) else {
+            continue;
+        };
+        let fd: i32 = value
+            .to_string_lossy()
+            .parse()
+            .map_err(|_| format!("invalid {variable} value"))?;
+        set_cloexec(fd)?;
+        std::env::remove_var(variable);
+    }
+    Ok(())
+}
+
+fn set_cloexec(fd: i32) -> Result<(), String> {
+    const F_GETFD: i32 = 1;
+    const F_SETFD: i32 = 2;
+    const FD_CLOEXEC: i32 = 1;
+
+    unsafe extern "C" {
+        fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    }
+
+    let flags = unsafe { fcntl(fd, F_GETFD) };
+    if flags < 0 {
+        return Err(format!("get source fd flags for {fd} failed"));
+    }
+    if unsafe { fcntl(fd, F_SETFD, flags | FD_CLOEXEC) } < 0 {
+        return Err(format!("set close-on-exec for source fd {fd} failed"));
+    }
+    Ok(())
+}
+
 fn default_development_system_state() -> SystemState {
     SystemState::new(
         SystemImageRef::new(Version::new(0, 1, 0)),
@@ -126,6 +163,11 @@ fn launch_graphical_user_session(
 }
 
 fn main() {
+    if let Err(error) = secure_source_handoff_fds() {
+        eprintln!("luna-system-runtime: invalid immutable source handoff: {error}");
+        std::process::exit(1);
+    }
+
     let login_command = graphical_login_command();
     let session_command = graphical_session_command();
     let respawn = std::env::var_os("LUNA_NO_RESPAWN").is_none();
