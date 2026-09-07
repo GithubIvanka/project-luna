@@ -21,7 +21,10 @@ fn secure_source_handoff_fds() -> Result<(), String> {
             .parse()
             .map_err(|_| format!("invalid {variable} value"))?;
         set_cloexec(fd)?;
-        std::env::remove_var(variable);
+        // SAFETY: this runs synchronously at PID 1 startup, before the runtime
+        // creates any worker threads or child processes. Removing these
+        // internal handoff variables therefore cannot race another env reader.
+        unsafe { std::env::remove_var(variable) };
     }
     Ok(())
 }
