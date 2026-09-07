@@ -92,11 +92,18 @@ The implementation must not copy the entire System Image into RAM merely to simp
 
 ## 6. Initial materialization
 
-The selected System Image is the source for an explicit boot-critical materialization set.
+The selected System Image manifest is the source of truth for the boot-critical materialization set:
 
-The current implementation keeps this set as an explicit bootstrap list in `luna-init` rather than copying the complete System Image. The complete dependency closure is still an open hardening requirement for production images.
+```toml
+[bootstrap]
+paths = ["/bin/busybox", "/sbin/luna-system-runtime", "/sbin/init"]
+```
+
+`luna-init` derives the adjacent manifest from the selected `.squashfs`, parses `[bootstrap].paths`, validates every path, and requires the minimum bootstrap contract to include `/bin/busybox`, `/sbin/luna-system-runtime`, and `/sbin/init`.
 
 For each resource, `luna-init` validates presence in the mounted immutable source and copies it into the RAM-backed root while preserving ordinary file/symlink semantics through BusyBox `cp -a`.
+
+The manifest describes the boot-critical set; complete runtime dependency closure remains a hardening requirement and the image builder must not silently rely on the entire image being present in RAM.
 
 ## 7. Lazy hydration and source lifetime
 
@@ -205,7 +212,7 @@ The current `develop` implementation provides:
 - direct DATA attachment at logical `/data`;
 - SYSTEM mounted read-only for bootstrap;
 - selected SquashFS mounted read-only as an internal source outside the future logical root;
-- explicit bootstrap subset rather than whole-image copy;
+- manifest-driven explicit bootstrap subset rather than whole-image copy;
 - trusted source FD handoff across the root transition;
 - runtime-generated `/dev`, `/proc`, `/sys`, `/run` and `/tmp`;
 - `pivot_root` into the RAM-backed filesystem;
@@ -213,7 +220,7 @@ The current `develop` implementation provides:
 
 Remaining implementation work includes:
 
-- manifest-driven boot-critical materialization/dependency closure;
+- complete executable/library dependency closure for the manifest bootstrap set;
 - secure file/tree materialization for all supported object types;
 - lazy hydration service/protocol over the trusted source FDs;
 - enforcement of the SYSTEM updater-only write authority;
