@@ -23,24 +23,7 @@ const IMAGE_SOURCE_FD_ENV: &str = "LUNA_IMAGE_SOURCE_FD";
 const SYS_PIVOT_ROOT: usize = 155;
 const SYS_UMOUNT2: usize = 166;
 const MNT_DETACH: usize = 2;
-
-/// The first userspace base is deliberately explicit rather than a copy of the
-/// complete System Image. Later resources can be hydrated by the runtime layer.
-const BOOTSTRAP_PATHS: &[&str] = &[
-    "/bin/busybox",
-    "/sbin/luna-system-runtime",
-    "/sbin/init",
-    "/etc/os-release",
-    "/etc/hostname",
-    "/etc/passwd",
-    "/etc/group",
-    "/etc/shadow",
-    "/etc/profile",
-    "/etc/luna",
-    "/usr/bin/luna-login",
-    "/usr/bin/niri-session",
-    "/usr/bin/setpriv",
-];
+const DEFAULT_SYSTEM_IMAGE: &str = "/images/luna-0.1.0.squashfs";
 
 fn main() -> ! {
     if let Err(error) = run() {
@@ -95,10 +78,16 @@ fn run() -> Result<(), String> {
         return Err(format!("selected System Image not found: {image_path}"));
     }
 
+    let manifest_path = manifest_path_for_image(&image)?;
+    let manifest = fs::read_to_string(format!("{SYSTEM_MOUNT}{manifest_path}"))
+        .map_err(|e| format!("read System Image manifest {manifest_path}: {e}"))?;
+    let bootstrap_paths = parse_bootstrap_paths(&manifest)?;
+    validate_bootstrap_contract(&bootstrap_paths)?;
+
     mount_loop_squashfs(&image_path, IMAGE_MOUNT)?;
 
-    prepare_root()?;
-    materialize_bootstrap(IMAGE_MOUNT, NEWROOT)?;
+    prepare_root(&bootstrap_paths)?;
+    materialize_bootstrap(IMAGE_MOUNT, NEWROOT, &bootstrap_paths)?;
 
     mount("proc", &format!("{NEWROOT}/proc"), "proc", "nosuid,nodev,noexec")?;
     mount(
@@ -157,8 +146,8 @@ fn run() -> Result<(), String> {
     )
 }
 
-fn prepare_root() -> Result<(), String> {
-    for path in BOOTSTRAP_PATHS {
+fn prepare_root(bootstrap_paths: &[String]) -> Result<(), String> {
+    for path in bootstrap_paths {
         let relative = path
             .strip_prefix('/')
             .ok_or_else(|| format!("invalid bootstrap path: {path}"))?;
@@ -176,8 +165,12 @@ fn prepare_root() -> Result<(), String> {
     Ok(())
 }
 
-fn materialize_bootstrap(source_root: &str, destination_root: &str) -> Result<(), String> {
-    for path in BOOTSTRAP_PATHS {
+fn materialize_bootstrap(
+    source_root: &str,
+    destination_root: &str,
+    bootstrap_paths: &[String],
+) -> Result<(), String> {
+    for path in bootstrap_paths {
         let source = format!("{source_root}{path}");
         let destination = PathBuf::from(destination_root).join(
             path.strip_prefix('/')
@@ -195,6 +188,94 @@ fn materialize_bootstrap(source_root: &str, destination_root: &str) -> Result<()
         copy_recursive(&source, &destination)?;
     }
     Ok(())
+}
+
+fn parse_bootstrap_paths(manifest: &str) -> Result<Vec<String>, String> {
+    let mut section = "";
+    let mut value = None;
+    for raw in manifest.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = &line[1..line.len() - 1];
+            continue;
+        }
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        if section == "bootstrap" && key.trim() == "paths" {
+            value = Some(parse_string_array(raw_value.trim())?);
+        }
+    }
+
+    value.ok_or_else(|| "System Image manifest has no [bootstrap].paths".to_owned())
+}
+
+fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
+    let value = value.trim();
+    if !value.starts_with('[') || !value.ends_with(']') {
+        return Err("bootstrap.paths must be a TOML string array".to_owned());
+    }
+
+    let body = &value[1..value.len() - 1];
+    let mut values = Vec::new();
+    let mut rest = body.trim();
+    while !rest.is_empty() {
+        if !rest.starts_with('"') {
+            return Err("bootstrap.paths entries must use double-quoted strings".to_owned());
+        }
+        let escaped = rest[1..]
+            .find('"')
+            .ok_or_else(|| "unterminated bootstrap.paths string".to_owned())?;
+        let end = escaped + 1;
+        let item = &rest[1..end];
+        if item.contains('\\') {
+            return Err("bootstrap.paths does not support escaped strings".to_owned());
+        }
+        values.push(item.to_owned());
+        rest = rest[end + 1..].trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let Some(after_comma) = rest.strip_prefix(',') else {
+            return Err("bootstrap.paths entries must be comma-separated".to_owned());
+        };
+        rest = after_comma.trim_start();
+    }
+    if values.is_empty() {
+        return Err("bootstrap.paths must not be empty".to_owned());
+    }
+    Ok(values)
+}
+
+fn validate_bootstrap_contract(paths: &[String]) -> Result<(), String> {
+    let required = ["/bin/busybox", "/sbin/luna-system-runtime", "/sbin/init"];
+    for path in required {
+        if !paths.iter().any(|value| value == path) {
+            return Err(format!("bootstrap manifest is missing required path: {path}"));
+        }
+    }
+
+    for path in paths {
+        if !path.starts_with('/')
+            || path.contains("//")
+            || path.contains("../")
+            || path.ends_with("/..")
+            || path.contains('\0')
+        {
+            return Err(format!("invalid bootstrap path: {path}"));
+        }
+    }
+    Ok(())
+}
+
+fn manifest_path_for_image(image: &str) -> Result<String, String> {
+    let stem = image
+        .strip_suffix(".squashfs")
+        .ok_or_else(|| format!("invalid System Image filename: {image}"))?;
+    Ok(format!("{stem}.toml"))
 }
 
 fn copy_recursive(source: &str, destination: &Path) -> Result<(), String> {
@@ -232,7 +313,7 @@ fn cmdline_value(content: &str, key: &str) -> Option<String> {
 
 fn system_image_from_cmdline(content: &str) -> Result<String, String> {
     let value = cmdline_value(content, "luna.system_image")
-        .unwrap_or_else(|| "/images/luna-0.1.0.squashfs".to_owned());
+        .unwrap_or_else(|| DEFAULT_SYSTEM_IMAGE.to_owned());
 
     if !value.starts_with("/images/")
         || !value.ends_with(".squashfs")
@@ -356,12 +437,13 @@ fn emergency_shell() -> ! {
 #[cfg(test)]
 mod tests {
     use super::{
-        cmdline_value, system_image_from_cmdline, BOOTSTRAP_PATHS, IMAGE_MOUNT, SYSTEM_MOUNT,
+        manifest_path_for_image, parse_bootstrap_paths, system_image_from_cmdline,
+        validate_bootstrap_contract,
     };
 
     #[test]
     fn parses_boot_device_from_cmdline() {
-        let value = cmdline_value(
+        let value = super::cmdline_value(
             "quiet luna.system_device=/dev/vda2 luna.data_device=/dev/vda3",
             "luna.system_device",
         );
@@ -381,16 +463,47 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_is_an_explicit_subset() {
-        assert!(BOOTSTRAP_PATHS.contains(&"/sbin/luna-system-runtime"));
-        assert!(!BOOTSTRAP_PATHS.contains(&"/usr/share"));
+    fn derives_adjacent_manifest_path() {
+        assert_eq!(
+            manifest_path_for_image("/images/luna-1.2.3.squashfs").unwrap(),
+            "/images/luna-1.2.3.toml"
+        );
     }
 
     #[test]
-    fn physical_sources_stay_outside_logical_root() {
-        assert!(SYSTEM_MOUNT.starts_with("/luna-source/"));
-        assert!(IMAGE_MOUNT.starts_with("/luna-source/"));
-        assert!(!SYSTEM_MOUNT.starts_with("/newroot/"));
-        assert!(!IMAGE_MOUNT.starts_with("/newroot/"));
+    fn parses_manifest_bootstrap_paths() {
+        let manifest = r#"
+            [image]
+            version = "1.2.3"
+
+            [bootstrap]
+            paths = ["/bin/busybox", "/sbin/luna-system-runtime", "/sbin/init"]
+        "#;
+        let paths = parse_bootstrap_paths(manifest).unwrap();
+        assert_eq!(
+            paths,
+            vec![
+                "/bin/busybox".to_owned(),
+                "/sbin/luna-system-runtime".to_owned(),
+                "/sbin/init".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_bootstrap_contract() {
+        let paths = vec!["/bin/busybox".to_owned()];
+        assert!(validate_bootstrap_contract(&paths).is_err());
+    }
+
+    #[test]
+    fn rejects_traversal_in_bootstrap_contract() {
+        let paths = vec![
+            "/bin/busybox".to_owned(),
+            "/sbin/luna-system-runtime".to_owned(),
+            "/sbin/init".to_owned(),
+            "/etc/../shadow".to_owned(),
+        ];
+        assert!(validate_bootstrap_contract(&paths).is_err());
     }
 }
