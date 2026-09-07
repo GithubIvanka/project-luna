@@ -1,6 +1,6 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration, PID supervisor и полноценный kernel/provider enforcement продолжаются.
+**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
 
 ## Назначение
 
@@ -14,7 +14,8 @@
 - подготовкой execution environment;
 - связью экземпляра с `UserSession`;
 - выбором runtime по `RuntimeSpec`;
-- границей между authorization и namespace/process enforcement.
+- границей между authorization и namespace/process enforcement;
+- внутренним trusted setup layer для материализации уже авторизованного execution environment и последующего `execve()`.
 
 `RuntimeKind` является свойством `RuntimeSpec`, а не самостоятельным компонентом. Принятые semantics включают Luna, Glibc и Bundle runtime.
 
@@ -27,44 +28,123 @@ ApplicationPlan
   ↓
 validate
   ↓
+luna-root-mapping
+  ↓
+MappingPlan
+  ↓
 luna-security
   ↓
 AuthorizedApplicationPlan
   ↓
-ApplicationLaunchContext + RuntimeProfile
+luna-app-runtime / trusted setup layer
   ↓
-luna-namespace
+Linux process + execution environment
   ↓
-PID namespace supervisor
+execve()
   ↓
-application process (PID 2+)
-  ↓
-ApplicationInstance
+ApplicationInstance / Running
 ```
+
+`luna-root-mapping` владеет семантикой logical-to-physical/resource mapping и строит `MappingPlan` из manifest/resource declarations и runtime/user/system context. `MappingPlan` не является security grant.
 
 План проходит валидацию до authorization. Authorization возвращает отдельный `AuthorizedApplicationPlan`; namespace materialization и process creation не выполняются во время policy evaluation.
 
+## Mapping boundary
+
+`luna-app-runtime` не создаёт mapping policy напрямую и не является альтернативным владельцем `MappingPlan`.
+
+```text
+ApplicationPlan
+    ↓
+luna-root-mapping
+    ↓
+MappingPlan
+    ↓
+luna-security
+    ↓
+AuthorizedApplicationPlan
+```
+
+`luna-root-mapping` отвечает за:
+
+- logical path semantics;
+- source selection;
+- file/subtree mappings;
+- dependency/resource mappings;
+- validation и построение `MappingPlan`.
+
+`luna-app-runtime` только потребляет уже сформированный и авторизованный план в рамках launch lifecycle.
+
 ## Security boundary
 
-`ApplicationPlan` не является grant. Он содержит requests, mapping context и executable identity. Только `ApplicationPlan::authorize()` может создать `AuthorizedApplicationPlan`.
+`ApplicationPlan` не является grant. Он содержит requests, mapping context и executable identity. Только authorization через `luna-security` может создать `AuthorizedApplicationPlan`.
 
 ```text
 request ≠ grant
 
 ApplicationPlan
     ↓ validate
+luna-root-mapping
+    ↓
+MappingPlan
+    ↓
 luna-security
     ↓ Allow
 AuthorizedApplicationPlan
     ↓
-ApplicationLaunchContext
+trusted setup layer
     ↓
-luna-namespace / process launch
+luna-namespace / process launch primitives
 ```
 
 `Deny`, policy errors и неподдержанные `Constrained` decisions являются fail-closed. Launcher не принимает обычный `ApplicationPlan`, только уже авторизованный тип.
 
 Capability identity также отделена от authorization: `CapabilityRegistry` определяет известный capability и provider, а `CapabilityGrant` появляется только после успешной authorization. Provider не принимает policy decision и не может расширить выданный grant.
+
+## Trusted setup layer
+
+Trusted setup является **внутренним слоем `luna-app-runtime`**, а не отдельным постоянным daemon или самостоятельной security authority.
+
+Он отвечает только за материализацию `AuthorizedApplicationPlan` в Linux execution environment и переход к приложению:
+
+```text
+AuthorizedApplicationPlan
+        ↓
+trusted setup layer
+        ├── process creation
+        ├── cgroup placement
+        ├── mount namespace
+        ├── RAM-backed logical `/`
+        ├── authorized resource mappings
+        ├── runtime filesystems
+        ├── final credentials/capabilities setup
+        ├── final security restrictions
+        └── execve()
+```
+
+Trusted setup **не может**:
+
+- добавлять новые mappings вне `AuthorizedApplicationPlan`;
+- расширять security grants;
+- самостоятельно разрешать denied resources;
+- выдавать capability grants, которых нет в authorized plan;
+- расширять resource limits;
+- обходить `luna-security`.
+
+Таким образом:
+
+```text
+luna-root-mapping
+    = что и откуда должно попасть в logical environment
+
+luna-security
+    = что действительно разрешено
+
+trusted setup
+    = как разрешённое материализуется средствами Linux
+```
+
+Trusted setup является фазой подготовки того же процесса, который после завершения подготовки делает `execve()`. Отдельный постоянный environment-helper daemon не является частью принятой архитектуры.
 
 ## RuntimeProfile и logical root
 
@@ -113,9 +193,11 @@ Capabilities также не являются скрытым продолжен�
 
 ## PID boundary
 
-Application PID 1 запрещён как execution target. При использовании PID namespace PID 1 резервируется под Luna namespace supervisor/init, а реальный executable приложения стартует с PID 2 или выше.
+По умолчанию ApplicationInstance не получает отдельный PID namespace. Приложение запускается как обычный процесс в нормальном system PID namespace и получает обычный non-1 PID.
 
-Это не механизм сокрытия изоляции от приложения. Это корректная Linux lifecycle boundary: namespace supervisor отвечает за reaping и lifetime namespace, а application process не принимает на себя специальную роль PID 1.
+`luna-system-runtime` остаётся PID 1 нормального Luna userspace process namespace. `luna-app-runtime` не является дополнительным init-процессом, и `luna-app-init` не существует.
+
+Если отдельный PID namespace когда-либо потребуется для конкретного сценария, это требует отдельного архитектурного решения и не должно молча добавлять новый runtime layer.
 
 ## Executable boundary
 
@@ -175,11 +257,11 @@ luna-app-runtime
 ApplicationInstance
 ```
 
-`luna-system-runtime` остаётся system-wide supervisor. `luna-app-runtime` владеет application execution lifecycle. Generic `luna-runtime` daemon отсутствует.
+`luna-system-runtime` остаётся system-wide supervisor. `luna-app-runtime` владеет application execution lifecycle и внутренним trusted setup layer. Generic `luna-runtime` daemon отсутствует.
 
 ## Не владеет
 
-Bundle install/remove, созданием UserSession, system-wide supervision, authorization policy, raw filesystem primitives или UEFI boot.
+Bundle install/remove, созданием UserSession, system-wide supervision, authorization policy, семантикой logical mapping или отдельным постоянным environment-helper daemon.
 
 ## Тестовый контракт
 
@@ -198,11 +280,13 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - invalid launch context отклоняет запуск до создания staging directory;
 - staging внутри System Image root отклоняется;
 - launcher принимает только authorized plan type;
+- trusted setup не может материализовать resource вне authorized plan;
+- trusted setup не может расширить capability/resource grant;
 - capability names неизвестные Registry не могут получить grant;
-- PID supervisor test must keep application executable at PID 2+ when PID isolation is enabled.
+- default application launch не требует PID namespace supervisor.
 
-Linux integration дополнительно проверяет cleanup staging root, PID namespace lifecycle и process reaping.
+Linux integration дополнительно проверяет cleanup staging root, mount namespace lifecycle, process lifecycle и process reaping.
 
 ## Открыто
 
-Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; PID supervisor/child-spawn implementation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; полноценный kernel enforcement.
+Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; `/proc` visibility model; `/sys` visibility model; полноценный kernel enforcement.
