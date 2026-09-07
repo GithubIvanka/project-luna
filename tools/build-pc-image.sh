@@ -177,6 +177,9 @@ arch = "x86_64"
 
 [kernels]
 compatible = ["$KERNEL_VERSION"]
+
+[bootstrap]
+paths = ["/bin/busybox", "/sbin/luna-system-runtime", "/sbin/init", "/etc/os-release", "/etc/hostname", "/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile", "/etc/luna", "/usr/bin/luna-login", "/usr/bin/niri-session", "/usr/bin/setpriv"]
 EOF
 truncate -s "${SYSTEM_SIZE_MIB}M" "$OUT/luna-system.img"
 mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$WORK/system-partition" "$OUT/luna-system.img" >/dev/null
