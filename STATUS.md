@@ -1,6 +1,6 @@
 # Project Luna — текущее состояние
 
-**Последнее обновление:** 2026-09-06
+**Последнее обновление:** 2026-09-07
 
 > `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
 
@@ -25,9 +25,9 @@
 | Persistent state | durable `redb` backend в `DATA/system/state` реализован |
 | Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
 | Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
-| `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
+| `luna-system-runtime` | real child supervision, UserSession lifecycle ownership и trusted immutable-source FD intake реализованы |
 | `luna-app-runtime` | ApplicationInstance lifecycle, ApplicationPlan и typed execution boundary реализованы |
-| `luna-init` | native musl early-userspace с RAM-backed tmpfs root, explicit bootstrap subset, отдельными runtime pseudo-filesystems и финальным `chroot` в `luna-system-runtime` реализован; lazy hydration и dependency-closure ещё продолжаются |
+| `luna-init` | native musl early-userspace с прямым RAM-backed logical `/`, DATA в `/data`, hidden SYSTEM/Image source boundary, manifest-driven bootstrap и `pivot_root` в `luna-system-runtime` реализован; dependency closure и lazy hydration ещё продолжаются |
 | `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
 | Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
 | External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
@@ -49,9 +49,9 @@ Linux kernel
  ↓
 luna-init
  ↓
-internal immutable System Image source
+SYSTEM + selected System Image source
  ↓
-RAM-backed tmpfs logical /
+RAM-backed logical /
  ↓
 luna-system-runtime (PID 1)
  ↓
@@ -128,6 +128,16 @@ Capabilities:
 
 `luna-security` решает, разрешён ли запрос. `luna-namespace` и provider backends должны применять уже авторизованный результат.
 
+### SYSTEM security boundary
+
+```text
+ordinary user / application → NO ACCESS
+normal system runtime       → controlled read-only source access
+luna-updater                → sole SYSTEM writer
+```
+
+SYSTEM не является частью logical `/` и не должен появляться в application filesystem mappings. В normal boot он подключается read-only. Runtime source access передаётся через trusted handoff boundary; физические SYSTEM/source pathnames остаются за пределами user-visible root.
+
 ### Текущее состояние namespace
 
 Production materialization уже использует RAM-backed logical root и profile-selected trusted resources вместо полного System Image OverlayFS lower layer. Открыты hardening/integration задачи для privileged Linux tests, filtered `/dev`, child-creation primitive и полной lazy hydration.
@@ -141,14 +151,18 @@ initramfs
     ↓
 /init = luna-init
     ↓
-SYSTEM + DATA + selected System Image source
+RAM-backed logical root + DATA at /data
     ↓
-/tmpfs logical /
+SYSTEM/Image mounted outside future logical root
     ↓
-chroot
+boot-critical materialization
+    ↓
+pivot_root()
     ↓
 /sbin/luna-system-runtime = system PID 1
 ```
+
+Старые initramfs `/proc`, `/sys`, `/dev` mounts закрываются перед root transition. SYSTEM и selected System Image не становятся `/` и не отдаются приложениям как pathname tree.
 
 Классический `switch_root` к SquashFS root больше не используется целевым `luna-init` path.
 
@@ -167,14 +181,14 @@ system PID namespace
 
 ## Ближайшие технические приоритеты
 
-1. Зафиксировать boot-critical materialization manifest/dependency closure и реализовать безопасную материализацию из внутреннего System Image source.
-2. Реализовать lazy System Image hydration так, чтобы materialized resources не зависели от lifetime image.
+1. Довести manifest-driven bootstrap до полной dependency closure для boot-critical binaries и их runtime resources.
+2. Реализовать lazy System Image hydration поверх trusted source boundary так, чтобы materialized resources не зависели от pathname/source lifetime.
 3. Завершить physical symlink/containment hardening для mapping roots и staging paths.
 4. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
 5. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
 6. Завершить graphical login + niri + Noctalia integration.
 7. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
-8. Завершить durable boot/update success/failure state.
+8. Завершить durable boot/update success/failure state и enforcement updater-only SYSTEM writes.
 9. Завершить LBP1 conformance и Ed25519 trust binding.
 10. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
 11. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
@@ -189,4 +203,4 @@ docs/contracts/LUNA-INIT-CONTRACT.md
 docs/decisions/0008-pid-namespace-and-ram-hydration.md
 ```
 
-Они описывают принятую модель: `luna-init` строит RAM-backed logical `/`, `luna-system-runtime` является PID 1, а отдельного `luna-app-init` нет.
+Они описывают принятую модель: `luna-init` строит прямой RAM-backed logical `/`, `luna-system-runtime` является PID 1, SYSTEM остаётся физическим скрытым source boundary, а отдельного `luna-app-init` нет.
