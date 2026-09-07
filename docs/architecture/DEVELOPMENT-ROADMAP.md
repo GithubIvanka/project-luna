@@ -20,7 +20,7 @@ luna-boot.efi
   ↓
 luna-init
   ↓
-logical /
+RAM-backed logical /
   ↓
 luna-system-runtime
   ↓
@@ -70,26 +70,27 @@ shutdown / reboot / resume
 
 ## Этап 2 — ранний userspace и logical root
 
-Цель: `luna-init` строит RAM-backed logical `/` из внутреннего immutable System Image source и передаёт управление `luna-system-runtime` без `switch_root` к SquashFS.
+Цель: `luna-init` создаёт RAM-backed logical `/` напрямую из immutable System Image source и передаёт управление `luna-system-runtime` без `switch_root` к SquashFS и без дополнительной root/source прослойки.
 
-Уже реализовано в первом проходе:
+Уже реализовано в текущем проходе:
 
-- отдельный tmpfs для logical `/`;
-- независимое подключение DATA;
-- read-only System Image как внутренний source;
-- явный bootstrap subset вместо полной копии image;
-- runtime-generated `/dev`, `/proc`, `/sys`, `/run`, `/tmp`;
-- отсоединение System Image и SYSTEM source перед передачей управления;
-- `chroot` в RAM-backed root с запуском `luna-system-runtime` как PID 1.
+- отдельный tmpfs становится физической основой logical `/` через `pivot_root`;
+- DATA подключается непосредственно как logical `/data`;
+- SYSTEM и выбранный SquashFS монтируются только в скрытом boot-only mount tree за пределами будущего logical root;
+- manifest `[bootstrap].paths` задаёт boot-critical materialization set;
+- runtime-generated `/dev`, `/proc`, `/sys`, `/run`, `/tmp` создаются отдельно;
+- trusted source FDs передаются `luna-system-runtime` через root transition;
+- старое initramfs дерево detaches после `pivot_root`, поэтому SYSTEM/source pathnames не становятся частью пользовательского `/`;
+- `/sbin/init` запускает `luna-system-runtime` как PID 1.
 
 Остаётся проверить и укрепить:
 
-- manifest-driven bootstrap set;
 - полную dependency closure boot-critical resources;
 - корректность materialization всех поддерживаемых типов файлов;
 - transactional rollback при каждом промежуточном failure;
-- lazy hydration protocol;
-- image-retirement safety.
+- lazy hydration protocol поверх trusted source boundary;
+- SYSTEM updater-only write enforcement;
+- image-retirement safety и runtime dependency tracking.
 
 ## Этап 3 — system runtime и состояние
 
