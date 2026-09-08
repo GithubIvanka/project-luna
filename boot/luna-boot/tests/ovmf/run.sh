@@ -46,7 +46,8 @@ mkdir -p "$OUT/data-root/system" "$OUT/data-root/users/luna" "$OUT/data-root/cac
 mkfs.ext4 -q -F -L LUNA-DATA -d "$OUT/data-root" "$OUT/data.img" 128M
 
 # GPT: ESP at 1 MiB, SYSTEM at 65 MiB, DATA immediately after SYSTEM.
-truncate -s 449M "$OUT/disk.img"
+# Keep disk.img larger than the final partition end plus GPT backup-table slack.
+truncate -s 520M "$OUT/disk.img"
 sgdisk --zap-all "$OUT/disk.img" >/dev/null
 sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B \
        --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 \
