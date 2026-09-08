@@ -37,6 +37,7 @@ Handoff не является файлом и не хранится на SYSTEM,
 - `DATA_PARTITION` — GPT disk GUID + partition GUID;
 - `SYSTEM_IMAGE` — семейство, версия, имя файла, manifest identity и image digest;
 - `KERNEL_IDENTITY` — identity/version running kernel и digest выбранного kernel artifact;
+- `LUNA_INIT_IMAGE` — адрес, размер и BLAKE3-256 digest загруженного `luna-X.Y.Z.init` ELF;
 - `BOOT_MODE` — normal/detailed/recovery/factory/external;
 - `BOOT_STATE` — минимальный контекст текущей boot attempt.
 
@@ -56,6 +57,14 @@ Handoff передаёт identity выбранного image и ожидаемы
 
 System Image остаётся immutable source. Он не становится физическим `/`.
 
+Для образа версии `X.Y.Z` bootloader также требует канонический initial-userspace artifact:
+
+```text
+SYSTEM/images/luna-X.Y.Z.init
+```
+
+Это отдельный boot-critical ELF, логически связанный с выбранным System Image.
+
 ## 6. Kernel
 
 Kernel является отдельным versioned artifact. Handoff содержит его identity для provenance и проверки boot attempt; передавать сам kernel в handoff не требуется, поскольку kernel уже исполняется.
@@ -70,9 +79,9 @@ Luna Handoff не дублирует ACPI, E820 или другие kernel-owned
 
 ## 8. Memory ownership
 
-Handoff storage выделяется `luna-boot` до `ExitBootServices`.
+Handoff storage и `luna-init` image storage выделяются `luna-boot` до `ExitBootServices`.
 
-Память handoff должна быть сохранена как boot-reserved до момента, когда Luna kernel integration завершит обработку объекта. Нельзя полагаться на случайное сохранение адреса в свободной RAM.
+Память handoff и загруженного initial-userspace image должна быть сохранена как boot-reserved до момента, когда Luna kernel integration завершит их обработку. Нельзя полагаться на случайное сохранение адреса в свободной RAM.
 
 После `ExitBootServices` `luna-boot` не использует Boot Services allocator, UEFI filesystem protocols или console APIs.
 
@@ -80,7 +89,7 @@ Handoff storage выделяется `luna-boot` до `ExitBootServices`.
 
 Kernel command line остаётся допустимым transport для стандартных Linux kernel parameters и временной диагностики.
 
-Однако Luna не использует `luna.system_device`, `luna.data_device` и `luna.system_image` как основной production ABI после внедрения Handoff v1.
+Однако Luna не использует `luna.system_device`, `luna.data_device`, `luna.system_image` или другие Luna-specific storage/image selectors как основной production ABI после внедрения Handoff v1.
 
 Таким образом, Luna-specific boot state является структурированным объектом, а не набором строковых параметров.
 
@@ -88,13 +97,26 @@ Kernel command line остаётся допустимым transport для ст�
 
 Luna kernel integration должна сделать validated `LunaBootHandoffV1` доступным `luna-init` до его запуска.
 
+Канонический userspace channel:
+
+```text
+FD 3 = read-only Luna boot-context
+```
+
+FD 3 установлен kernel до передачи управления entry point `luna-init`, начинается с offset 0 и содержит сериализованные байты валидированного `LunaBootHandoffV1`.
+
+`luna-init` обязан прочитать контекст и закрыть FD 3 до создания или запуска обычных дочерних процессов.
+
+Подробный контракт канала: `docs/contracts/LUNA-INIT-IMAGE-CONTRACT.md`; решение зафиксировано в `docs/decisions/0012-luna-init-boot-context-fd.md`.
+
 `luna-init` получает как минимум:
 
 ```text
 SYSTEM identity
 DATA identity
 selected image identity + digest
-running kernel identity
+running kernel identity + digest
+luna-init identity + digest
 boot attempt id
 boot mode
 boot state context
@@ -159,16 +181,22 @@ Handoff считается недействительным при:
 - выходе record за `total_size`;
 - integer overflow;
 - отсутствующем обязательном record;
-- невозможной/несогласованной identity.
+- невозможной/несогласованной identity;
+- отсутствующем или невалидном `LUNA_INIT_IMAGE`.
 
 При invalid handoff `luna-init` не должен молча переходить к старому строковому fallback discovery.
+
+Отсутствующий или недоступный FD 3 является фатальной ошибкой direct-init startup.
 
 ## 15. Связанные документы
 
 ```text
 docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md
-docs/contracts/KERNEL-CONTRACT.md
+docs/contracts/LUNA-INIT-IMAGE-CONTRACT.md
 docs/contracts/LUNA-INIT-CONTRACT.md
+docs/decisions/0010-versioned-luna-init-artifact.md
+docs/decisions/0011-canonical-pid1-and-direct-boot-chain.md
+docs/decisions/0012-luna-init-boot-context-fd.md
 docs/contracts/BOOT-STATE-CONTRACT.md
 docs/contracts/FAILURE-RECOVERY-CONTRACT.md
 ```
