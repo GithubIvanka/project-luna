@@ -6,7 +6,7 @@ use core::ptr::NonNull;
 
 use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
-use uefi::proto::{Protocol, ProtocolPointer};
+use uefi::proto::Protocol;
 use uefi::Handle;
 
 use crate::error::{BootError, BootResult};
@@ -47,7 +47,7 @@ impl<P: Protocol + ?Sized> Deref for BorrowedProtocol<P> {
 /// Disk protocols are commonly already opened by UEFI drivers, so Exclusive
 /// access can legitimately return ACCESS_DENIED. `GET_PROTOCOL` is the UEFI
 /// mode intended for shared access and does not require a later CloseProtocol.
-fn open_shared<P: Protocol + ?Sized>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
+fn open_shared<P: Protocol>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
     let protocol = unsafe {
         open_protocol::<P>(
             OpenProtocolParams {
