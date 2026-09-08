@@ -32,10 +32,12 @@ For an image with version `X.Y.Z`:
 SYSTEM/images/
 ├── luna-X.Y.Z.squashfs
 ├── luna-X.Y.Z.toml
-└── luna-X.Y.Z.init.elf
+└── luna-X.Y.Z.init
 ```
 
-The `.init.elf` artifact is versioned with the System Image because `luna-init` owns the transition from the boot context into the corresponding System Environment.
+The `.init` artifact is versioned with the System Image because `luna-init` owns the transition from the boot context into the corresponding System Environment.
+
+The `.init` suffix denotes the artifact role. The payload format is still strictly required to be ELF64; the filename suffix is not the format declaration.
 
 The kernel remains independently versioned under `SYSTEM/kernels/`.
 
