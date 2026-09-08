@@ -17,7 +17,7 @@ Each System Image version owns a standalone statically linked `luna-init` ELF ar
 SYSTEM/images/
 ├── luna-X.Y.Z.squashfs
 ├── luna-X.Y.Z.toml
-└── luna-X.Y.Z.init.elf
+└── luna-X.Y.Z.init
 ```
 
 `luna-boot.efi` selects the three artifacts as one image target:
@@ -28,7 +28,9 @@ System Image + manifest + luna-init
 
 The selected kernel remains an independent artifact under `SYSTEM/kernels/<kernel-id>/`.
 
-`luna-boot.efi` loads the `.init.elf` bytes into reserved physical memory and passes their address, size and BLAKE3-256 digest through the `LUNA_INIT_IMAGE` record of `LunaBootHandoffV1`.
+`luna-boot.efi` loads the `.init` bytes into reserved physical memory and passes their address, size and BLAKE3-256 digest through the `LUNA_INIT_IMAGE` record of `LunaBootHandoffV1`.
+
+The `.init` suffix denotes the artifact role, not its binary format. The payload is strictly an ELF64 executable for x86-64.
 
 The Linux kernel validates the object again and directly executes it as the first userspace process. No initramfs archive is created or used for this purpose.
 
@@ -56,12 +58,13 @@ Positive:
 - no requirement for `luna-boot` to parse SquashFS;
 - deterministic pairing of image and initial userspace supervisor;
 - direct PID 1 semantics;
-- independent kernel updates remain possible.
+- independent kernel updates remain possible;
+- the artifact naming remains consistent with Luna's role-oriented `squashfs` / `toml` naming.
 
 Costs:
 
 - every System Image version carries one additional boot-critical ELF;
-- update tooling must validate and atomically install the `.init.elf` together with its image/manifest;
+- update tooling must validate and atomically install the `.init` artifact together with its image/manifest;
 - `luna-boot` must validate the artifact before `ExitBootServices`;
 - the kernel must repeat digest and ELF validation.
 
