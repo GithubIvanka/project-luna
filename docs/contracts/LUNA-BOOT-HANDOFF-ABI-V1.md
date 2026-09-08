@@ -189,8 +189,10 @@ Identifies the exact `luna-init` ELF loaded by `luna-boot` into reserved physica
 For image version `X.Y.Z`, the bootloader resolves the canonical artifact:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.init.elf
+SYSTEM/images/luna-X.Y.Z.init
 ```
+
+The `.init` suffix denotes the artifact role; the payload format is strictly ELF64 for x86-64.
 
 Payload:
 
