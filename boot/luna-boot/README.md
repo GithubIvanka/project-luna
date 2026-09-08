@@ -11,20 +11,45 @@ luna-boot.efi
   ↓
 GPT → SYSTEM → ext4
   ↓
-System Image + совместимое Linux bzImage
+System Image manifest + совместимый Linux bzImage
   ↓
-boot_params + E820 + initramfs
+boot_params + E820 + LunaBootHandoffV1
   ↓
 ExitBootServices
   ↓
 identity paging + вход x86_64 Linux
   ↓
-Linux
+Luna Linux kernel
+  ↓
+luna-init (PID 1)
 ```
+
+`luna-boot` не загружает отдельный initramfs userspace. Luna kernel должен содержать boot-critical driver/filesystem/crypto support, необходимый для непосредственного запуска `luna-init`.
 
 Меню загрузки не имеет таймера. `luna-boot` один раз проверяет очередь ввода UEFI при запуске: если в очереди есть `B`, открывается меню; иначе загрузка продолжается без искусственной задержки.
 
-Сам System Image загрузчик не интерпретирует. Он остаётся файлом `*.squashfs`; ранний userspace Linux отвечает за построение логического корня.
+Сам System Image загрузчик не интерпретирует как Linux root. Он остаётся файлом `*.squashfs`; `luna-init` использует его как immutable source для построения System Environment.
+
+## Luna Boot Handoff
+
+Luna-specific boot state передаётся как `LunaBootHandoffV1` через Linux x86 `setup_data`.
+
+Handoff находится в выделенной физической памяти и не является файлом.
+
+В v1 передаются:
+
+- identity SYSTEM partition;
+- identity DATA partition;
+- selected System Image identity and digest;
+- running kernel identity and digest;
+- boot mode;
+- boot attempt/state context.
+
+Полный ABI:
+
+```text
+docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md
+```
 
 ## Граница ответственности
 
@@ -35,9 +60,12 @@ Linux
 - выбор совместимой пары System Image + kernel;
 - Boot Menu;
 - boot-time fallback;
-- передачу boot-параметров Linux.
+- Linux boot-protocol setup;
+- Luna Boot Handoff;
+- `ExitBootServices`;
+- передачу управления Linux kernel.
 
-Он не владеет `UserSession`, application lifecycle, DATA management или обычным userspace runtime.
+Он не владеет `luna-init` runtime supervision, UserSession, application lifecycle, DATA management или обычным userspace runtime.
 
 ## Сборка
 
@@ -50,8 +78,6 @@ Linux
 - target `x86_64-unknown-uefi`;
 - для OVMF-теста: `qemu-system-x86_64`, `sgdisk`, `mkfs.ext4`, `mkfs.fat`, `mformat`, `mmd`, `mcopy`, `dd`.
 
-На Ubuntu также должны быть доступны инструменты UEFI/EFI и QEMU из соответствующих системных пакетов.
-
 ### Рекомендуемый способ сборки
 
 Из корня репозитория:
@@ -59,14 +85,6 @@ Linux
 ```bash
 bash tools/build-luna-boot.sh
 ```
-
-Скрипт:
-
-1. проверяет `cargo` и `rustup`;
-2. устанавливает `x86_64-unknown-uefi`, если target отсутствует;
-3. переходит в `boot/luna-boot`;
-4. выполняет release-сборку;
-5. проверяет наличие итогового `.efi`.
 
 Результат:
 
@@ -87,19 +105,8 @@ cargo build --release --target x86_64-unknown-uefi
 file boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
 ```
 
-Для полноценного OVMF-теста:
-
-```bash
-export OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
-export OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
-export LUNA_TEST_KERNEL=/path/to/bzImage
-export LUNA_TEST_INITRD=/path/to/initramfs.img
-export LUNA_TEST_SQUASHFS=/path/to/luna-test.squashfs
-bash tools/test-luna-boot-ovmf.sh
-```
-
-Скрипт сначала собирает `luna-boot`, затем запускает существующий тест `boot/luna-boot/tests/ovmf/run.sh`.
+Для OVMF bring-up и полноценной no-initramfs интеграции сценарий тестирования должен использовать Luna kernel и SYSTEM/DATA test image; отдельный `LUNA_TEST_INITRD` больше не является частью целевого boot contract.
 
 ## Важное ограничение текущего теста
 
-Текущий OVMF bring-up доказывает UEFI/Linux boot path и тестовую загрузку через init, но сам по себе ещё не является доказательством полного production-сценария `System Image → logical root → luna-system-runtime → UserSession → graphical desktop`.
+Существующий OVMF bring-up доказывает UEFI/Linux handoff и тестовую загрузку, но ещё не является доказательством production-сценария `luna-boot → Luna kernel → luna-init PID 1 → luna-system-runtime → UserSession → graphical desktop`.
