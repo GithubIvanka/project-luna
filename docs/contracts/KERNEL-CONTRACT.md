@@ -1,57 +1,169 @@
 # Контракт Linux kernel
 
-**Статус:** черновик для Phase 0.
+**Статус:** Accepted / реализация в процессе  
+**Дата:** 2026-09-08
 
 ## 1. Граница
 
-Kernel является независимым от System Image артефактом. Он хранится в `SYSTEM/kernels/` и выбирается только с учётом совместимости, объявленной для выбранного System Image.
+Kernel является независимым от System Image versioned артефактом. Он хранится в `SYSTEM/kernels/` и выбирается только с учётом совместимости, объявленной для выбранного System Image.
+
+Kernel является частью Luna boot chain и должен уметь запускать `luna-init` без отдельного initramfs userspace слоя.
 
 ## 2. Формат для x86_64 PC
 
-Текущий boot path использует стандартный Linux `bzImage` из `arch/x86/boot/bzImage`. `luna-boot.efi` реализует Linux x86_64 boot protocol и не обязан вызывать EFI stub.
+Текущий boot path использует стандартный Linux `arch/x86/boot/bzImage`. `luna-boot.efi` реализует Linux x86_64 boot protocol.
 
-## 3. Metadata
+Luna не требует EFI stub как отдельного userspace слоя.
 
-Для kernel должны быть доступны как минимум:
+## 3. Luna kernel boot model
 
-- версия;
-- архитектура;
-- тип/формат образа ядра;
-- идентификатор артефакта;
-- сведения, необходимые для проверки совместимости и загрузки.
-
-Точная структура каталога kernel и metadata пока не утверждена.
-
-## 4. Совместимость
-
-Совместимость является отношением между System Image и kernel. Kernel нельзя считать совместимым только потому, что его версия новее или он находится в `SYSTEM/kernels/`.
-
-## 5. Жизненный цикл
+Целевая последовательность:
 
 ```text
-публикация
-  ↓
-проверка
-  ↓
-установка
-  ↓
-доступен для совместимого image
-  ↓
-активация
-  ↓
-проверка успешной загрузки
-  ↓
-допускается в retention
+luna-boot.efi
+    ↓
+Linux bzImage
+    ↓
+Luna kernel early boot
+    ↓
+luna-init (PID 1)
+    ↓
+luna-system-runtime
 ```
 
-## 6. Сбой ядра
+Kernel configuration и небольшая Luna-specific kernel integration обеспечивают непосредственный запуск `luna-init`.
 
-Kernel-level failure может требовать перезагрузки. После повторного запуска `luna-boot.efi` должен выбрать другую совместимую комбинацию согласно boot state и failure policy.
+Классическая схема `kernel → initramfs → switch_root/pivot_root → second init` не является целевой архитектурой Luna.
 
-## 7. Независимость обновлений
+## 4. Boot-critical built-ins
 
-Обновление kernel не должно переписывать System Image. Обновление System Image не должно требовать замены kernel, если существующее ядро остаётся совместимым.
+Все kernel capabilities, без которых поддерживаемый Luna boot profile не может обнаружить SYSTEM/DATA, получить доступ к boot storage, прочитать необходимую файловую систему, получить доступ к выбранному System Image и запустить `luna-init`, должны быть built-in (`CONFIG_*=y`).
 
-## 8. Открытые вопросы
+Категории оцениваются по реальной boot dependency closure, а не по фиксированному заранее списку. В зависимости от поддерживаемой платформы сюда могут входить:
 
-Нужно отдельно закрепить точный metadata contract, integrity/authenticity model, статус активного ядра и правила удержания предыдущих ядер.
+- PCI и соответствующие bus/controller drivers;
+- storage-controller drivers;
+- NVMe/SATA/USB storage support, когда это требуется boot profile;
+- GPT/partition support;
+- ext4;
+- SquashFS;
+- необходимые crypto/verification primitives;
+- необходимые input/display/console primitives для выбранного boot profile;
+- firmware, необходимое до появления нормального userspace.
+
+Linux допускает встраивание firmware непосредственно в kernel через `CONFIG_EXTRA_FIRMWARE` и `CONFIG_EXTRA_FIRMWARE_DIR`, в том числе когда firmware требуется для доступа к boot device без initramfs. citeturn856784search0
+
+## 5. Loadable modules
+
+`CONFIG_MODULES=y` остаётся допустимым и ожидаемым для необязательных post-boot drivers.
+
+Важно различать:
+
+```text
+boot-critical functionality → built-in
+optional runtime functionality → module
+```
+
+Отсутствие initramfs не означает запрет kernel modules. Оно означает, что ранний boot не зависит от загрузки модулей из initramfs.
+
+## 6. Kernel artifact layout
+
+Kernel и его module set образуют одну versioned artifact identity.
+
+Каноническое направление хранения:
+
+```text
+SYSTEM/kernels/
+└── <kernel-id>/
+    ├── bzImage
+    ├── kernel.toml
+    └── modules/
+        └── lib/modules/<kernel-release>/...
+```
+
+`kernel.toml` описывает artifact identity, release, architecture, compatibility metadata и module-set identity.
+
+Модульный набор не является глобальным shared directory для всех kernel versions.
+
+## 7. Module compatibility
+
+Module set должен быть собран против конкретного kernel configuration/release и не должен автоматически считаться совместимым с другим kernel только по имени.
+
+Для shared signing infrastructure необходимо учитывать kernel/module version information; Linux также поддерживает `CONFIG_MODVERSIONS` и kernel-side signature verification. citeturn856784search4
+
+## 8. Kernel metadata
+
+Для kernel должны быть доступны:
+
+- artifact identity;
+- kernel release/version;
+- architecture;
+- format (`bzImage` для x86_64 PC);
+- kernel digest;
+- module-set identity/digest;
+- compatibility metadata;
+- сведения, необходимые `luna-boot` для безопасного выбора.
+
+Точная TOML-схема `kernel.toml` — отдельный контракт и не должна смешиваться с boot handoff ABI.
+
+## 9. Luna Boot Handoff
+
+`luna-boot` передаёт Luna-specific boot context через `LunaBootHandoffV1`, связанный с Linux x86 `setup_data`.
+
+Kernel должен валидировать Handoff и сделать его доступным `luna-init` до запуска initial userspace. Linux x86 boot protocol определяет `setup_data` как extensible linked-list boot data mechanism. citeturn880881search1turn880881search2
+
+## 10. Command line
+
+Kernel command line остаётся частью Linux boot protocol для kernel parameters и диагностики.
+
+Luna-specific storage/image identity не должна зависеть от `luna.system_device`, `luna.data_device` или `luna.system_image` строкового parsing в production boot path.
+
+## 11. Kernel/root responsibility
+
+Kernel не должен превращать System Image в долгоживущий root filesystem только потому, что Luna использует SquashFS.
+
+Целевая ответственность:
+
+```text
+kernel
+    → hardware + kernel subsystems
+    → initial userspace launch
+
+luna-init
+    → physical Luna resource knowledge
+    → System Environment construction
+    → logical root construction
+```
+
+System Image остаётся immutable source для `luna-init` и дальнейшей hydration/materialization модели.
+
+## 12. Lifecycle
+
+```text
+publish
+  ↓
+validate
+  ↓
+install
+  ↓
+compatible with image(s)
+  ↓
+activate
+  ↓
+boot confirmation
+  ↓
+retention eligibility
+```
+
+Kernel update не переписывает System Image. System Image update не требует замены kernel, если существующее kernel остаётся совместимым.
+
+## 13. Open implementation work
+
+- define exact kernel manifest schema;
+- define supported boot-profile driver closure;
+- implement Luna kernel integration for direct `luna-init` launch;
+- build/test required drivers as built-in;
+- package version-matched module trees under `SYSTEM/kernels/<kernel-id>/modules`;
+- define module signing and trust policy;
+- validate Handoff before initial userspace launch;
+- integrate kernel artifact discovery with `luna-boot`.
