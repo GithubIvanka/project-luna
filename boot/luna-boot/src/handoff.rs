@@ -127,7 +127,6 @@ impl LunaHandoff {
             core::ptr::write_bytes(address as *mut u8, 0, pages * PAGE_SIZE);
             let node = address as *mut u8;
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), node.add(SETUP_DATA_NODE_SIZE), bytes.len());
-            core::ptr::copy_nonoverlapping(node_as_bytes().as_ptr(), node, SETUP_DATA_NODE_SIZE);
             (node.add(0) as *mut u64).write(0);
             (node.add(8) as *mut u32).write(SETUP_DATA_TYPE);
             (node.add(12) as *mut u32).write(bytes.len() as u32);
@@ -135,8 +134,6 @@ impl LunaHandoff {
         Ok(Self { address, size: bytes.len(), allocation_pages: pages })
     }
 }
-
-fn node_as_bytes() -> [u8; SETUP_DATA_NODE_SIZE] { [0; SETUP_DATA_NODE_SIZE] }
 
 pub struct PreparedIdentity {
     pub kernel_digest: [u8; 32],
@@ -215,24 +212,34 @@ luna_linux_entry:
     cli
     mov cr3, rdx
     lgdt [rip + luna_boot_gdt_ptr]
-    mov ax, 0x10
+
+    // Linux 64-bit boot protocol selectors are __BOOT_CS=0x10 and
+    // __BOOT_DS=0x18. Both descriptors are flat; CS is executable/readable,
+    // DS/ES/SS are writable data. FS/GS are cleared as recommended.
+    mov ax, 0x18
     mov ds, ax
     mov es, ax
     mov ss, ax
     xor eax, eax
     mov fs, ax
     mov gs, ax
+
     mov rax, rdi
-    push 0x08
+    push 0x10
     push rax
     retfq
+
     .align 8
 luna_boot_gdt:
     .quad 0x0000000000000000
+    // 0x08 unused: keep descriptor numbering explicit.
+    .quad 0x0000000000000000
+    // 0x10: 64-bit code.
     .quad 0x00af9a000000ffff
+    // 0x18: flat writable data.
     .quad 0x00cf92000000ffff
 luna_boot_gdt_ptr:
-    .word 0x17
+    .word 0x1f
     .quad luna_boot_gdt
 "#);
 
