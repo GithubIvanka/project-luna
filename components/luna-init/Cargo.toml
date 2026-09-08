@@ -5,6 +5,10 @@ edition = "2024"
 license = "Apache-2.0"
 description = "Minimal native Luna early-userspace initializer"
 
+# luna-init is a separately built direct-PID1 artifact. It intentionally does
+# not belong to the root Project Luna workspace.
+[workspace]
+
 [[bin]]
 name = "luna-init"
 path = "src/main.rs"
