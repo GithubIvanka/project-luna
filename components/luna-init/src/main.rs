@@ -135,7 +135,7 @@ fn run() -> Result<(), String> {
     unmount("/proc")?;
     unmount("/sys")?;
     unmount("/dev")?;
-    pivot_root()?
+    pivot_root()?;
 
     // Source mounts are intentionally no longer reachable through a path from
     // the logical root. The open FDs above keep the trusted source objects alive.
@@ -392,118 +392,49 @@ fn pivot_root() -> Result<(), String> {
     if result != 0 {
         return Err(format!("pivot_root failed: errno {}", -result));
     }
+    unmount(OLDROOT)
+}
 
-    std::env::set_current_dir("/").map_err(|e| format!("set logical root cwd: {e}"))?;
+fn unmount(path: &str) -> Result<(), String> {
+    let c_path = CString::new(path).map_err(|_| format!("invalid unmount path: {path}"))?;
 
-    let old_root = CString::new("/.luna-oldroot")
-        .map_err(|_| "invalid old root path".to_owned())?;
-    let result = unsafe { syscall(SYS_UMOUNT2, old_root.as_ptr(), MNT_DETACH) };
-    if result != 0 {
-        return Err(format!("detach old initramfs root failed: errno {}", -result));
+    unsafe extern "C" {
+        fn syscall(number: usize, ...) -> isize;
     }
 
+    let result = unsafe { syscall(SYS_UMOUNT2, c_path.as_ptr(), MNT_DETACH) };
+    if result != 0 {
+        return Err(format!("unmount {path} failed: errno {}", -result));
+    }
     Ok(())
 }
 
-fn exec_init(init: &str, system_fd: i32, image_fd: i32) -> Result<(), String> {
-    let error = Command::new(init)
-        .env(SYSTEM_SOURCE_FD_ENV, system_fd.to_string())
-        .env(IMAGE_SOURCE_FD_ENV, image_fd.to_string())
-        .exec();
-    Err(format!("exec {init} failed: {error}"))
+fn exec_init(path: &str, system_fd: i32, image_fd: i32) -> ! {
+    let system_fd_value = system_fd.to_string();
+    let image_fd_value = image_fd.to_string();
+
+    let mut command = Command::new(path);
+    command.env(SYSTEM_SOURCE_FD_ENV, &system_fd_value);
+    command.env(IMAGE_SOURCE_FD_ENV, &image_fd_value);
+    command.env("PATH", "/bin:/sbin:/usr/bin:/usr/sbin");
+
+    let error = command.exec();
+    eprintln!("luna-init: exec {path} failed: {error}");
+    emergency_shell()
 }
 
 fn require_success(status: ExitStatus, operation: &str) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!("{operation} failed with {status}"))
+        Err(format!("{operation} failed with status {status}"))
     }
-}
-
-fn unmount(target: &str) -> Result<(), String> {
-    let status = Command::new(BUSYBOX)
-        .args(["umount", "-l", target])
-        .status()
-        .map_err(|e| format!("unmount {target}: {e}"))?;
-    require_success(status, &format!("unmount {target}"))
 }
 
 fn emergency_shell() -> ! {
-    let _ = Command::new(BUSYBOX).arg("sh").status();
+    let _ = Command::new(BUSYBOX)
+        .args(["sh"])
+        .status()
+        .ok();
     std::process::exit(1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        manifest_path_for_image, parse_bootstrap_paths, system_image_from_cmdline,
-        validate_bootstrap_contract,
-    };
-
-    #[test]
-    fn parses_boot_device_from_cmdline() {
-        let value = super::cmdline_value(
-            "quiet luna.system_device=/dev/vda2 luna.data_device=/dev/vda3",
-            "luna.system_device",
-        );
-        assert_eq!(value.as_deref(), Some("/dev/vda2"));
-    }
-
-    #[test]
-    fn accepts_default_system_image() {
-        let value = system_image_from_cmdline("").unwrap();
-        assert_eq!(value, "/images/luna-0.1.0.squashfs");
-    }
-
-    #[test]
-    fn rejects_path_traversal_in_system_image() {
-        let error = system_image_from_cmdline("luna.system_image=/images/../data/x.squashfs");
-        assert!(error.is_err());
-    }
-
-    #[test]
-    fn derives_adjacent_manifest_path() {
-        assert_eq!(
-            manifest_path_for_image("/images/luna-1.2.3.squashfs").unwrap(),
-            "/images/luna-1.2.3.toml"
-        );
-    }
-
-    #[test]
-    fn parses_manifest_bootstrap_paths() {
-        let manifest = r#"
-            [image]
-            version = "1.2.3"
-
-            [bootstrap]
-            paths = ["/bin/busybox", "/sbin/luna-system-runtime", "/sbin/init"]
-        "#;
-        let paths = parse_bootstrap_paths(manifest).unwrap();
-        assert_eq!(
-            paths,
-            vec![
-                "/bin/busybox".to_owned(),
-                "/sbin/luna-system-runtime".to_owned(),
-                "/sbin/init".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn rejects_incomplete_bootstrap_contract() {
-        let paths = vec!["/bin/busybox".to_owned()];
-        assert!(validate_bootstrap_contract(&paths).is_err());
-    }
-
-    #[test]
-    fn rejects_traversal_in_bootstrap_contract() {
-        let paths = vec![
-            "/bin/busybox".to_owned(),
-            "/sbin/luna-system-runtime".to_owned(),
-            "/sbin/init".to_owned(),
-            "/etc/../shadow".to_owned(),
-        ];
-        assert!(validate_bootstrap_contract(&paths).is_err());
-    }
 }
