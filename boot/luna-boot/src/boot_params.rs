@@ -5,10 +5,16 @@ use crate::error::{BootError, BootResult};
 
 pub const BOOT_PARAMS_SIZE: usize = 4096;
 pub const E820_MAX_ENTRIES: usize = 128;
+pub const LOW_MEMORY_CMDLINE_MAX: u64 = 0x9f_fff;
 
 const SETUP_HEADER_START: usize = 0x1f1;
 const SETUP_HEADER_END: usize = 0x290;
 const SETUP_DATA_OFFSET: usize = 0x250;
+const LOADFLAGS_OFFSET: usize = 0x211;
+const HEAP_END_PTR_OFFSET: usize = 0x224;
+const CMDLINE_PTR_OFFSET: usize = 0x228;
+const EXT_CMDLINE_PTR_OFFSET: usize = 0x0c8;
+const CAN_USE_HEAP: u8 = 1 << 7;
 
 #[derive(Clone)]
 pub struct BootParams { bytes: [u8; BOOT_PARAMS_SIZE] }
@@ -27,15 +33,25 @@ impl BootParams {
     }
 
     pub fn set_loader_type(&mut self, value: u8) { self.bytes[0x210] = value; }
-    pub fn set_loadflags(&mut self, value: u8) { self.bytes[0x211] = value; }
+
+    pub fn set_loadflags(&mut self, value: u8) { self.bytes[LOADFLAGS_OFFSET] = value; }
+
+    /// Advertise the conventional setup heap required by modern Linux boot
+    /// protocol loaders. The kernel setup code uses this flag when it needs
+    /// temporary low-memory storage during early initialization.
+    pub fn enable_setup_heap(&mut self) {
+        self.bytes[LOADFLAGS_OFFSET] |= CAN_USE_HEAP;
+        self.bytes[HEAP_END_PTR_OFFSET..HEAP_END_PTR_OFFSET + 2]
+            .copy_from_slice(&0xde00u16.to_le_bytes());
+    }
 
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
-        if address > u32::MAX as u64 {
-            self.bytes[0x0c8..0x0cc].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
-        } else {
-            self.bytes[0x0c8..0x0cc].fill(0);
+        if address > LOW_MEMORY_CMDLINE_MAX {
+            return Err(BootError::Unsupported("Linux x86_64 command line must reside below 0xA0000"));
         }
-        self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
+        self.bytes[EXT_CMDLINE_PTR_OFFSET..EXT_CMDLINE_PTR_OFFSET + 4].fill(0);
+        self.bytes[CMDLINE_PTR_OFFSET..CMDLINE_PTR_OFFSET + 4]
+            .copy_from_slice(&(address as u32).to_le_bytes());
         Ok(())
     }
 
@@ -121,8 +137,6 @@ impl BootParams {
                 }
                 segment_count = next_count;
                 for i in 0..segment_count { segments[i] = (next[i].0, next[i].1 & !(1u64 << 63)); }
-                // Reserved portions are emitted directly below, so remember them
-                // by placing the high bit marker back into the current segment list.
                 for i in 0..segment_count {
                     if segments[i].0 < segments[i].1 && segments[i].0 >= rstart && segments[i].1 <= rend && typ != 2 {
                         segments[i].1 |= 1u64 << 63;
