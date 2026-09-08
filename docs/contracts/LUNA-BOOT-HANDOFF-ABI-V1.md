@@ -116,23 +116,33 @@ Malformed lengths, integer overflow, records extending beyond `total_size`, or i
 
 Identifies the immutable SYSTEM partition without binding Luna to Linux device names.
 
+Discovery may use the filesystem label (`LUNA-SYSTEM` by policy) and other bootloader-side metadata. The handoff carries stable identity so `luna-init` can verify that the resolved Linux block device is the partition selected by `luna-boot`.
+
 Payload:
 
 ```text
 u8  disk_guid[16]
 u8  partition_guid[16]
+u16 label_len
+u16 reserved
+u8  label[label_len]
 ```
 
 Linux device paths such as `/dev/sda2`, `/dev/nvme0n1p2` or similar are not part of the ABI.
 
 ### `DATA_PARTITION`
 
-Identifies the persistent DATA partition using the same stable GPT identity model:
+Identifies the persistent DATA partition using the same model:
 
 ```text
 u8  disk_guid[16]
 u8  partition_guid[16]
+u16 label_len
+u16 reserved
+u8  label[label_len]
 ```
+
+The filesystem label is a discovery/configuration identifier; the GUID pair is the stable identity used for boot-context verification. Duplicate labels must not silently resolve to an arbitrary partition.
 
 ### `SYSTEM_IMAGE`
 
