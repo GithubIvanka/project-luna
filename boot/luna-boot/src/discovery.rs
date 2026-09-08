@@ -78,18 +78,22 @@ impl BootCatalog {
         for image in images.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs")) {
             let stem = &image.name[..image.name.len() - 8];
             let init_path = format!("/images/{}.init", stem);
+            let manifest_path = format!("/images/{}.toml", stem);
             if !fs.file_exists(&init_path)? { continue; }
-            let manifest_bytes = match fs.read_file(&format!("/images/{}.toml", stem)) { Ok(bytes) => bytes, Err(_) => continue };
+            let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
             let manifest = match ImageManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
             let Some(kernel) = select_kernel(&manifest, &kernels) else { continue; };
             let mut target = BootTarget::new(
                 match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
-                manifest.version.clone(), format!("/images/{}", image.name), init_path, kernel.kernel_path,
+                manifest.name.clone(),
+                manifest.version.clone(),
+                format!("/images/{}", image.name),
+                manifest_path,
+                init_path,
+                kernel.kernel_path,
+                kernel.version.clone(),
             );
-            target = target.with_cmdline(format!(
-                "quiet loglevel=3 luna.boot_mode={} ",
-                match manifest.role { ImageRole::Normal => "normal", ImageRole::Factory => "factory", ImageRole::Recovery => "recovery" }
-            ));
+            target = target.with_cmdline("quiet loglevel=3");
             match manifest.role { ImageRole::Normal => targets.push(target), ImageRole::Factory => factory = Some(target.factory()), ImageRole::Recovery => recovery = Some(target.recovery()) }
         }
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
