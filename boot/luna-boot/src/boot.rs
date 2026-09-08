@@ -94,13 +94,13 @@ pub fn boot_flow() -> BootResult<()> {
     }?;
 
     let page_table = prepare_identity_map()?;
-    let mut handoff = KernelHandoff {
+    let handoff = KernelHandoff {
         kernel_load_address: prepared.kernel_address,
         kernel_entry: prepared.kernel_entry,
+        init_address: prepared.init_address,
+        init_size: prepared.init_size,
         boot_params_address: prepared.boot_params_address,
         command_line_address: prepared.command_line_address,
-        initrd_address: prepared.initrd_address,
-        initrd_size: prepared.initrd_size,
         setup: prepared.setup,
         boot_params: prepared.boot_params,
         page_table,
@@ -108,6 +108,7 @@ pub fn boot_flow() -> BootResult<()> {
 
     if !handoff.is_ready() { return Err(BootError::InvalidKernel); }
     let final_map = unsafe { boot::exit_boot_services(None) };
+    let mut handoff = handoff;
     handoff.boot_params.set_e820_from_map(&final_map)?;
     unsafe {
         core::ptr::copy_nonoverlapping(
