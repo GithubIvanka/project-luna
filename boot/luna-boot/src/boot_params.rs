@@ -6,10 +6,9 @@ use crate::error::{BootError, BootResult};
 pub const BOOT_PARAMS_SIZE: usize = 4096;
 pub const E820_MAX_ENTRIES: usize = 128;
 
-// setup_header begins at 0x1f1. There is no one-byte header length at 0x201;
-// deriving a copy length from that byte corrupts/truncates the zero page.
 const SETUP_HEADER_START: usize = 0x1f1;
 const SETUP_HEADER_END: usize = 0x290;
+const SETUP_DATA_OFFSET: usize = 0x250;
 
 #[derive(Clone)]
 pub struct BootParams { bytes: [u8; BOOT_PARAMS_SIZE] }
@@ -37,6 +36,15 @@ impl BootParams {
             self.bytes[0x0c8..0x0cc].fill(0);
         }
         self.bytes[0x228..0x22c].copy_from_slice(&(address as u32).to_le_bytes());
+        Ok(())
+    }
+
+    pub fn set_setup_data(&mut self, address: u64) -> BootResult<()> {
+        if address > u32::MAX as u64 {
+            return Err(BootError::Unsupported("luna setup_data must be below 4 GiB for Linux boot protocol compatibility"));
+        }
+        self.bytes[SETUP_DATA_OFFSET..SETUP_DATA_OFFSET + 8]
+            .copy_from_slice(&address.to_le_bytes());
         Ok(())
     }
 
