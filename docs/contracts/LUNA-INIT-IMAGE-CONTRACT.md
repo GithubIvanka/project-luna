@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** 2026-09-08  
-**Scope:** standalone `luna-init` ELF loaded by `luna-boot.efi` and directly executed by the Luna kernel integration
+**Scope:** standalone `luna-init` executable artifact loaded by `luna-boot.efi` and directly executed by the Luna kernel integration
 
 ## 1. Purpose
 
@@ -151,11 +151,27 @@ There is no earlier initramfs PID and no later `execve("/sbin/init")` replacemen
 
 ## 9. Boot-context delivery to luna-init
 
-The kernel must provide the validated `LunaBootHandoffV1` context to `luna-init` without requiring a filesystem path.
+The kernel must provide the validated `LunaBootHandoffV1` context to `luna-init` without requiring a filesystem path, command-line parsing or a custom syscall.
 
-The initial implementation will use a kernel-created read-only boot-context object exposed only to PID 1. The object is not a physical-device path and is not part of the logical root filesystem.
+The canonical initial channel is a kernel-created read-only anonymous file object installed into the initial userspace file descriptor table as:
 
-The exact userspace ABI for consuming this object must be frozen before the direct-init implementation lands. Until then, kernel and `luna-init` changes must not invent ad-hoc command-line parsing for Luna boot identity.
+```text
+FD 3 = Luna boot-context
+```
+
+FD 3 is fixed by contract for the initial `luna-init` process. It is opened read-only, starts at offset zero and contains the serialized `LunaBootHandoffV1` bytes exactly as validated by the kernel.
+
+The object:
+
+- has no pathname;
+- is not backed by SYSTEM or DATA;
+- is not part of the logical root filesystem;
+- is accessible only through the initial process's inherited FD table;
+- must be consumed and closed by `luna-init` before it creates or launches normal child processes.
+
+The kernel must install FD 3 before transferring control to the ELF entry point. The handoff object must be valid for the lifetime of the initial `luna-init` process until it closes the descriptor.
+
+No Luna-specific boot identity may be reconstructed from `argv`, environment variables or legacy `luna.*` kernel command-line options.
 
 ## 10. Failure policy
 
