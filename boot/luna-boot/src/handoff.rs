@@ -1,6 +1,5 @@
 //! Linux entry transition and Luna Handoff ABI v1 serialization.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::arch::global_asm;
 
@@ -8,16 +7,17 @@ use uefi::boot::{self, AllocateType, MemoryType, PAGE_SIZE};
 
 use crate::boot_params::BootParams;
 use crate::error::{BootError, BootResult};
+use crate::gpt::Partition;
 use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;
-use crate::gpt::Partition;
 
 const ABI_MAJOR: u16 = 1;
 const ABI_MINOR: u16 = 0;
 const HEADER_SIZE: usize = 84;
 const HEADER_ALIGNED_SIZE: usize = 88;
+const SETUP_DATA_NODE_SIZE: usize = 16;
 const RECORD_ALIGN: usize = 8;
-const SETUP_DATA_TYPE: u32 = 0x4c55_4e41; // ASCII "LUNA" in little-endian storage.
+const SETUP_DATA_TYPE: u32 = 0x4c55_4e41;
 const MAX_HANDOFF_SIZE: usize = 64 * 1024;
 
 pub const RECORD_SYSTEM_PARTITION: u16 = 1;
@@ -46,8 +46,11 @@ impl Default for BootState {
 }
 
 pub struct LunaHandoff {
+    /// Physical address of the Linux `struct setup_data` node.
     pub address: u64,
+    /// Size of the Luna ABI payload, excluding the Linux setup_data node header.
     pub size: usize,
+    /// Full number of pages reserved for the node plus payload.
     pub allocation_pages: usize,
 }
 
@@ -83,7 +86,7 @@ impl LunaHandoff {
         push_record(&mut bytes, RECORD_LUNA_INIT_IMAGE, 0, &init)?;
         push_record(&mut bytes, RECORD_BOOT_MODE, 0, &[(mode as u8)])?;
         let mut boot_state = Vec::with_capacity(24);
-        boot_state.push(1); // Boot State payload version.
+        boot_state.push(1);
         boot_state.push(state.fallback_depth);
         boot_state.push(state.previous_attempt_failed as u8);
         boot_state.push(0);
@@ -112,7 +115,8 @@ impl LunaHandoff {
         let checksum = *blake3::hash(&bytes).as_bytes();
         bytes[52..84].copy_from_slice(&checksum);
 
-        let pages = div_ceil(bytes.len(), PAGE_SIZE);
+        let total_node_size = SETUP_DATA_NODE_SIZE.checked_add(bytes.len()).ok_or(BootError::InvalidKernel)?;
+        let pages = div_ceil(total_node_size, PAGE_SIZE);
         let allocation = boot::allocate_pages(
             AllocateType::MaxAddress(0xffff_ffff),
             MemoryType::LOADER_DATA,
@@ -121,11 +125,18 @@ impl LunaHandoff {
         let address = allocation.as_ptr() as u64;
         unsafe {
             core::ptr::write_bytes(address as *mut u8, 0, pages * PAGE_SIZE);
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), address as *mut u8, bytes.len());
+            let node = address as *mut u8;
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), node.add(SETUP_DATA_NODE_SIZE), bytes.len());
+            core::ptr::copy_nonoverlapping(node_as_bytes().as_ptr(), node, SETUP_DATA_NODE_SIZE);
+            (node.add(0) as *mut u64).write(0);
+            (node.add(8) as *mut u32).write(SETUP_DATA_TYPE);
+            (node.add(12) as *mut u32).write(bytes.len() as u32);
         }
         Ok(Self { address, size: bytes.len(), allocation_pages: pages })
     }
 }
+
+fn node_as_bytes() -> [u8; SETUP_DATA_NODE_SIZE] { [0; SETUP_DATA_NODE_SIZE] }
 
 pub struct PreparedIdentity {
     pub kernel_digest: [u8; 32],
@@ -197,10 +208,6 @@ fn push_record(bytes: &mut Vec<u8>, ty: u16, flags: u16, payload: &[u8]) -> Boot
 fn magic() -> u64 { u64::from_le_bytes(*b"LUNAHD01") }
 const fn div_ceil(value: usize, divisor: usize) -> usize { (value + divisor - 1) / divisor }
 
-// Keep this deliberately small and independent of UEFI. The Linux x86-64
-// entry transition receives the kernel entry in RDI, boot_params in RSI and
-// loader-owned page tables in RDX. Linux's real-mode/setup protocol uses a
-// flat ring-0 64-bit GDT.
 global_asm!(r#"
     .section .text.luna_handoff,"ax"
     .global luna_linux_entry
