@@ -77,7 +77,7 @@ pub fn boot_flow() -> BootResult<()> {
         target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
     }
 
-    let prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
+    let mut prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
         KernelLoader::new(filesystem).prepare(&target)
     } else {
         match KernelLoader::new(filesystem).prepare(&target) {
