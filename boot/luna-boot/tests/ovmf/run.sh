@@ -8,8 +8,7 @@ mkdir -p "$OUT"
 : "${OVMF_CODE:?Set OVMF_CODE to OVMF_CODE.fd}"
 : "${OVMF_VARS:?Set OVMF_VARS to a writable OVMF_VARS.fd copy}"
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"
-: "${LUNA_TEST_INITRD:?Set LUNA_TEST_INITRD to an initramfs image}"
-: "${LUNA_TEST_SQUASHFS:?Set LUNA_TEST_SQUASHFS to a Luna SquashFS image}"
+: "${BUSYBOX:?Set BUSYBOX to a static x86_64 BusyBox binary}"
 
 command -v cargo >/dev/null
 command -v qemu-system-x86_64 >/dev/null
@@ -20,21 +19,26 @@ command -v mcopy >/dev/null
 command -v mmd >/dev/null
 command -v dd >/dev/null
 
+bash "$ROOT_DIR/tests/ovmf/build-userspace.sh"
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$ROOT_DIR/Cargo.toml"
 EFI="$ROOT_DIR/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
-rm -f "$OUT"/disk.img "$OUT"/esp.img "$OUT"/system.img "$OUT"/data.img
+rm -f "$OUT/disk.img" "$OUT/esp.img" "$OUT/system.img" "$OUT/data.img"
 truncate -s 64M "$OUT/esp.img"
 mkfs.fat -F 32 "$OUT/esp.img" >/dev/null
 mmd -i "$OUT/esp.img" ::/EFI
 mmd -i "$OUT/esp.img" ::/EFI/LUNA
+mmd -i "$OUT/esp.img" ::/EFI/BOOT
 mcopy -i "$OUT/esp.img" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI
+mcopy -i "$OUT/esp.img" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
 
 rm -rf "$OUT/system-root"
 mkdir -p "$OUT/system-root/images" "$OUT/system-root/kernels/test"
 cp "$LUNA_TEST_KERNEL" "$OUT/system-root/kernels/test/bzImage"
-cp "$LUNA_TEST_INITRD" "$OUT/system-root/kernels/test/initramfs.img"
-cp "$LUNA_TEST_SQUASHFS" "$OUT/system-root/images/luna-test.squashfs"
+cp "$OUT/luna-test.squashfs" "$OUT/system-root/images/luna-test.squashfs"
+cp "$OUT/luna-test.toml" "$OUT/system-root/images/luna-test.toml"
+cp "$OUT/luna-test.init" "$OUT/system-root/images/luna-test.init"
+
 mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$OUT/system-root" "$OUT/system.img" 256M
 
 rm -rf "$OUT/data-root"
@@ -42,11 +46,13 @@ mkdir -p "$OUT/data-root/system" "$OUT/data-root/users/luna" "$OUT/data-root/cac
 mkfs.ext4 -q -F -L LUNA-DATA -d "$OUT/data-root" "$OUT/data.img" 128M
 
 # GPT: ESP at 1 MiB, SYSTEM at 65 MiB, DATA immediately after SYSTEM.
-# SYSTEM starts at sector 133120 and is 256 MiB (524288 sectors).
-# DATA therefore starts at sector 657408.
 truncate -s 449M "$OUT/disk.img"
 sgdisk --zap-all "$OUT/disk.img" >/dev/null
-sgdisk -n 1:2048:+64M -t 1:ef00 -c 1:EFI \
+sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B \
+       --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 \
+       --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D \
+       --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 \
+       -n 1:2048:+64M -t 1:ef00 -c 1:EFI \
        -n 2:133120:+256M -t 2:8300 -c 2:SYSTEM \
        -n 3:657408:+128M -t 3:8300 -c 3:DATA "$OUT/disk.img" >/dev/null
 
