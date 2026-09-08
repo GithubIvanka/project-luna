@@ -52,6 +52,8 @@ boot_params
                 └── typed Luna records
 ```
 
+For ABI v1, the Linux `setup_data` node uses type `0x4c554e41` (`LUNA`) and its payload is exactly one `LunaBootHandoffV1` object. The node's `len` is the byte length of that handoff object; `next` is zero unless a future implementation explicitly preserves an existing Linux `setup_data` chain.
+
 The handoff allocation and every referenced boot object must be treated as reserved boot data until the Luna kernel integration has consumed or explicitly retained it. The bootloader must not leave these ranges in memory that the kernel may immediately reclaim as ordinary free RAM.
 
 ## 4. ABI header
@@ -72,6 +74,10 @@ u64 payload_size
 u8  checksum[32]
 ```
 
+The v1 header occupies 84 bytes. The record payload area begins at offset 88; bytes 84..87 are mandatory zero padding so that the first record begins on the 8-byte ABI alignment boundary.
+
+The v1 magic is the 8-byte ASCII sequence `LUNAHD01` encoded as a little-endian `u64`.
+
 The actual on-wire Rust/C representation must use explicitly sized little-endian integer fields and static layout assertions. Native-language struct layout is not itself part of the ABI.
 
 ### Header semantics
@@ -82,17 +88,17 @@ The actual on-wire Rust/C representation must use explicitly sized little-endian
 
 `abi_minor` permits compatible extensions. A consumer may accept a newer minor version when all required records are understood and unknown records are safely skippable.
 
-`header_size` is the number of bytes occupied by the fixed header.
+`header_size` is the number of bytes occupied by the fixed header and is `84` for ABI v1.
 
-`total_size` is the complete handoff size, including header and records.
+`total_size` is the complete handoff size, including header, alignment padding and records.
 
 `flags` contains only global handoff properties. Record-specific semantics belong in record flags.
 
 `boot_attempt_id` identifies this concrete boot attempt across `luna-boot`, kernel and `luna-init`.
 
-`payload_offset` and `payload_size` identify the typed record area relative to the beginning of the handoff.
+`payload_offset` and `payload_size` identify the typed record area relative to the beginning of the handoff and are `88` and `total_size - 88` for ABI v1.
 
-`checksum` covers the ABI-defined handoff bytes with the checksum field zeroed during calculation.
+`checksum` is the BLAKE3-256 digest of the complete handoff bytes with the entire 32-byte checksum field zeroed during calculation.
 
 ## 5. Record format
 
@@ -111,13 +117,25 @@ Unknown record types must be ignored after validating their bounds.
 
 Malformed lengths, integer overflow, records extending beyond `total_size`, or impossible alignment must cause the handoff to be rejected.
 
+ABI v1 centrally allocates record types:
+
+```text
+1 = SYSTEM_PARTITION
+2 = DATA_PARTITION
+3 = SYSTEM_IMAGE
+4 = KERNEL_IDENTITY
+5 = LUNA_INIT_IMAGE
+6 = BOOT_MODE
+7 = BOOT_STATE
+```
+
 ## 6. Required v1 records
 
 ### `SYSTEM_PARTITION`
 
 Identifies the immutable SYSTEM partition without binding Luna to Linux device names.
 
-Discovery may use the filesystem label (`LUNA-SYSTEM` by policy) and other bootloader-side metadata. The handoff carries stable identity so `luna-init` can verify that the resolved Linux block device is the partition selected by `luna-boot`.
+The `disk_guid` and `partition_guid` fields contain the exact 16-byte GPT on-disk GUID encodings. `label` is the UTF-8 GPT partition name used only as a discovery/configuration label.
 
 Payload:
 
@@ -215,24 +233,40 @@ The digest covers exactly the supplied ELF byte range. `luna-boot` validates the
 Enumerates the boot path selected by `luna-boot`:
 
 ```text
-NORMAL
-DETAILED
-RECOVERY
-FACTORY
-EXTERNAL
+0 NORMAL
+1 DETAILED
+2 RECOVERY
+3 FACTORY
+4 EXTERNAL
 ```
+
+The payload is exactly one `u8` containing the enum value.
 
 ### `BOOT_STATE`
 
 Contains only boot-selection/failure context required by the current attempt. It does not become a general state database and does not replace `luna-state`.
 
-The exact compact payload is versioned with the Boot State Contract.
+ABI v1 payload:
+
+```text
+u8  version              = 1
+u8  fallback_depth
+u8  previous_attempt_failed
+u8  reserved
+u64 previous_attempt_id
+u32 failure_code
+u32 reserved
+```
+
+The current loader emits a neutral state (`fallback_depth=0`, `previous_attempt_failed=0`, `previous_attempt_id=0`, `failure_code=0`) until the persistent boot-state/fallback manager is wired in. The payload remains versioned so later compatible state fields can be added without changing the record type.
 
 ## 7. Integrity
 
-The selected System Image record contains its expected content digest. The adjacent manifest identity is also included.
+The selected System Image record contains its BLAKE3-256 content digest. The adjacent manifest identity is also the BLAKE3-256 digest of the exact manifest bytes supplied by the bootloader.
 
 The `LUNA_INIT_IMAGE` record contains the expected BLAKE3-256 `luna-init` ELF digest.
+
+The `KERNEL_IDENTITY` record contains the BLAKE3-256 digest of the exact kernel artifact bytes loaded from SYSTEM.
 
 The handoff checksum protects the structure of the handoff itself. It does not by itself establish authenticity of the image, manifest, kernel or `luna-init` artifact.
 
