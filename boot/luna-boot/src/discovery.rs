@@ -58,7 +58,7 @@ impl ImageManifest {
 }
 
 #[derive(Clone, Debug)]
-pub struct KernelRecord { pub version: String, pub kernel_path: String, pub initrd_path: Option<String> }
+pub struct KernelRecord { pub version: String, pub kernel_path: String }
 
 #[derive(Clone, Debug, Default)]
 pub struct BootCatalog { pub targets: Vec<BootTarget>, pub recovery: Option<BootTarget>, pub factory: Option<BootTarget>, pub default_target: usize }
@@ -72,23 +72,23 @@ impl BootCatalog {
             let base = format!("/kernels/{}/", entry.name);
             let kernel_path = find_file(fs, &[format!("{}bzImage", base), format!("{}vmlinuz", base)])?;
             let Some(kernel_path) = kernel_path else { continue; };
-            let initrd_path = find_file(fs, &[format!("{}initramfs.img", base), format!("{}initrd.img", base)])?;
-            kernels.push(KernelRecord { version: entry.name.clone(), kernel_path, initrd_path });
+            kernels.push(KernelRecord { version: entry.name.clone(), kernel_path });
         }
         let mut targets = Vec::new(); let mut recovery = None; let mut factory = None;
         for image in images.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs")) {
             let stem = &image.name[..image.name.len() - 8];
+            let init_path = format!("/images/{}.init", stem);
+            if !fs.file_exists(&init_path)? { continue; }
             let manifest_bytes = match fs.read_file(&format!("/images/{}.toml", stem)) { Ok(bytes) => bytes, Err(_) => continue };
             let manifest = match ImageManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
             let Some(kernel) = select_kernel(&manifest, &kernels) else { continue; };
             let mut target = BootTarget::new(
                 match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
-                manifest.version.clone(), format!("/images/{}", image.name), kernel.kernel_path,
+                manifest.version.clone(), format!("/images/{}", image.name), init_path, kernel.kernel_path,
             );
-            if let Some(initrd) = kernel.initrd_path { target = target.with_initrd(initrd); }
             target = target.with_cmdline(format!(
-                "quiet loglevel=3 root=/dev/ram0 ro rdinit=/init luna.system_image=/images/{} luna.system_device=LABEL=LUNA-SYSTEM luna.data_device=LABEL=LUNA-DATA luna.kernel_version={} luna.boot_mode={}",
-                image.name, kernel.version, match manifest.role { ImageRole::Normal => "normal", ImageRole::Factory => "factory", ImageRole::Recovery => "recovery" }
+                "quiet loglevel=3 luna.boot_mode={} ",
+                match manifest.role { ImageRole::Normal => "normal", ImageRole::Factory => "factory", ImageRole::Recovery => "recovery" }
             ));
             match manifest.role { ImageRole::Normal => targets.push(target), ImageRole::Factory => factory = Some(target.factory()), ImageRole::Recovery => recovery = Some(target.recovery()) }
         }
