@@ -35,7 +35,7 @@ There is no separate initramfs userspace layer in the Luna boot architecture, no
 - The handoff is not a replacement for the Linux kernel command line. Kernel-specific parameters remain kernel parameters; Luna state is structured data.
 - A separate memory-resident `luna-init` ELF is part of the boot handoff and is executed directly by the Luna kernel integration.
 
-Linux x86 boot protocol 2.09+ provides the `setup_data` linked-list mechanism for extending boot parameters beyond the fixed 4096-byte `boot_params` area. 
+Linux x86 boot protocol 2.09+ provides the `setup_data` linked-list mechanism for extending boot parameters beyond the fixed 4096-byte `boot_params` area.
 
 ## 3. Transport
 
@@ -186,6 +186,12 @@ The kernel image itself is already executing; this record is identity and proven
 
 Identifies the exact `luna-init` ELF loaded by `luna-boot` into reserved physical memory.
 
+For image version `X.Y.Z`, the bootloader resolves the canonical artifact:
+
+```text
+SYSTEM/images/luna-X.Y.Z.init.elf
+```
+
 Payload:
 
 ```text
@@ -195,6 +201,8 @@ u8  digest[32]
 u32 flags
 u32 reserved
 ```
+
+The digest is the BLAKE3-256 digest of exactly the supplied ELF byte range.
 
 The referenced range must be entirely contained within boot-reserved memory and must not overlap the handoff metadata, kernel image, command line or another incompatible boot object.
 
@@ -222,7 +230,7 @@ The exact compact payload is versioned with the Boot State Contract.
 
 The selected System Image record contains its expected content digest. The adjacent manifest identity is also included.
 
-The `LUNA_INIT_IMAGE` record contains the expected `luna-init` ELF digest.
+The `LUNA_INIT_IMAGE` record contains the expected BLAKE3-256 `luna-init` ELF digest.
 
 The handoff checksum protects the structure of the handoff itself. It does not by itself establish authenticity of the image, manifest, kernel or `luna-init` artifact.
 
