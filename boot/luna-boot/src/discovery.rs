@@ -76,7 +76,7 @@ impl BootCatalog {
         }
         let mut targets = Vec::new(); let mut recovery = None; let mut factory = None;
         for image in images.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs")) {
-            let stem = &image.name[..image.name.len() - 8];
+            let Some(stem) = image.name.strip_suffix(".squashfs") else { continue; };
             let init_path = format!("/images/{}.init", stem);
             let manifest_path = format!("/images/{}.toml", stem);
             if !fs.file_exists(&init_path)? { continue; }
