@@ -1,49 +1,102 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
+**Статус:** `ApplicationInstance`, `ApplicationPlan`, `RuntimeSpec`/`RuntimeKind` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
 
 ## Назначение
 
 Владеет выполнением и жизненным циклом запущенных приложений.
 
+`luna-app-runtime` является application-runtime boundary между `UserSession` и конкретными `ApplicationInstance`. Внутри одного `ApplicationInstance` используются специализированные слои/subsystems: `ApplicationPlan`, `luna-root-mapping`, `luna-security` и внутренний `trusted-setup`.
+
+## Иерархия
+
+```text
+UserSession
+    ↓
+luna-app-runtime
+    ↓
+ApplicationInstance
+    │
+    ├── ApplicationPlan
+    ├── luna-root-mapping
+    │      └── MappingPlan
+    ├── luna-security
+    │      └── AuthorizedApplicationPlan
+    └── trusted-setup
+```
+
+Это ownership/structural hierarchy, а не набор отдельных процессов. Все перечисленные слои работают в рамках lifecycle одного `ApplicationInstance`.
+
 ## Владеет
 
 - identity и state `ApplicationInstance`;
 - `ApplicationPlan` и executable identity для конкретного запуска;
+- `RuntimeSpec` и выбор runtime semantics;
 - lifecycle процессов приложения;
 - подготовкой execution environment;
 - связью экземпляра с `UserSession`;
-- выбором runtime по `RuntimeSpec`;
 - границей между authorization и namespace/process enforcement;
 - внутренним trusted setup layer для материализации уже авторизованного execution environment и последующего `execve()`.
 
 `RuntimeKind` является свойством `RuntimeSpec`, а не самостоятельным компонентом. Принятые semantics включают Luna, Glibc и Bundle runtime.
 
+## ApplicationInstance
+
+`ApplicationInstance` представляет один конкретный launched execution и хранит:
+
+- instance identity;
+- application identity/version;
+- session identity;
+- `RuntimeSpec`, включая `RuntimeKind`;
+- lifecycle state;
+- supervised process identity, если процесс создан.
+
+`ApplicationInstance` является конкретным execution context, над которым `luna-app-runtime` выполняет lifecycle management.
+
+`ApplicationInstance` не принимает security decisions. Authorization, mapping validation и capability approval должны завершиться до запуска процесса.
+
+## RuntimeSpec / RuntimeKind
+
+`RuntimeSpec` описывает execution runtime для конкретного `ApplicationInstance`. `RuntimeKind` является его классификацией и не существует как отдельный runtime-компонент.
+
+```text
+ApplicationInstance
+    ↓
+RuntimeSpec
+    └── RuntimeKind
+```
+
+Runtime selection является частью `luna-app-runtime`. Runtime/mapping incompatibility должна быть выявлена до authorization.
+
 ## Поток запуска
 
 ```text
-Bundle declaration
-  ↓
-ApplicationPlan
-  ↓
-validate
-  ↓
-luna-root-mapping
-  ↓
-MappingPlan
-  ↓
-luna-security
-  ↓
-AuthorizedApplicationPlan
-  ↓
-luna-app-runtime / trusted setup layer
-  ↓
-Linux process + execution environment
-  ↓
-execve()
-  ↓
-ApplicationInstance / Running
+ApplicationInstance
+  │
+  ├── RuntimeSpec / RuntimeKind
+  │
+  ├── ApplicationPlan
+  │      ↓
+  ├── validate
+  │      ↓
+  ├── luna-root-mapping
+  │      ↓
+  ├── MappingPlan
+  │      ↓
+  ├── luna-security
+  │      ↓
+  ├── AuthorizedApplicationPlan
+  │      ↓
+  └── trusted setup layer
+           ↓
+      Linux process + execution environment
+           ↓
+         execve()
+           ↓
+      ApplicationInstance / Running
 ```
+
+Показанный pipeline описывает внутреннюю последовательность работы `ApplicationInstance`; `luna-root-mapping`, `luna-security` и `trusted-setup` не являются самостоятельными sibling runtime-компонентами уровня `UserSession`.
 
 `luna-root-mapping` владеет семантикой logical-to-physical/resource mapping и строит `MappingPlan` из manifest/resource declarations и runtime/user/system context. `MappingPlan` не является security grant.
 
@@ -73,7 +126,7 @@ AuthorizedApplicationPlan
 - dependency/resource mappings;
 - validation и построение `MappingPlan`.
 
-`luna-app-runtime` только потребляет уже сформированный и авторизованный план в рамках launch lifecycle.
+`luna-app-runtime` владеет lifecycle и только координирует использование этих слоёв в рамках `ApplicationInstance`.
 
 ## Security boundary
 
@@ -230,21 +283,6 @@ Logical root создаётся как tmpfs в private mount namespace; staging
 
 Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
 
-## ApplicationInstance
-
-`ApplicationInstance` представляет один конкретный launched execution и хранит:
-
-- instance identity;
-- application identity/version;
-- session identity;
-- runtime specification;
-- lifecycle state;
-- supervised process identity, если процесс создан.
-
-`ApplicationInstance` не принимает security decisions. Authorization, mapping validation и capability approval должны завершиться до запуска процесса.
-
-Состояние `Running` выставляется только после успешного создания и attach supervised process для production launcher.
-
 ## Ownership model
 
 ```text
@@ -255,6 +293,19 @@ UserSession
 luna-app-runtime
     ↓
 ApplicationInstance
+```
+
+Внутри ApplicationInstance:
+
+```text
+ApplicationInstance
+    ├── ApplicationPlan
+    ├── RuntimeSpec / RuntimeKind
+    ├── luna-root-mapping
+    │      └── MappingPlan
+    ├── luna-security
+    │      └── AuthorizedApplicationPlan
+    └── trusted-setup
 ```
 
 `luna-system-runtime` остаётся system-wide supervisor. `luna-app-runtime` владеет application execution lifecycle и внутренним trusted setup layer. Generic `luna-runtime` daemon отсутствует.
