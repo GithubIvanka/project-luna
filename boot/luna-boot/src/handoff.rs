@@ -56,10 +56,10 @@ unsafe extern "sysv64" {
 pub struct KernelHandoff {
     pub kernel_load_address: u64,
     pub kernel_entry: u64,
+    pub init_address: u64,
+    pub init_size: usize,
     pub boot_params_address: u64,
     pub command_line_address: u64,
-    pub initrd_address: u64,
-    pub initrd_size: usize,
     pub setup: LinuxSetupHeader,
     pub boot_params: BootParams,
     pub page_table: u64,
@@ -69,6 +69,8 @@ impl KernelHandoff {
     pub fn is_ready(&self) -> bool {
         self.kernel_load_address != 0
             && self.kernel_entry != 0
+            && self.init_address != 0
+            && self.init_size != 0
             && self.boot_params_address != 0
             && self.page_table != 0
     }
