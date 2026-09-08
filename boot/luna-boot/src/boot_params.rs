@@ -68,9 +68,18 @@ impl BootParams {
     }
 
     pub fn set_e820_from_map(&mut self, map: &impl uefi::mem::memory_map::MemoryMap) -> BootResult<()> {
+        self.set_e820_from_map_reserved(map, &[])
+    }
+
+    pub fn set_e820_from_map_reserved(
+        &mut self,
+        map: &impl uefi::mem::memory_map::MemoryMap,
+        reserved: &[(u64, usize)],
+    ) -> BootResult<()> {
+        let mut entries = [E820Entry { addr: 0, size: 0, typ: 0, reserved: 0 }; E820_MAX_ENTRIES];
         let mut count = 0usize;
+
         for d in map.entries() {
-            if count == E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
             let size = d.page_count.saturating_mul(4096);
             if size == 0 { continue; }
             let typ = match d.ty {
@@ -81,11 +90,57 @@ impl BootParams {
                 | uefi::mem::memory_map::MemoryType::LOADER_DATA => 1,
                 _ => 2,
             };
-            self.write_e820(count, &E820Entry { addr: d.phys_start, size, typ, reserved: 0 });
-            count += 1;
+
+            let start = d.phys_start;
+            let end = start.checked_add(size).ok_or(BootError::InvalidKernel)?;
+            let mut segments = [(start, end); 16];
+            let mut segment_count = 1usize;
+            for &(rstart, rpages) in reserved {
+                if rpages == 0 { continue; }
+                let rend = rstart.checked_add((rpages as u64).saturating_mul(4096)).ok_or(BootError::InvalidKernel)?;
+                let mut next = [(0u64, 0u64); 16];
+                let mut next_count = 0usize;
+                for &(s, e) in &segments[..segment_count] {
+                    if next_count + 2 > next.len() { return Err(BootError::Unsupported("too many E820 reservation splits")); }
+                    if rend <= s || rstart >= e {
+                        next[next_count] = (s, e);
+                        next_count += 1;
+                    } else {
+                        if s < rstart { next[next_count] = (s, rstart.min(e)); next_count += 1; }
+                        let mid_start = s.max(rstart);
+                        let mid_end = e.min(rend);
+                        if mid_start < mid_end && typ != 2 {
+                            next[next_count] = (mid_start, mid_end | (1u64 << 63));
+                            next_count += 1;
+                        } else if mid_start < mid_end {
+                            next[next_count] = (mid_start, mid_end);
+                            next_count += 1;
+                        }
+                        if rend < e { next[next_count] = (rend.max(s), e); next_count += 1; }
+                    }
+                }
+                segment_count = next_count;
+                for i in 0..segment_count { segments[i] = (next[i].0, next[i].1 & !(1u64 << 63)); }
+                // Reserved portions are emitted directly below, so remember them
+                // by placing the high bit marker back into the current segment list.
+                for i in 0..segment_count {
+                    if segments[i].0 < segments[i].1 && segments[i].0 >= rstart && segments[i].1 <= rend && typ != 2 {
+                        segments[i].1 |= 1u64 << 63;
+                    }
+                }
+            }
+
+            for &(s, tagged_e) in &segments[..segment_count] {
+                if s == tagged_e & !(1u64 << 63) { continue; }
+                let is_reserved = tagged_e & (1u64 << 63) != 0;
+                let e = tagged_e & !(1u64 << 63);
+                if e <= s { continue; }
+                if count == E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
+                entries[count] = E820Entry { addr: s, size: e - s, typ: if is_reserved { 2 } else { typ }, reserved: 0 };
+                count += 1;
+            }
         }
-        self.bytes[0x1e8] = count as u8;
-        Ok(())
+        self.set_e820(&entries[..count])
     }
 
     fn write_e820(&mut self, index: usize, entry: &E820Entry) {
