@@ -11,7 +11,7 @@ description = "Minimal UEFI bootloader for Project Luna"
 [dependencies]
 uefi = { version = "0.40", features = ["alloc", "global_allocator", "logger", "panic_handler", "log-debugcon"] }
 log = "0.4"
-blake3 = { version = "1.8", default-features = false }
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 
 [profile.release]
 opt-level = "s"
