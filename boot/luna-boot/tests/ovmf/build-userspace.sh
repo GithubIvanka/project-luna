@@ -4,12 +4,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 OUT="${REPO_ROOT}/boot/luna-boot/tests/ovmf/out"
 SYSROOT="${OUT}/system-root"
-INITROOT="${OUT}/initramfs-root"
 
 : "${BUSYBOX:?Set BUSYBOX to a static x86_64 BusyBox binary}"
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"
 
-for tool in cargo rustup mksquashfs cpio gzip file; do
+for tool in cargo rustup mksquashfs file; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 [ -x "$BUSYBOX" ] || { echo "BUSYBOX is not executable: $BUSYBOX" >&2; exit 1; }
@@ -20,8 +19,9 @@ if ! rustup target list --installed | grep -qx "$RUNTIME_TARGET"; then
     rustup target add "$RUNTIME_TARGET"
 fi
 
-rm -rf "$SYSROOT" "$INITROOT"
-mkdir -p "$SYSROOT"/{bin,sbin,dev,proc,sys,run,tmp,etc,data} "$INITROOT"/{bin,dev,proc,sys,run,newroot}
+rm -rf "$SYSROOT"
+mkdir -p "$SYSROOT"/{bin,sbin,dev,proc,sys,run,tmp,etc,data,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var}
+mkdir -p "$SYSROOT/usr/bin" "$SYSROOT/usr/lib" "$SYSROOT/usr/sbin" "$SYSROOT/etc/luna"
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
 cargo build --release --manifest-path "$REPO_ROOT/components/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
@@ -51,24 +51,28 @@ cp "$RUNTIME" "$SYSROOT/sbin/luna-system-runtime"
 chmod 0755 "$SYSROOT/sbin/luna-system-runtime"
 ln -sf luna-system-runtime "$SYSROOT/sbin/init"
 
-mkdir -p "$SYSROOT"/{boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var}
-mkdir -p "$SYSROOT/usr/bin" "$SYSROOT/usr/lib" "$SYSROOT/usr/sbin" "$SYSROOT/etc/luna"
-
 mksquashfs "$SYSROOT" "$OUT/luna-test.squashfs" -noappend -comp zstd -all-root -no-xattrs >/dev/null
 
-cp "$BUSYBOX" "$INITROOT/bin/busybox"
-chmod 0755 "$INITROOT/bin/busybox"
-cp "$LUNA_INIT" "$INITROOT/init"
-chmod 0755 "$INITROOT/init"
+cp "$LUNA_INIT" "$OUT/luna-test.init"
+chmod 0755 "$OUT/luna-test.init"
 
-(
-    cd "$INITROOT"
-    find . -print0 | cpio --null -o -H newc --quiet | gzip -9 > "$OUT/luna-test-initramfs.img"
-)
+cat > "$OUT/luna-test.toml" <<'EOF'
+[image]
+name = "luna"
+version = "0.1.0"
+format = "squashfs"
+role = "normal"
+
+[architecture]
+arch = "x86_64"
+
+[kernels]
+compatible = ["test"]
+EOF
 
 echo "Built Luna QEMU userspace:"
 echo "  System Image: $OUT/luna-test.squashfs"
-echo "  initramfs:    $OUT/luna-test-initramfs.img"
+echo "  Manifest:     $OUT/luna-test.toml"
+echo "  luna-init:    $OUT/luna-test.init"
 echo "  runtime:      $RUNTIME"
-echo "  luna-init:    $LUNA_INIT"
 echo "  kernel:       $LUNA_TEST_KERNEL"
