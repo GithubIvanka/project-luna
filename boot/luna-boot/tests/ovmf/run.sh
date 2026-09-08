@@ -23,7 +23,7 @@ bash "$ROOT_DIR/tests/ovmf/build-userspace.sh"
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$ROOT_DIR/Cargo.toml"
 EFI="$ROOT_DIR/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
-rm -f "$OUT/disk.img" "$OUT/esp.img" "$OUT/system.img" "$OUT/data.img"
+rm -f "$OUT/disk.img" "$OUT/esp.img" "$OUT/system.img" "$OUT/data.img" "$OUT/qemu.log"
 truncate -s 64M "$OUT/esp.img"
 mkfs.fat -F 32 "$OUT/esp.img" >/dev/null
 mmd -i "$OUT/esp.img" ::/EFI
@@ -69,4 +69,7 @@ exec qemu-system-x86_64 \
   -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" \
   -drive format=raw,file="$OUT/disk.img" \
   -serial stdio \
-  -no-reboot
+  -no-reboot \
+  -no-shutdown \
+  -d int,cpu_reset \
+  -D "$OUT/qemu.log"
