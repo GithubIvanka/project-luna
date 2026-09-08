@@ -1,6 +1,8 @@
 //! UEFI Block I/O adapter used by the read-only ext4 layer.
 
 use alloc::vec::Vec;
+use core::ops::Deref;
+use core::ptr::NonNull;
 
 use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
@@ -12,14 +14,41 @@ use crate::ext4::BlockDevice;
 
 const IO_CHUNK: usize = 4096;
 
-/// Open a firmware-owned protocol without trying to disconnect the firmware's
-/// disk driver. Disk protocols are commonly already opened by UEFI drivers,
-/// so Exclusive access can legitimately return ACCESS_DENIED.
-fn open_shared<P: ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<ScopedProtocol<P>> {
-    // SAFETY: the handle and protocol remain valid while the returned scoped
-    // protocol is alive; this function only borrows an existing firmware
-    // protocol and never uninstalls or replaces it.
-    unsafe {
+/// A firmware protocol obtained with UEFI `GET_PROTOCOL` semantics.
+///
+/// UEFI explicitly does not require `CloseProtocol()` for `GET_PROTOCOL`.
+/// Some firmware implementations, including OVMF, therefore return
+/// `EFI_NOT_FOUND` if a caller tries to close such an access through the
+/// `ScopedProtocol` RAII path. The protocol is only needed until
+/// `ExitBootServices()`, so Luna deliberately keeps the pointer borrowed and
+/// does not issue a matching close.
+struct BorrowedProtocol<P: ?Sized>(NonNull<P>);
+
+impl<P: ?Sized> BorrowedProtocol<P> {
+    fn from_scoped(protocol: ScopedProtocol<P>) -> Self {
+        let ptr = NonNull::from(&*protocol);
+        core::mem::forget(protocol);
+        Self(ptr)
+    }
+}
+
+impl<P: ?Sized> Deref for BorrowedProtocol<P> {
+    type Target = P;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: the firmware protocol is valid for the lifetime of the
+        // loader and remains installed until ExitBootServices().
+        unsafe { self.0.as_ref() }
+    }
+}
+
+/// Open a firmware-owned protocol without taking exclusive ownership.
+///
+/// Disk protocols are commonly already opened by UEFI drivers, so Exclusive
+/// access can legitimately return ACCESS_DENIED. `GET_PROTOCOL` is the UEFI
+/// mode intended for shared access and does not require a later CloseProtocol.
+fn open_shared<P: ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
+    let protocol = unsafe {
         open_protocol::<P>(
             OpenProtocolParams {
                 handle,
@@ -28,12 +57,14 @@ fn open_shared<P: ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<Scoped
             },
             OpenProtocolAttributes::GetProtocol,
         )
-        .map_err(BootError::from)
-    }
+        .map_err(BootError::from)?
+    };
+
+    Ok(BorrowedProtocol::from_scoped(protocol))
 }
 
 pub struct UefiBlockDevice {
-    io: ScopedProtocol<BlockIO>,
+    io: BorrowedProtocol<BlockIO>,
     start_lba: u64,
     block_size: u64,
 }
