@@ -18,10 +18,10 @@ pub struct PreparedKernel {
     pub kernel_address: u64,
     pub kernel_entry: u64,
     pub kernel_size: usize,
+    pub init_address: u64,
+    pub init_size: usize,
     pub boot_params_address: u64,
     pub command_line_address: u64,
-    pub initrd_address: u64,
-    pub initrd_size: usize,
     pub boot_params: BootParams,
     pub allocations: Vec<(u64, usize)>,
 }
@@ -43,15 +43,25 @@ impl<'a> KernelLoader<'a> {
         let protected = kernel
             .get(setup.protected_mode_offset()..)
             .ok_or(BootError::InvalidKernel)?;
-        let init_size = setup.init_size as usize;
-        if protected.len() > init_size {
+        let kernel_size = setup.init_size as usize;
+        if protected.len() > kernel_size {
             return Err(BootError::InvalidKernel);
         }
 
-        let kernel_address = allocate_kernel(setup.pref_address, init_size, setup.kernel_alignment as u64)?;
+        let kernel_address = allocate_kernel(setup.pref_address, kernel_size, setup.kernel_alignment as u64)?;
         unsafe {
-            ptr::write_bytes(kernel_address as *mut u8, 0, init_size);
+            ptr::write_bytes(kernel_address as *mut u8, 0, kernel_size);
             ptr::copy_nonoverlapping(protected.as_ptr(), kernel_address as *mut u8, protected.len());
+        }
+
+        let init = self.filesystem.read_file(&target.init_path)?;
+        validate_luna_init(&init)?;
+        let init_size = init.len();
+        let init_pages = div_ceil(init_size, PAGE_SIZE);
+        let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
+        unsafe {
+            ptr::write_bytes(init_address as *mut u8, 0, init_pages * PAGE_SIZE);
+            ptr::copy_nonoverlapping(init.as_ptr(), init_address as *mut u8, init_size);
         }
 
         let mut boot_params = BootParams::zeroed();
@@ -74,25 +84,6 @@ impl<'a> KernelLoader<'a> {
         }
         boot_params.set_cmdline(cmdline_addr)?;
 
-        let mut initrd_address = 0;
-        let mut initrd_size = 0;
-        let mut initrd_pages = 0;
-        if !target.initrd_path.is_empty() {
-            let initrd = self.filesystem.read_file(&target.initrd_path)?;
-            if initrd.is_empty() {
-                return Err(BootError::InvalidKernel);
-            }
-            initrd_size = initrd.len();
-            initrd_pages = div_ceil(initrd.len(), PAGE_SIZE);
-            let max = if setup.initrd_addr_max == 0 { 0xffff_ffff } else { setup.initrd_addr_max as u64 };
-            initrd_address = allocate_pages(initrd_pages, max)?;
-            unsafe {
-                ptr::write_bytes(initrd_address as *mut u8, 0, initrd_pages * PAGE_SIZE);
-                ptr::copy_nonoverlapping(initrd.as_ptr(), initrd_address as *mut u8, initrd.len());
-            }
-            boot_params.set_ramdisk(initrd_address, initrd.len() as u64)?;
-        }
-
         let e820 = Vec::<E820Entry>::new();
         boot_params.set_e820(&e820)?;
         unsafe {
@@ -103,28 +94,39 @@ impl<'a> KernelLoader<'a> {
             );
         }
 
-        let mut allocations = vec![
-            (kernel_address, div_ceil(init_size, PAGE_SIZE)),
+        let allocations = vec![
+            (kernel_address, div_ceil(kernel_size, PAGE_SIZE)),
+            (init_address, init_pages),
             (bp_addr, 1),
             (cmdline_addr, 1),
         ];
-        if initrd_pages != 0 {
-            allocations.push((initrd_address, initrd_pages));
-        }
 
         Ok(PreparedKernel {
             setup,
             kernel_address,
             kernel_entry: kernel_address + setup.entry_offset() as u64,
             kernel_size: protected.len(),
+            init_address,
+            init_size,
             boot_params_address: bp_addr,
             command_line_address: cmdline_addr,
-            initrd_address,
-            initrd_size,
             boot_params,
             allocations,
         })
     }
+}
+
+fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
+    if bytes.len() < 64 || &bytes[0..4] != b"\x7fELF" {
+        return Err(BootError::InvalidKernel);
+    }
+    if bytes[4] != 2 || bytes[5] != 1 || bytes[6] != 1 {
+        return Err(BootError::Unsupported("luna-init must be ELF64 little-endian"));
+    }
+    if u16::from_le_bytes([bytes[18], bytes[19]]) != 0x3e {
+        return Err(BootError::Unsupported("luna-init must target x86_64"));
+    }
+    Ok(())
 }
 
 fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u64> {
