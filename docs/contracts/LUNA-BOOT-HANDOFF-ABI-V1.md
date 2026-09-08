@@ -22,7 +22,7 @@ luna-init (PID 1)
 luna-system-runtime
 ```
 
-There is no separate initramfs userspace layer in the Luna boot architecture, no `switch_root` stage and no second system-init process.
+There is no separate initramfs userspace layer in the Luna boot architecture, no `switch_root` stage and no `pivot_root` stage in the target implementation.
 
 ## 2. Design principles
 
@@ -31,10 +31,11 @@ There is no separate initramfs userspace layer in the Luna boot architecture, no
 - The handoff is a memory-resident boot object, never a file on SYSTEM, DATA or EFI.
 - The ABI is fixed-header plus typed extensible records.
 - Unknown record types may be skipped safely by consumers that understand the ABI version.
-- `luna-boot` provides Luna boot selection facts; it does not duplicate kernel-owned hardware discovery.
+- `luna-boot` provides Luna boot-selection facts; it does not duplicate kernel-owned hardware discovery.
 - The handoff is not a replacement for the Linux kernel command line. Kernel-specific parameters remain kernel parameters; Luna state is structured data.
+- A separate memory-resident `luna-init` ELF is part of the boot handoff and is executed directly by the Luna kernel integration.
 
-Linux x86 boot protocol 2.09+ provides the `setup_data` linked-list mechanism specifically to extend boot parameters beyond the fixed 4096-byte `boot_params` area. citeturn880881search1turn880881search2
+Linux x86 boot protocol 2.09+ provides the `setup_data` linked-list mechanism for extending boot parameters beyond the fixed 4096-byte `boot_params` area. 
 
 ## 3. Transport
 
@@ -51,7 +52,7 @@ boot_params
                 └── typed Luna records
 ```
 
-The handoff allocation must be treated as reserved boot data until the Luna kernel integration has consumed or explicitly retained it. The bootloader must not leave the handoff in memory that the kernel may immediately reclaim as ordinary free RAM.
+The handoff allocation and every referenced boot object must be treated as reserved boot data until the Luna kernel integration has consumed or explicitly retained it. The bootloader must not leave these ranges in memory that the kernel may immediately reclaim as ordinary free RAM.
 
 ## 4. ABI header
 
@@ -181,6 +182,24 @@ u8  strings[]
 
 The kernel image itself is already executing; this record is identity and provenance metadata for the running kernel/boot attempt.
 
+### `LUNA_INIT_IMAGE`
+
+Identifies the exact `luna-init` ELF loaded by `luna-boot` into reserved physical memory.
+
+Payload:
+
+```text
+u64 physical_address
+u64 size
+u8  digest[32]
+u32 flags
+u32 reserved
+```
+
+The referenced range must be entirely contained within boot-reserved memory and must not overlap the handoff metadata, kernel image, command line or another incompatible boot object.
+
+The digest covers exactly the supplied ELF byte range. `luna-boot` validates the ELF before handoff; the Luna kernel repeats structural/security-critical validation before execution.
+
 ### `BOOT_MODE`
 
 Enumerates the boot path selected by `luna-boot`:
@@ -203,21 +222,25 @@ The exact compact payload is versioned with the Boot State Contract.
 
 The selected System Image record contains its expected content digest. The adjacent manifest identity is also included.
 
-The kernel-facing handoff checksum protects the structure of the handoff itself. It does not by itself establish authenticity of the image or manifest.
+The `LUNA_INIT_IMAGE` record contains the expected `luna-init` ELF digest.
 
-System Image authenticity/trust remains a separate policy and update concern.
+The handoff checksum protects the structure of the handoff itself. It does not by itself establish authenticity of the image, manifest, kernel or `luna-init` artifact.
+
+Image, kernel and `luna-init` authenticity/trust remain separate policy/update concerns.
 
 ## 8. Hardware information boundary
 
 Luna Handoff v1 does **not** duplicate generic hardware information already represented by the Linux x86 boot protocol or discovered by the kernel.
 
-The bootloader continues to populate standard boot structures such as the Linux `boot_params` memory/firmware fields it owns. The Luna handoff carries only Luna-specific state.
+The bootloader continues to populate standard boot structures such as Linux `boot_params` memory/firmware fields it owns. The Luna handoff carries only Luna-specific state and the direct initial-userspace memory object.
 
-This avoids turning the handoff into a second ACPI/E820/device-discovery protocol. Linux's x86 boot protocol already defines `boot_params` fields for data such as ACPI RSDP and an extensible `setup_data` list. citeturn856784search2turn880881search1
+This avoids turning the handoff into a second ACPI/E820/device-discovery protocol. Linux's x86 boot protocol defines `boot_params` fields and the extensible `setup_data` mechanism used here.
 
-## 9.2 Memory ownership
+## 9. Memory ownership
 
-The handoff memory is boot-reserved memory. `luna-boot` must allocate it before `ExitBootServices`, populate it completely, and publish its physical address through the Linux boot protocol.
+The handoff and `luna-init` memory object are boot-reserved memory. `luna-boot` must allocate, populate and publish them before `ExitBootServices`.
+
+The Luna kernel must preserve the referenced `luna-init` bytes until the ELF has been successfully loaded and no remaining kernel state references the original range. The exact release point is a kernel implementation detail.
 
 After `ExitBootServices`, the bootloader performs no further UEFI allocation or filesystem activity.
 
@@ -248,22 +271,23 @@ validated LunaBootContext
     ├── DATA partition identity
     ├── selected image identity + digest
     ├── running kernel identity + digest
+    ├── luna-init identity + digest
     ├── boot attempt identity
     ├── boot mode
     └── boot state context
 ```
 
-No initramfs archive is required to transport these values.
+`luna-init` is launched directly from the memory-resident `LUNA_INIT_IMAGE` object by the Luna kernel integration. No initramfs archive is required to transport either the executable or the Luna boot context.
 
 ## 12. Kernel driver policy
 
-Luna does not use initramfs to discover or load the drivers required to reach the SYSTEM partition, read the required filesystem, access the selected System Image and start `luna-init`.
+Luna does not use initramfs to discover or load the drivers required to reach the SYSTEM partition, read the required filesystem, access the selected System Image and execute `luna-init`.
 
 The Luna kernel configuration must therefore build all boot-critical storage, bus, filesystem, crypto and hardware support required by the supported boot profiles directly into the kernel (`CONFIG_*=y`).
 
 Optional post-boot drivers remain eligible for loadable modules.
 
-Built-in firmware may also be used when a device requires firmware during boot and a filesystem-based lookup would otherwise reintroduce an early-userspace dependency. Linux supports built-in firmware with `CONFIG_EXTRA_FIRMWARE` and `CONFIG_EXTRA_FIRMWARE_DIR`. citeturn856784search0
+Built-in firmware may also be used when a device requires firmware during boot and a filesystem-based lookup would otherwise reintroduce an early-userspace dependency. Linux supports built-in firmware with `CONFIG_EXTRA_FIRMWARE` and `CONFIG_EXTRA_FIRMWARE_DIR`.
 
 ## 13. Kernel modules
 
@@ -284,11 +308,13 @@ The module set is tied to the kernel identity and must not be treated as a globa
 
 The module tree may be materialized into the logical runtime filesystem after `luna-init` has constructed the system environment.
 
-Where modules are allowed to load, Luna may enforce signed-module policy. Linux supports kernel-side module signature verification and a force-enforcement configuration. citeturn856784search4
+Where modules are allowed to load, Luna may enforce signed-module policy.
 
 ## 14. Failure
 
 A missing, malformed, incompatible or unverified required handoff record is a boot failure. `luna-init` must not guess a replacement image or device identity from unrelated paths when a required ABI record is invalid.
+
+A missing, malformed or unexecutable `LUNA_INIT_IMAGE` is fatal to the current boot attempt.
 
 Boot fallback remains owned by the boot state/fallback mechanism. The handoff describes the attempt selected by `luna-boot`.
 
