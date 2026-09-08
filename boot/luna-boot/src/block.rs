@@ -6,7 +6,7 @@ use core::ptr::NonNull;
 
 use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
-use uefi::proto::ProtocolPointer;
+use uefi::proto::{Protocol, ProtocolPointer};
 use uefi::Handle;
 
 use crate::error::{BootError, BootResult};
@@ -22,9 +22,9 @@ const IO_CHUNK: usize = 4096;
 /// `ScopedProtocol` RAII path. The protocol is only needed until
 /// `ExitBootServices()`, so Luna deliberately keeps the pointer borrowed and
 /// does not issue a matching close.
-struct BorrowedProtocol<P: ?Sized>(NonNull<P>);
+struct BorrowedProtocol<P: Protocol + ?Sized>(NonNull<P>);
 
-impl<P: ?Sized> BorrowedProtocol<P> {
+impl<P: Protocol + ?Sized> BorrowedProtocol<P> {
     fn from_scoped(protocol: ScopedProtocol<P>) -> Self {
         let ptr = NonNull::from(&*protocol);
         core::mem::forget(protocol);
@@ -32,7 +32,7 @@ impl<P: ?Sized> BorrowedProtocol<P> {
     }
 }
 
-impl<P: ?Sized> Deref for BorrowedProtocol<P> {
+impl<P: Protocol + ?Sized> Deref for BorrowedProtocol<P> {
     type Target = P;
 
     fn deref(&self) -> &Self::Target {
@@ -47,7 +47,7 @@ impl<P: ?Sized> Deref for BorrowedProtocol<P> {
 /// Disk protocols are commonly already opened by UEFI drivers, so Exclusive
 /// access can legitimately return ACCESS_DENIED. `GET_PROTOCOL` is the UEFI
 /// mode intended for shared access and does not require a later CloseProtocol.
-fn open_shared<P: ProtocolPointer + ?Sized>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
+fn open_shared<P: Protocol + ?Sized>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
     let protocol = unsafe {
         open_protocol::<P>(
             OpenProtocolParams {
