@@ -18,8 +18,10 @@ pub struct PreparedKernel {
     pub kernel_address: u64,
     pub kernel_entry: u64,
     pub kernel_size: usize,
+    pub kernel_digest: [u8; 32],
     pub init_address: u64,
     pub init_size: usize,
+    pub init_digest: [u8; 32],
     pub boot_params_address: u64,
     pub command_line_address: u64,
     pub boot_params: BootParams,
@@ -35,6 +37,7 @@ impl<'a> KernelLoader<'a> {
 
     pub fn prepare(&mut self, target: &BootTarget) -> BootResult<PreparedKernel> {
         let kernel = self.filesystem.read_file(&target.kernel_path)?;
+        let kernel_digest = *blake3::hash(&kernel).as_bytes();
         let setup = LinuxSetupHeader::parse(&kernel)?;
         if setup.xloadflags & 1 == 0 {
             return Err(BootError::Unsupported("kernel does not advertise XLF_KERNEL_64"));
@@ -56,6 +59,7 @@ impl<'a> KernelLoader<'a> {
 
         let init = self.filesystem.read_file(&target.init_path)?;
         validate_luna_init(&init)?;
+        let init_digest = *blake3::hash(&init).as_bytes();
         let init_size = init.len();
         let init_pages = div_ceil(init_size, PAGE_SIZE);
         let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
@@ -106,8 +110,10 @@ impl<'a> KernelLoader<'a> {
             kernel_address,
             kernel_entry: kernel_address + setup.entry_offset() as u64,
             kernel_size: protected.len(),
+            kernel_digest,
             init_address,
             init_size,
+            init_digest,
             boot_params_address: bp_addr,
             command_line_address: cmdline_addr,
             boot_params,
