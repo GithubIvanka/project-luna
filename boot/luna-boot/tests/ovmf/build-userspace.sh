@@ -32,14 +32,18 @@ if [ ! -x "$LUNA_INIT" ]; then
 fi
 [ -x "$RUNTIME" ] || { echo "system runtime binary was not produced: $RUNTIME" >&2; exit 1; }
 [ -x "$LUNA_INIT" ] || { echo "luna-init binary was not produced: $LUNA_INIT" >&2; exit 1; }
-if file "$RUNTIME" | grep -qv 'statically linked'; then
-    echo "luna-test userspace: system-runtime must be statically linked with musl" >&2
-    exit 1
-fi
-if file "$LUNA_INIT" | grep -qv 'statically linked'; then
-    echo "luna-test userspace: luna-init must be statically linked with musl" >&2
-    exit 1
-fi
+
+# `file(1)` reports traditional musl executables as "statically linked" and
+# static PIE binaries as "static-pie linked". Both satisfy Luna's requirement
+# that early userspace has no dynamic loader or external shared-library needs.
+for binary in "$RUNTIME" "$LUNA_INIT"; do
+    description="$(file "$binary")"
+    if [[ "$description" != *"statically linked"* && "$description" != *"static-pie linked"* ]]; then
+        echo "luna-test userspace: binary must be statically linked or static-PIE: $binary" >&2
+        echo "  file: $description" >&2
+        exit 1
+    fi
+done
 
 cp "$BUSYBOX" "$SYSROOT/bin/busybox"
 chmod 0755 "$SYSROOT/bin/busybox"
