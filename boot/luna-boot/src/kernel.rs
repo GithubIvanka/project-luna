@@ -6,7 +6,7 @@ use core::ptr;
 
 use uefi::boot::{self, AllocateType, MemoryType, PAGE_SIZE};
 
-use crate::boot_params::BootParams;
+use crate::boot_params::{BootParams, LOW_MEMORY_CMDLINE_MAX};
 use crate::e820::E820Entry;
 use crate::error::{BootError, BootResult};
 use crate::filesystem::SystemFilesystem;
@@ -43,6 +43,9 @@ impl<'a> KernelLoader<'a> {
             return Err(BootError::Unsupported("kernel does not advertise XLF_KERNEL_64"));
         }
 
+        // For a modern bzImage the protected-mode portion begins at
+        // (setup_sects + 1) * 512. It remains compressed; Linux's own
+        // decompressor is the code reached at loaded_address + 0x200.
         let protected = kernel
             .get(setup.protected_mode_offset()..)
             .ok_or(BootError::InvalidKernel)?;
@@ -71,7 +74,8 @@ impl<'a> KernelLoader<'a> {
         let mut boot_params = BootParams::zeroed();
         boot_params.copy_setup_header(&kernel)?;
         boot_params.set_loader_type(0xff);
-        boot_params.set_loadflags(setup.loadflags | 0x01 | 0x40);
+        boot_params.set_loadflags(setup.loadflags | 0x01);
+        boot_params.enable_setup_heap();
 
         let bp_addr = allocate_pages(1, 0xffff_ffff)?;
         unsafe { ptr::write_bytes(bp_addr as *mut u8, 0, PAGE_SIZE); }
@@ -81,7 +85,7 @@ impl<'a> KernelLoader<'a> {
         if cmdline.len() + 1 > max_cmdline {
             return Err(BootError::Unsupported("kernel command line exceeds Linux cmdline_size"));
         }
-        let cmdline_addr = allocate_pages(1, 0xffff_ffff)?;
+        let cmdline_addr = allocate_low_cmdline_page()?;
         unsafe {
             ptr::write_bytes(cmdline_addr as *mut u8, 0, PAGE_SIZE);
             ptr::copy_nonoverlapping(cmdline.as_ptr(), cmdline_addr as *mut u8, cmdline.len());
@@ -158,6 +162,19 @@ fn allocate_pages(pages: usize, max_address: u64) -> BootResult<u64> {
         pages.max(1),
     ).map_err(|_| BootError::MemoryAllocationFailed)?;
     Ok(ptr.as_ptr() as u64)
+}
+
+fn allocate_low_cmdline_page() -> BootResult<u64> {
+    let ptr = boot::allocate_pages(
+        AllocateType::MaxAddress(LOW_MEMORY_CMDLINE_MAX),
+        MemoryType::LOADER_DATA,
+        1,
+    ).map_err(|_| BootError::MemoryAllocationFailed)?;
+    let address = ptr.as_ptr() as u64;
+    if address + PAGE_SIZE as u64 > 0xA0000 {
+        return Err(BootError::MemoryAllocationFailed);
+    }
+    Ok(address)
 }
 
 const fn div_ceil(value: usize, divisor: usize) -> usize { (value + divisor - 1) / divisor }
