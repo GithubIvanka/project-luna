@@ -6,7 +6,7 @@ use core::ptr::NonNull;
 
 use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
 use uefi::proto::media::block::BlockIO;
-use uefi::proto::Protocol;
+use uefi::proto::{Protocol, ProtocolPointer};
 use uefi::Handle;
 
 use crate::error::{BootError, BootResult};
@@ -26,7 +26,7 @@ struct BorrowedProtocol<P: Protocol + ?Sized>(NonNull<P>);
 
 impl<P: Protocol + ?Sized> BorrowedProtocol<P> {
     fn from_scoped(protocol: ScopedProtocol<P>) -> Self {
-        let ptr = NonNull::from(&*protocol);
+        let ptr = protocol.get().map(NonNull::from).expect("GET_PROTOCOL returned a null interface");
         core::mem::forget(protocol);
         Self(ptr)
     }
@@ -42,12 +42,8 @@ impl<P: Protocol + ?Sized> Deref for BorrowedProtocol<P> {
     }
 }
 
-/// Open a firmware-owned protocol without taking exclusive ownership.
-///
-/// Disk protocols are commonly already opened by UEFI drivers, so Exclusive
-/// access can legitimately return ACCESS_DENIED. `GET_PROTOCOL` is the UEFI
-/// mode intended for shared access and does not require a later CloseProtocol.
-fn open_shared<P: Protocol>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
+/// Open a sized firmware protocol with `GET_PROTOCOL` semantics.
+fn open_shared<P: ProtocolPointer>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
     let protocol = unsafe {
         open_protocol::<P>(
             OpenProtocolParams {
@@ -61,6 +57,33 @@ fn open_shared<P: Protocol>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
     };
 
     Ok(BorrowedProtocol::from_scoped(protocol))
+}
+
+/// Open an unsized `DevicePath` protocol with `GET_PROTOCOL` semantics.
+///
+/// `DevicePath` is a dynamically-sized UEFI protocol type, so it cannot use
+/// `open_shared`, whose `ProtocolPointer` bound requires a sized type. Keep the
+/// returned `ScopedProtocol` intentionally leaked for the same reason described
+/// by `BorrowedProtocol`: GET_PROTOCOL access does not require CloseProtocol.
+fn open_device_path(handle: Handle) -> BootResult<&'static uefi::proto::device_path::DevicePath> {
+    use uefi::proto::device_path::DevicePath;
+
+    let protocol = unsafe {
+        open_protocol::<DevicePath>(
+            OpenProtocolParams {
+                handle,
+                agent: boot::image_handle(),
+                controller: None,
+            },
+            OpenProtocolAttributes::GetProtocol,
+        )
+        .map_err(BootError::from)?
+    };
+
+    let path = protocol.get().ok_or(BootError::FilesystemError)?;
+    let path = unsafe { core::mem::transmute::<&DevicePath, &'static DevicePath>(path) };
+    core::mem::forget(protocol);
+    Ok(path)
 }
 
 pub struct UefiBlockDevice {
@@ -131,7 +154,7 @@ pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
 
     let loaded = open_shared::<uefi::proto::loaded_image::LoadedImage>(image_handle)?;
     let device = loaded.device().ok_or(BootError::FilesystemError)?;
-    let path = open_shared::<DevicePath>(device)?;
+    let path = open_device_path(device)?;
     let bytes = path.as_bytes();
 
     let mut cut = None;
