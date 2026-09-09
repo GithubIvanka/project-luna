@@ -25,13 +25,12 @@ The patch targets the Linux 7.2.y stable tree used by Project Luna.
 diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
-@@ -66,6 +66,7 @@ obj-y			+= resource.o
- obj-y			+= irqflags.o
- obj-y			+= static_call.o
-+obj-y			+= luna_boot.o
+@@ -89,4 +89,5 @@ obj-y += resource.o
+ obj-y += irqflags.o
+ obj-y += static_call.o
++obj-y += luna_boot.o
  
- obj-y				+= process.o
- obj-y				+= fpu/
+ obj-y += process.o
 
 diff --git a/arch/x86/kernel/luna_boot.c b/arch/x86/kernel/luna_boot.c
 new file mode 100644
@@ -271,7 +270,7 @@ new file mode 100644
 diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
-@@ -1038,6 +1038,7 @@ void __init setup_arch(char **cmdline_p)
+@@ -962,7 +962,8 @@ void __init setup_arch(char **cmdline_p)
  	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
  	e820__memory_setup();
  	parse_setup_data();
