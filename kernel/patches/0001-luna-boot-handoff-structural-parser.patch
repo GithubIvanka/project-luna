@@ -1,242 +1,313 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Project Luna <luna@localhost>
-Date: Wed, 9 Sep 2026 08:30:00 +0700
-Subject: [PATCH] x86: add initial Luna boot handoff parser
+Date: Wed, 9 Sep 2026 09:10:00 +0700
+Subject: [PATCH] x86: move Luna boot handoff parser to Rust
 
-Add the first kernel-side slice of the Luna boot contract. The parser walks
-Linux setup_data, identifies the Luna setup node, validates the fixed v1
-header and record framing, and exposes the physical address of the required
-LUNA_INIT_IMAGE record to later init code.
+Make the Luna-specific kernel boot handoff logic Rust-first.
 
-This patch deliberately does not execute the image and does not implement
-BLAKE3 verification yet. It is structural plumbing only.
+The C side remains only as a tiny ABI bridge from setup_arch() into the
+Rust implementation. The parser itself validates Linux setup_data,
+LunaBootHandoffV1 framing, and the required LUNA_INIT_IMAGE record.
 
-The patch targets the Linux 7.2.y stable tree used by Project Luna.
+This keeps the early boot call site intact while making the Luna-specific
+logic use the kernel Rust infrastructure.
 
 ---
- arch/x86/kernel/Makefile    |   1 +
- arch/x86/kernel/luna_boot.c | 198 ++++++++++++++++++++++++++++++++++++++++++++
- arch/x86/kernel/setup.c     |   1 +
- include/linux/luna_boot.h    |  25 ++++++
- 4 files changed, 225 insertions(+)
- create mode 100644 arch/x86/kernel/luna_boot.c
+ arch/x86/kernel/Makefile     |   1 +
+ arch/x86/kernel/luna_boot.rs | 266 +++++++++++++++++++++++++++++++++++++++++++
+ arch/x86/kernel/setup.c      |   2 +
+ include/linux/luna_boot.h    |  25 +++++
+ 4 files changed, 294 insertions(+)
+ create mode 100644 arch/x86/kernel/luna_boot.rs
  create mode 100644 include/linux/luna_boot.h
 
 diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
-@@ -89,0 +90 @@
-+obj-y			+= luna_boot.o
+@@ -699,6 +699,7 @@ obj-y += resource.o
+ obj-y += irqflags.o
+ obj-y += static_call.o
++obj-$(CONFIG_RUST) += luna_boot.o
+ obj-y += process.o
+ obj-y += fpu/
+ obj-y += ptrace.o
 
-diff --git a/arch/x86/kernel/luna_boot.c b/arch/x86/kernel/luna_boot.c
+diff --git a/arch/x86/kernel/luna_boot.rs b/arch/x86/kernel/luna_boot.rs
 new file mode 100644
 --- /dev/null
-+++ b/arch/x86/kernel/luna_boot.c
-@@ -0,0 +1,198 @@
++++ b/arch/x86/kernel/luna_boot.rs
+@@ -0,0 +1,266 @@
 +// SPDX-License-Identifier: GPL-2.0
 +
-+#include <linux/init.h>
-+#include <linux/kernel.h>
-+#include <linux/luna_boot.h>
-+#include <linux/types.h>
++#![no_std]
 +
-+#include <asm/bootparam.h>
-+#include <asm/setup.h>
++#![allow(unsafe_op_in_unsafe_fn)]
 +
-+#define LUNA_SETUP_DATA_TYPE		0x4c554e41U
-+#define LUNA_HANDOFF_MAGIC		0x31304448_414e554cULL
-+#define LUNA_HANDOFF_MAJOR		1U
-+#define LUNA_HANDOFF_HEADER_SIZE	84U
-+#define LUNA_HANDOFF_MAX_SIZE		(64U * 1024U)
-+#define LUNA_RECORD_LUNA_INIT_IMAGE	5U
++//! Project Luna kernel-side boot handoff parser.
++//!
++//! The C kernel provides only the ABI entry point. Parsing and validation live
++//! in Rust so the Luna-specific policy remains in Rust.
 +
-+struct luna_handoff_header {
-+	u64 magic;
-+	u16 major;
-+	u16 minor;
-+	u32 header_size;
-+	u32 total_size;
-+	u32 flags;
-+	u32 reserved;
-+	u64 attempt_id;
-+	u64 records_offset;
-+	u64 records_size;
-+	u8 checksum[32];
-+} __packed;
++use core::ffi::c_void;
++use core::ptr;
 +
-+struct luna_handoff_record {
-+	u16 type;
-+	u16 flags;
-+	u32 size;
-+	u8 payload[];
-+} __packed;
++use kernel::bindings;
 +
-+struct luna_init_image_record {
-+	u64 address;
-+	u64 size;
-+	u8 digest[32];
-+	u32 reserved0;
-+	u32 reserved1;
-+} __packed;
++const LUNA_SETUP_DATA_TYPE: u32 = 0x4c55_4e41;
++const LUNA_HANDOFF_MAGIC: u64 = 0x3130_4448_414e_554c;
++const LUNA_HANDOFF_MAJOR: u16 = 1;
++const LUNA_HANDOFF_HEADER_SIZE: usize = 84;
++const LUNA_HANDOFF_MAX_SIZE: usize = 64 * 1024;
++const LUNA_RECORD_LUNA_INIT_IMAGE: u16 = 5;
++const SETUP_DATA_NODE_SIZE: usize = 16;
++const RECORD_HEADER_SIZE: usize = 8;
++const RECORD_ALIGN: u64 = 8;
++const LUNA_INIT_IMAGE_RECORD_SIZE: usize = 56;
 +
-+static phys_addr_t luna_handoff_phys __initdata;
-+static u32 luna_handoff_size __initdata;
-+static phys_addr_t luna_init_phys __initdata;
-+static u64 luna_init_size __initdata;
-+static bool luna_handoff_present __initdata;
-+static bool luna_init_present __initdata;
++static mut LUNA_HANDOFF_PHYS: u64 = 0;
++static mut LUNA_HANDOFF_SIZE: u32 = 0;
++static mut LUNA_INIT_PHYS: u64 = 0;
++static mut LUNA_INIT_SIZE: u64 = 0;
++static mut LUNA_HANDOFF_PRESENT: bool = false;
++static mut LUNA_INIT_PRESENT: bool = false;
 +
-+static bool luna_range_ok(u64 offset, u64 size, u64 total)
-+{
-+	if (offset > total)
-+		return false;
-+	if (size > total - offset)
-+		return false;
-+	return true;
++#[inline]
++unsafe fn read_u16(ptr: *const u8, offset: usize) -> u16 {
++    u16::from_le(ptr::read_unaligned(ptr.add(offset).cast()))
 +}
 +
-+static void __init luna_parse_handoff(phys_addr_t phys, u32 len)
-+{
-+	struct luna_handoff_header *hdr;
-+	struct luna_handoff_record *record;
-+	u8 *base;
-+	u64 offset;
-+	u64 records_end;
-+
-+	if (len < sizeof(*hdr) || len > LUNA_HANDOFF_MAX_SIZE)
-+		return;
-+
-+	base = early_memremap(phys, len);
-+	if (!base)
-+		return;
-+
-+	hdr = (struct luna_handoff_header *)base;
-+	if (hdr->magic != LUNA_HANDOFF_MAGIC ||
-+	    hdr->major != LUNA_HANDOFF_MAJOR ||
-+	    hdr->header_size != LUNA_HANDOFF_HEADER_SIZE ||
-+	    hdr->total_size != len ||
-+	    hdr->records_offset < LUNA_HANDOFF_HEADER_SIZE ||
-+	    !luna_range_ok(hdr->records_offset, hdr->records_size, len))
-+		goto out;
-+
-+	luna_handoff_phys = phys;
-+	luna_handoff_size = len;
-+	luna_handoff_present = true;
-+
-+	offset = hdr->records_offset;
-+	records_end = hdr->records_offset + hdr->records_size;
-+	while (offset < records_end) {
-+		u64 next;
-+		u32 record_size;
-+
-+		if (records_end - offset < sizeof(*record))
-+			goto invalid;
-+
-+		record = (struct luna_handoff_record *)(base + offset);
-+		record_size = record->size;
-+		next = offset + sizeof(*record) + record_size;
-+
-+		if (record_size > records_end - offset - sizeof(*record))
-+			goto invalid;
-+
-+		if (record->type == LUNA_RECORD_LUNA_INIT_IMAGE) {
-+			struct luna_init_image_record *init;
-+
-+			if (record_size != sizeof(*init))
-+				goto invalid;
-+
-+			init = (struct luna_init_image_record *)record->payload;
-+			if (!init->address || !init->size)
-+				goto invalid;
-+
-+			luna_init_phys = (phys_addr_t)init->address;
-+			luna_init_size = init->size;
-+			luna_init_present = true;
-+		}
-+
-+		/* Records are 8-byte aligned in the Luna wire format. */
-+		next = ALIGN(next, 8);
-+		if (next > records_end || next <= offset)
-+			goto invalid;
-+		offset = next;
-+	}
-+
-+	if (!luna_init_present)
-+		goto invalid;
-+
-+	pr_info("Luna: boot handoff v%u.%u accepted (%u bytes)\n",
-+		hdr->major, hdr->minor, hdr->total_size);
-+	pr_info("Luna: luna-init image at 0x%llx (%llu bytes)\n",
-+		(unsigned long long)luna_init_phys,
-+		(unsigned long long)luna_init_size);
-+	goto out;
-+
-+invalid:
-+	luna_handoff_present = false;
-+	luna_init_present = false;
-+	luna_handoff_phys = 0;
-+	luna_handoff_size = 0;
-+	luna_init_phys = 0;
-+	luna_init_size = 0;
-+out:
-+	early_memunmap(base, len);
++#[inline]
++unsafe fn read_u32(ptr: *const u8, offset: usize) -> u32 {
++    u32::from_le(ptr::read_unaligned(ptr.add(offset).cast()))
 +}
 +
-+void __init x86_luna_boot_parse(const struct boot_params *params)
-+{
-+	phys_addr_t phys;
-+	struct setup_data *node;
-+
-+	phys = params->hdr.setup_data;
-+	while (phys) {
-+		node = early_memremap(phys, sizeof(*node));
-+		if (!node)
-+			return;
-+
-+		if (node->type == LUNA_SETUP_DATA_TYPE) {
-+			u64 payload_phys = phys + sizeof(*node);
-+			u32 payload_len = node->len;
-+
-+			early_memunmap(node, sizeof(*node));
-+			luna_parse_handoff(payload_phys, payload_len);
-+			return;
-+		}
-+
-+		phys = node->next;
-+		early_memunmap(node, sizeof(*node));
-+	}
++#[inline]
++unsafe fn read_u64(ptr: *const u8, offset: usize) -> u64 {
++    u64::from_le(ptr::read_unaligned(ptr.add(offset).cast()))
 +}
 +
-+bool x86_luna_boot_available(void)
-+{
-+	return luna_handoff_present && luna_init_present;
++#[inline]
++fn range_ok(offset: usize, size: usize, total: usize) -> bool {
++    offset <= total && size <= total - offset
 +}
 +
-+phys_addr_t x86_luna_init_phys(void)
-+{
-+	return luna_init_phys;
++unsafe fn clear_state() {
++    LUNA_HANDOFF_PHYS = 0;
++    LUNA_HANDOFF_SIZE = 0;
++    LUNA_INIT_PHYS = 0;
++    LUNA_INIT_SIZE = 0;
++    LUNA_HANDOFF_PRESENT = false;
++    LUNA_INIT_PRESENT = false;
 +}
 +
-+u64 x86_luna_init_size(void)
-+{
-+	return luna_init_size;
++unsafe fn parse_handoff(phys: u64, len: u32) {
++    clear_state();
++
++    let len = len as usize;
++    if !(LUNA_HANDOFF_HEADER_SIZE..=LUNA_HANDOFF_MAX_SIZE).contains(&len) {
++        return;
++    }
++
++    let base = bindings::early_memremap(
++        phys as bindings::phys_addr_t,
++        len,
++    ) as *mut u8;
++    if base.is_null() {
++        return;
++    }
++
++    let magic = read_u64(base, 0);
++    let major = read_u16(base, 8);
++    let header_size = read_u32(base, 12) as usize;
++    let total_size = read_u32(base, 16) as usize;
++    let records_offset = read_u64(base, 32) as usize;
++    let records_size = read_u64(base, 40) as usize;
++
++    let valid = magic == LUNA_HANDOFF_MAGIC
++        && major == LUNA_HANDOFF_MAJOR
++        && header_size == LUNA_HANDOFF_HEADER_SIZE
++        && total_size == len
++        && records_offset >= LUNA_HANDOFF_HEADER_SIZE
++        && records_offset % RECORD_ALIGN as usize == 0
++        && range_ok(records_offset, records_size, len);
++
++    if !valid {
++        bindings::early_memunmap(base.cast::<c_void>(), len);
++        return;
++    }
++
++    let records_end = records_offset + records_size;
++    let mut offset = records_offset;
++    let mut init_seen = false;
++
++    while offset < records_end {
++        if records_end - offset < RECORD_HEADER_SIZE {
++            clear_state();
++            bindings::early_memunmap(base.cast::<c_void>(), len);
++            return;
++        }
++
++        let record_type = read_u16(base, offset);
++        let record_size = read_u32(base, offset + 4) as usize;
++        let payload = offset + RECORD_HEADER_SIZE;
++
++        if !range_ok(payload, record_size, records_end) {
++            clear_state();
++            bindings::early_memunmap(base.cast::<c_void>(), len);
++            return;
++        }
++
++        if record_type == LUNA_RECORD_LUNA_INIT_IMAGE {
++            if init_seen || record_size != LUNA_INIT_IMAGE_RECORD_SIZE {
++                clear_state();
++                bindings::early_memunmap(base.cast::<c_void>(), len);
++                return;
++            }
++
++            let address = read_u64(base, payload);
++            let size = read_u64(base, payload + 8);
++            if address == 0 || size == 0 {
++                clear_state();
++                bindings::early_memunmap(base.cast::<c_void>(), len);
++                return;
++            }
++
++            LUNA_INIT_PHYS = address;
++            LUNA_INIT_SIZE = size;
++            init_seen = true;
++        }
++
++        let next = payload
++            .checked_add(record_size)
++            .and_then(|value| value.checked_add(RECORD_ALIGN as usize - 1))
++            .map(|value| value & !(RECORD_ALIGN as usize - 1));
++
++        let Some(next) = next else {
++            clear_state();
++            bindings::early_memunmap(base.cast::<c_void>(), len);
++            return;
++        };
++
++        if next > records_end || next <= offset {
++            clear_state();
++            bindings::early_memunmap(base.cast::<c_void>(), len);
++            return;
++        }
++
++        offset = next;
++    }
++
++    if !init_seen {
++        clear_state();
++        bindings::early_memunmap(base.cast::<c_void>(), len);
++        return;
++    }
++
++    LUNA_HANDOFF_PHYS = phys;
++    LUNA_HANDOFF_SIZE = len as u32;
++    LUNA_HANDOFF_PRESENT = true;
++    LUNA_INIT_PRESENT = true;
++
++    kernel::pr_info!(
++        "Luna: boot handoff v{}.{} accepted ({} bytes)\n",
++        major,
++        read_u16(base, 10),
++        total_size
++    );
++    let init_phys = LUNA_INIT_PHYS;
++    let init_size = LUNA_INIT_SIZE;
++    kernel::pr_info!(
++        "Luna: luna-init image at {:#x} ({} bytes)\n",
++        init_phys,
++        init_size
++    );
++
++    bindings::early_memunmap(base.cast::<c_void>(), len);
 +}
 +
-+phys_addr_t x86_luna_handoff_phys(void)
-+{
-+	return luna_handoff_phys;
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_boot_parse(
++    params: *const bindings::boot_params,
++) {
++    if params.is_null() {
++        clear_state();
++        return;
++    }
++
++    let setup_data = (*params).hdr.setup_data;
++    let mut phys = setup_data;
++
++    for _ in 0..1024 {
++        if phys == 0 {
++            clear_state();
++            return;
++        }
++
++        let node = bindings::early_memremap(
++            phys as bindings::phys_addr_t,
++            SETUP_DATA_NODE_SIZE,
++        ) as *mut u8;
++        if node.is_null() {
++            clear_state();
++            return;
++        }
++
++        let next = read_u64(node, 0);
++        let node_type = read_u32(node, 8);
++        let len = read_u32(node, 12);
++
++        bindings::early_memunmap(
++            node.cast::<c_void>(),
++            SETUP_DATA_NODE_SIZE,
++        );
++
++        if node_type == LUNA_SETUP_DATA_TYPE {
++            let payload_phys = match phys.checked_add(SETUP_DATA_NODE_SIZE as u64) {
++                Some(value) => value,
++                None => {
++                    clear_state();
++                    return;
++                }
++            };
++            parse_handoff(payload_phys, len);
++            return;
++        }
++
++        phys = next;
++    }
++
++    clear_state();
 +}
 +
-+u32 x86_luna_handoff_size(void)
-+{
-+	return luna_handoff_size;
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_boot_available() -> bool {
++    LUNA_HANDOFF_PRESENT && LUNA_INIT_PRESENT
 +}
 +
-diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
-new file mode 100644
---- /dev/null
-+++ b/include/linux/luna_boot.h
-@@ -0,0 +1,25 @@
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_init_phys() -> u64 {
++    LUNA_INIT_PHYS
++}
++
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_init_size() -> u64 {
++    LUNA_INIT_SIZE
++}
++
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_handoff_phys() -> u64 {
++    LUNA_HANDOFF_PHYS
++}
++
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn x86_luna_handoff_size() -> u32 {
++    LUNA_HANDOFF_SIZE
++}
++diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
++new file mode 100644
++--- /dev/null
+++++ b/include/linux/luna_boot.h
++@@ -0,0 +1,25 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +#ifndef _LINUX_LUNA_BOOT_H
 +#define _LINUX_LUNA_BOOT_H
@@ -245,7 +316,7 @@ new file mode 100644
 +
 +struct boot_params;
 +
-+#ifdef CONFIG_X86_64
++#ifdef CONFIG_RUST
 +void x86_luna_boot_parse(const struct boot_params *params);
 +bool x86_luna_boot_available(void);
 +phys_addr_t x86_luna_init_phys(void);
@@ -262,9 +333,26 @@ new file mode 100644
 +#endif
 +
 +#endif /* _LINUX_LUNA_BOOT_H */
-
-diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
---- a/arch/x86/kernel/setup.c
-+++ b/arch/x86/kernel/setup.c
-@@ -962,0 +963 @@
-+	x86_luna_boot_parse(&boot_params);
++diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
++--- a/arch/x86/kernel/setup.c
+++++ b/arch/x86/kernel/setup.c
++@@ -1,8 +1,9 @@
++ // SPDX-License-Identifier: GPL-2.0-only
++ /*
++  *  Copyright (C) 1995  Linus Torvalds
++  *
++  * This file contains the setup_arch() code, which handles the architecture-dependent
++  * parts of early kernel initialization.
++  */
++ #include <linux/acpi.h>
++ #include <linux/bootconfig.h>
+++#include <linux/luna_boot.h>
++ #include <linux/console.h>
++@@ -959,6 +960,7 @@ void __init setup_arch(char **cmdline_p)
++ 	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
++ 	e820__memory_setup();
++ 	parse_setup_data();
+++	x86_luna_boot_parse(&boot_params);
++ 
++ 	copy_edd();
++ 
