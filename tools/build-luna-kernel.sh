@@ -15,7 +15,7 @@ for tool in curl tar make python3; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
-[ -x "$OVERLAY" ] || { echo "missing executable kernel overlay: $OVERLAY" >&2; exit 1; }
+[ -f "$OVERLAY" ] || { echo "missing kernel overlay: $OVERLAY" >&2; exit 1; }
 
 mkdir -p "$OUT"
 if [ ! -d "$SRC" ]; then
@@ -35,7 +35,7 @@ if [ -e .luna-overlay-applied ]; then
     exit 1
 fi
 
-"$OVERLAY" "$SRC" "$REPO_ROOT"
+bash "$OVERLAY" "$SRC" "$REPO_ROOT"
 touch .luna-overlay-applied
 
 make O="$SRC/build" ARCH=x86_64 x86_64_defconfig
