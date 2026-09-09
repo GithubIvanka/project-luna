@@ -1,13 +1,9 @@
 # Контракт передачи управления из `luna-boot`
 
-**Статус:** Accepted / реализуется по ABI v1.  
-**Дата:** 2026-09-08
+**Статус:** Accepted / ABI v1 implementation in progress  
+**Scope:** `luna-boot.efi` → Linux kernel → `luna-init`
 
-## 1. Цель
-
-После работы UEFI-загрузчика Linux kernel должен получить самодостаточный Luna boot context и запустить `luna-init` напрямую, без отдельного initramfs userspace слоя.
-
-Целевая цепочка:
+## Целевая цепочка
 
 ```text
 UEFI
@@ -21,182 +17,108 @@ luna-init (PID 1)
 luna-system-runtime
 ```
 
-## 2. Основной transport
+Отдельного initramfs userspace этапа нет.
 
-Luna-specific boot data передаётся через Linux x86 `setup_data` как запись `LunaBootHandoffV1`, размещённую в физической памяти до `ExitBootServices`.
+## Ответственность `luna-boot`
 
-Linux x86 boot protocol предоставляет `setup_data` именно как расширяемый механизм передачи boot parameters; базовый `boot_params` ограничен 4096 байтами, а `setup_data` позволяет расширять его без изменения фиксированной структуры. citeturn880881search1turn880881search2
+`luna-boot.efi` отвечает за UEFI boundary, обнаружение SYSTEM, discovery System Images и kernels, чтение manifest, выбор совместимой пары, Boot Menu, fallback, подготовку Linux boot context, загрузку kernel и `luna-init`, построение `LunaBootHandoffV1`, `ExitBootServices` и передачу управления kernel.
 
-Handoff не является файлом и не хранится на SYSTEM, DATA или EFI.
+После `ExitBootServices` загрузчик не использует UEFI Boot Services, UEFI filesystem protocols или UEFI console APIs.
 
-## 3. Что передаётся
+## Handoff transport
 
-Обязательные Luna-specific records v1:
+Luna-specific boot data передаётся через Linux x86 `setup_data` как один `LunaBootHandoffV1` object. Handoff находится в физической памяти и не является файлом.
 
-- `SYSTEM_PARTITION` — GPT disk GUID + partition GUID;
-- `DATA_PARTITION` — GPT disk GUID + partition GUID;
-- `SYSTEM_IMAGE` — семейство, версия, имя файла, manifest identity и image digest;
-- `KERNEL_IDENTITY` — identity/version running kernel и digest выбранного kernel artifact;
-- `LUNA_INIT_IMAGE` — адрес, размер и BLAKE3-256 digest загруженного `luna-X.Y.Z.init` ELF;
-- `BOOT_MODE` — normal/detailed/recovery/factory/external;
-- `BOOT_STATE` — минимальный контекст текущей boot attempt.
+Каноническая ABI v1 описана в `docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md`.
 
-Актуальная бинарная структура и record encoding определены в `docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md`.
+## Что передаётся
 
-## 4. Устройства и идентичность
+Обязательные v1 records:
 
-Luna не привязывает boot contract к Linux device names (`/dev/sda`, `/dev/sdb`, `/dev/nvme...`).
+- `SYSTEM_PARTITION`;
+- `DATA_PARTITION`;
+- `SYSTEM_IMAGE`;
+- `KERNEL_IDENTITY`;
+- `LUNA_INIT_IMAGE`;
+- `BOOT_MODE`;
+- `BOOT_STATE`.
 
-SYSTEM и DATA идентифицируются стабильными GPT identities. `luna-init` после старта kernel разрешает эти identities в фактические Linux block devices.
+Handoff содержит identity и digest выбранных артефактов и идентичность физических SYSTEM/DATA partition. Linux device names не являются ABI.
 
-## 5. System Image
+## `luna-init`
 
-`luna-boot` выбирает System Image до запуска kernel и проверяет его manifest/совместимость.
-
-Handoff передаёт identity выбранного image и ожидаемый content digest. `luna-init` не должен выбирать другой image только потому, что найден другой файл с похожим именем.
-
-System Image остаётся immutable source. Он не становится физическим `/`.
-
-Для образа версии `X.Y.Z` bootloader также требует канонический initial-userspace artifact:
+Для выбранного System Image `luna-boot` загружает отдельный ELF artifact:
 
 ```text
 SYSTEM/images/luna-X.Y.Z.init
 ```
 
-Это отдельный boot-critical ELF, логически связанный с выбранным System Image.
+Artifact является memory-resident и boot-reserved. В `LUNA_INIT_IMAGE` передаются физический адрес, размер и BLAKE3-256 digest exact ELF byte range.
 
-## 6. Kernel
+Kernel обязан валидировать этот объект и запустить его непосредственно как initial userspace process. `luna-init` становится PID 1.
 
-Kernel является отдельным versioned artifact. Handoff содержит его identity для provenance и проверки boot attempt; передавать сам kernel в handoff не требуется, поскольку kernel уже исполняется.
+## Memory ownership
 
-Kernel selection производится `luna-boot` до handoff и всегда учитывает compatibility relation с System Image.
+Handoff и загруженный `luna-init` являются boot-reserved objects. Их диапазоны не должны рассматриваться kernel как свободная RAM до завершения соответствующего kernel-side processing.
 
-## 7. Hardware information boundary
+Kernel должен сохранить исходные bytes `luna-init` до момента успешной загрузки ELF и освобождать backing memory только после того, как она больше не нужна.
 
-Generic hardware/platform data остаётся в стандартном Linux boot protocol и в данных, которые Linux kernel получает от firmware/bootloader.
+## Command line
 
-Luna Handoff не дублирует ACPI, E820 или другие kernel-owned hardware descriptions. `boot_params` уже содержит поля для platform information, а `setup_data` используется для расширений. citeturn856784search2turn880881search1
+Kernel command line остаётся для стандартных Linux parameters и временной диагностики.
 
-## 8. Memory ownership
+Production boot не зависит от:
 
-Handoff storage и `luna-init` image storage выделяются `luna-boot` до `ExitBootServices`.
+```text
+luna.system_device
+luna.data_device
+luna.system_image
+```
 
-Память handoff и загруженного initial-userspace image должна быть сохранена как boot-reserved до момента, когда Luna kernel integration завершит их обработку. Нельзя полагаться на случайное сохранение адреса в свободной RAM.
+Эти значения не являются primary Luna boot ABI.
 
-После `ExitBootServices` `luna-boot` не использует Boot Services allocator, UEFI filesystem protocols или console APIs.
+## System Image
 
-## 9. Command line
+`luna-boot` выбирает конкретный System Image и передаёт его identity/digest через handoff. `luna-init` не должен выбирать другой image из-за случайного совпадения имени.
 
-Kernel command line остаётся допустимым transport для стандартных Linux kernel parameters и временной диагностики.
+System Image остаётся immutable source и не становится физическим `/`.
 
-Однако Luna не использует `luna.system_device`, `luna.data_device`, `luna.system_image` или другие Luna-specific storage/image selectors как основной production ABI после внедрения Handoff v1.
+## Hardware boundary
 
-Таким образом, Luna-specific boot state является структурированным объектом, а не набором строковых параметров.
+Handoff не дублирует ACPI, E820 или другую generic hardware information. Эта информация передаётся/обнаруживается через стандартный Linux boot path.
 
-## 10. Initial userspace
+## Initramfs policy
 
-Luna kernel integration должна сделать validated `LunaBootHandoffV1` доступным `luna-init` до его запуска.
+Luna production boot **не использует initramfs**.
 
-Канонический userspace channel:
+`luna-init` не транспортируется в cpio/gzip archive и не запускается через отдельный initramfs `/init`.
+
+Целевой путь:
+
+```text
+Linux kernel
+    ↓
+LunaBootHandoffV1
+    ↓
+memory-resident luna-init ELF
+    ↓
+luna-init PID 1
+```
+
+Любая документация, build script или image builder, создающие `luna-initramfs.img` либо описывающие `kernel → initramfs → luna-init`, считаются устаревшими и должны быть удалены.
+
+## Userspace channel
+
+После валидации handoff kernel предоставляет `luna-init` canonical boot context через:
 
 ```text
 FD 3 = read-only Luna boot-context
 ```
 
-FD 3 установлен kernel до передачи управления entry point `luna-init`, начинается с offset 0 и содержит сериализованные байты валидированного `LunaBootHandoffV1`.
+FD 3 начинается с offset 0 и содержит сериализованные bytes валидированного `LunaBootHandoffV1`. `luna-init` обязан прочитать context и закрыть FD 3 до создания/запуска обычных дочерних процессов.
 
-`luna-init` обязан прочитать контекст и закрыть FD 3 до создания или запуска обычных дочерних процессов.
+## Failure
 
-Подробный контракт канала: `docs/contracts/LUNA-INIT-IMAGE-CONTRACT.md`; решение зафиксировано в `docs/decisions/0012-luna-init-boot-context-fd.md`.
+Повреждённый или неполный handoff, отсутствующий обязательный record, невалидный `LUNA_INIT_IMAGE`, невозможная memory range или failure direct-init startup — это boot failure.
 
-`luna-init` получает как минимум:
-
-```text
-SYSTEM identity
-DATA identity
-selected image identity + digest
-running kernel identity + digest
-luna-init identity + digest
-boot attempt id
-boot mode
-boot state context
-```
-
-## 11. Initramfs policy
-
-В production boot path Luna **не использует отдельный initramfs userspace**.
-
-`luna-boot` не загружает `luna-init` как отдельный initramfs filesystem. Kernel должен запускать `luna-init` как непосредственный initial userspace entry.
-
-Классическая двухфазная схема `kernel → initramfs → real root → switch_root/pivot_root → second init` не является целевой архитектурой Luna.
-
-## 12. Kernel built-in policy
-
-Чтобы отказаться от initramfs dependency для early boot, все драйверы, bus support, block/filesystem support, crypto primitives и другие kernel features, без которых поддерживаемый Luna boot profile не может:
-
-```text
-discover SYSTEM
-  ↓
-access DATA when required
-  ↓
-read required filesystem
-  ↓
-access System Image
-  ↓
-start luna-init
-```
-
-должны быть встроены в kernel (`CONFIG_*=y`).
-
-Остальные optional drivers могут быть loadable modules.
-
-Built-in firmware является допустимым дополнением, когда устройство требует firmware на ранней стадии и filesystem lookup создал бы нежелательную раннюю userspace зависимость. Linux поддерживает встроенное firmware через `CONFIG_EXTRA_FIRMWARE` и `CONFIG_EXTRA_FIRMWARE_DIR`. citeturn856784search0
-
-## 13. Kernel modules
-
-Loadable modules принадлежат конкретной версии kernel и не являются глобальным shared pool.
-
-Каноническое направление хранения:
-
-```text
-SYSTEM/kernels/
-└── <kernel-id>/
-    ├── bzImage
-    ├── kernel.toml
-    └── modules/
-        └── lib/modules/<kernel-release>/...
-```
-
-Такой layout позволяет связать kernel artifact и его module set одной versioned identity. После построения logical root module tree может быть подключён/материализован в обычную Linux filesystem hierarchy.
-
-Если loadable modules разрешены, production policy может требовать kernel-side signature enforcement; Linux поддерживает подписи модулей и принудительное отклонение неподписанных/невалидных модулей. citeturn856784search4
-
-## 14. Ошибки
-
-Handoff считается недействительным при:
-
-- неподдерживаемом major ABI;
-- неверном magic;
-- повреждённом checksum;
-- выходе record за `total_size`;
-- integer overflow;
-- отсутствующем обязательном record;
-- невозможной/несогласованной identity;
-- отсутствующем или невалидном `LUNA_INIT_IMAGE`.
-
-При invalid handoff `luna-init` не должен молча переходить к старому строковому fallback discovery.
-
-Отсутствующий или недоступный FD 3 является фатальной ошибкой direct-init startup.
-
-## 15. Связанные документы
-
-```text
-docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md
-docs/contracts/LUNA-INIT-IMAGE-CONTRACT.md
-docs/contracts/LUNA-INIT-CONTRACT.md
-docs/decisions/0010-versioned-luna-init-artifact.md
-docs/decisions/0011-canonical-pid1-and-direct-boot-chain.md
-docs/decisions/0012-luna-init-boot-context-fd.md
-docs/contracts/BOOT-STATE-CONTRACT.md
-docs/contracts/FAILURE-RECOVERY-CONTRACT.md
-```
+`luna-init` не должен молча переходить на legacy path discovery или выбирать другой image/device, если structured ABI invalid.
