@@ -20,7 +20,6 @@ const EFAULT: i32 = 14;
 const EIO: i32 = 5;
 const ENOENT: i32 = 2;
 const MAX_ERRNO: isize = 4095;
-const VM_NORESERVE: u64 = 1;
 
 unsafe extern "C" {
     fn shmem_kernel_file_setup(
@@ -114,7 +113,7 @@ unsafe fn build_executable_object() -> Result<*mut bindings::file, i32> {
     let file = shmem_kernel_file_setup(
         name.as_ptr().cast::<c_char>(),
         size as bindings::loff_t,
-        VM_NORESERVE,
+        0,
     );
     if file.is_null() || is_err_ptr(file) {
         return Err(ptr_err(file));
