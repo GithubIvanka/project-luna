@@ -9,12 +9,13 @@ SRC="${OUT}/linux-${VERSION}"
 TARBALL="${OUT}/linux-${VERSION}.tar.xz"
 URL="https://www.kernel.org/pub/linux/kernel/v7.x/linux-${VERSION}.tar.xz"
 CONFIG_FRAGMENT="${REPO_ROOT}/kernel/luna-x86_64.config"
-PATCH_DIR="${REPO_ROOT}/kernel/patches"
+OVERLAY="${REPO_ROOT}/tools/apply-luna-kernel-overlay.sh"
 
-for tool in curl tar make patch; do
+for tool in curl tar make python3; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
+[ -x "$OVERLAY" ] || { echo "missing executable kernel overlay: $OVERLAY" >&2; exit 1; }
 
 mkdir -p "$OUT"
 if [ ! -d "$SRC" ]; then
@@ -26,25 +27,16 @@ fi
 
 cd "$SRC"
 
-# Keep the source tree reproducible: a previously patched tree must never be
-# silently reused for a clean build.
-if [ -e .luna-patches-applied ]; then
-    echo "refusing to reuse already patched kernel source: $SRC" >&2
+# A source tree that has already received the Luna overlay is never silently
+# reused. Delete it (or use another LUNA_KERNEL_OUT) for a clean application.
+if [ -e .luna-overlay-applied ]; then
+    echo "refusing to reuse an already overlaid kernel source: $SRC" >&2
     echo "remove $SRC or build with a fresh LUNA_KERNEL_OUT" >&2
     exit 1
 fi
 
-if [ -d "$PATCH_DIR" ]; then
-    shopt -s nullglob
-    PATCHES=("$PATCH_DIR"/*.patch)
-    shopt -u nullglob
-    for patch in "${PATCHES[@]}"; do
-        echo "Applying Luna kernel patch: $(basename "$patch")"
-        patch --fuzz=0 -p1 --forward --batch < "$patch"
-    done
-fi
-
-touch .luna-patches-applied
+"$OVERLAY" "$SRC" "$REPO_ROOT"
+touch .luna-overlay-applied
 
 make O="$SRC/build" ARCH=x86_64 x86_64_defconfig
 cat "$CONFIG_FRAGMENT" >> "$SRC/build/.config"
