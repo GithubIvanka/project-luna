@@ -3,7 +3,7 @@ name = "luna-init"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Minimal native Luna early-userspace initializer"
+description = "Minimal native Luna direct-PID1 initializer"
 
 # luna-init is a separately built direct-PID1 artifact. It intentionally does
 # not belong to the root Project Luna workspace.
@@ -14,3 +14,5 @@ name = "luna-init"
 path = "src/main.rs"
 
 [dependencies]
+blake3 = { version = "1.8", default-features = false, features = ["std"] }
+libc = "0.2"
