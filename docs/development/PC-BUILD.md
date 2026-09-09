@@ -10,20 +10,12 @@
 dist/luna-pc.img
 ```
 
-Разметка:
+Разметка development image:
 
 ```text
 EFI     128 MiB
-SYSTEM  384 MiB
-DATA    512 MiB
-```
-
-Development image использует принятую физическую модель Luna:
-
-```text
-EFI
-SYSTEM
-DATA
+SYSTEM  configurable, default 768 MiB
+DATA    configurable, default 512 MiB
 ```
 
 SWAP в development image намеренно отсутствует.
@@ -37,17 +29,7 @@ luna-boot.efi
   ↓
 Linux kernel
   ↓
-ранний initramfs
-  ↓
-SYSTEM (read-only)
-  ↓
-выбранный versioned SquashFS System Image
-  ↓
-DATA (read-write)
-  ↓
-luna-init
-  ↓
-logical /
+luna-init (PID 1, direct memory-resident launch)
   ↓
 luna-system-runtime
   ↓
@@ -56,7 +38,7 @@ UserSession
 Wayland → niri → Noctalia
 ```
 
-Здесь нет отдельного `luna-session` компонента и нет штатного TTY login path.
+`luna-init` получает `LunaBootHandoffV1` через фиксированный FD 3 и не выполняет файловый bootstrap. SYSTEM и DATA монтируются уже следующим userspace-слоем.
 
 ## Требования к хосту
 
@@ -64,12 +46,9 @@ Wayland → niri → Noctalia
 
 ```bash
 sudo apt install \
-  busybox-static \
-  cpio \
   dosfstools \
   e2fsprogs \
   gdisk \
-  linux-image-amd64 \
   musl-tools \
   mtools \
   squashfs-tools
@@ -77,17 +56,9 @@ sudo apt install \
 
 Также нужны Rust stable и `rustup`. Сборщик при необходимости устанавливает targets `x86_64-unknown-linux-musl` и `x86_64-unknown-uefi`.
 
-Автоматически используются:
+Ядро для теста задаётся через `LUNA_TEST_KERNEL`. Для production-like development image также требуется подготовленный `LUNA_DESKTOP_ROOT`.
 
-```text
-/boot/vmlinuz-*
-/usr/bin/busybox
-/bin/busybox
-```
-
-Явные пути задаются через `LUNA_TEST_KERNEL` и `BUSYBOX`.
-
-Для OVMF нужны QEMU и отдельный writable variables-файл.
+Для UEFI-проверки нужны QEMU/OVMF и отдельный writable variables-файл.
 
 ## Сборка
 
@@ -97,7 +68,20 @@ sudo apt install \
 tools/build-pc-image.sh
 ```
 
-Не следует запускать полный build для исправления локальной ошибки crate. Сначала проверяется затронутый слой, затем интеграционный слой, затем полный image.
+Сборщик помещает в SYSTEM:
+
+```text
+images/
+├── luna-X.Y.Z.squashfs
+├── luna-X.Y.Z.toml
+└── luna-X.Y.Z.init
+
+kernels/
+└── <kernel-version>/
+    └── bzImage
+```
+
+`luna-X.Y.Z.squashfs` является самим System Image; `.init` является отдельным ELF64-артефактом `luna-init` и не является initramfs.
 
 ## Установка на реальный диск
 
@@ -127,20 +111,10 @@ test -f dist/SHA256SUMS
 
 ## Текущие ограничения
 
-Это development image, а не production installer.
-
-Финальные inventory и compatibility rules для kernel/System Image, persistent boot-success state, полноценная графическая интеграция, production child-creation primitive и полная device/portal integration ещё требуют отдельной разработки.
-
-Графическая граница остаётся:
+Первый прямой userspace milestone проверяет именно переход:
 
 ```text
-luna-system-runtime
-  ↓
-UserSession
-  ↓
-Wayland
-  ↓
-niri
-  ↓
-Noctalia
+UEFI → luna-boot → kernel → luna-init(PID 1)
 ```
+
+Полный запуск `luna-system-runtime`, persistent boot-success state, production child/process policy и графическая интеграция остаются следующими слоями разработки.
