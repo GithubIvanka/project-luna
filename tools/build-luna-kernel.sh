@@ -15,10 +15,40 @@ OVERLAY="${REPO_ROOT}/tools/apply-luna-kernel-overlay.sh"
 for tool in curl tar make python3; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
+
+LLVM_PREFIX=""
 if [ "$LLVM_MODE" = "1" ]; then
-    command -v clang >/dev/null || { echo "missing required tool: clang" >&2; exit 1; }
-    command -v ld.lld >/dev/null || { echo "missing required tool: ld.lld" >&2; exit 1; }
+    # Kbuild's LLVM=1 expects unsuffixed tools such as llvm-ar in PATH.
+    # Ubuntu may ship versioned LLVM binaries outside PATH, so prefer a
+    # complete LLVM bin directory and pass it via LLVM=/path/to/llvm/.
+    if command -v clang >/dev/null 2>&1 \
+        && command -v ld.lld >/dev/null 2>&1 \
+        && command -v llvm-ar >/dev/null 2>&1; then
+        LLVM_PREFIX="$(dirname "$(command -v clang)")"
+    else
+        for candidate in \
+            "${LUNA_LLVM_BIN:-}" \
+            /usr/lib/llvm-*/bin \
+            /usr/local/opt/llvm/bin; do
+            [ -n "$candidate" ] || continue
+            if [ -x "$candidate/clang" ] \
+                && [ -x "$candidate/ld.lld" ] \
+                && [ -x "$candidate/llvm-ar" ]; then
+                LLVM_PREFIX="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$LLVM_PREFIX" ]; then
+        echo "cannot locate a complete LLVM toolchain (clang, ld.lld, llvm-ar)" >&2
+        echo "set LUNA_LLVM_BIN to the LLVM bin directory" >&2
+        exit 1
+    fi
+
+    export PATH="$LLVM_PREFIX:$PATH"
 fi
+
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
 [ -f "$OVERLAY" ] || { echo "missing kernel overlay: $OVERLAY" >&2; exit 1; }
 
@@ -55,7 +85,7 @@ touch .luna-overlay-applied
 
 MAKE=(make)
 if [ "$LLVM_MODE" = "1" ]; then
-    MAKE+=(LLVM=1)
+    MAKE+=(LLVM="$LLVM_PREFIX/")
 fi
 MAKE+=(O="$SRC/build" ARCH=x86_64)
 
