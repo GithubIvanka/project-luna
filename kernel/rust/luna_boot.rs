@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#![no_std]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 //! Project Luna kernel-side LunaBootHandoffV1 parser.
@@ -12,6 +11,10 @@ use core::ffi::c_void;
 use core::ptr;
 
 use kernel::bindings;
+
+// Kbuild compiles this file as a standalone Rust crate/object. The kernel
+// print macros expect this crate-root prefix to exist.
+const __LOG_PREFIX: &[u8] = b"luna_boot\0";
 
 const SETUP_DATA_TYPE: u32 = 0x4c55_4e41; // "LUNA"
 const HANDOFF_MAGIC: u64 = ux64_from_bytes(*b"LUNAHD01");
