@@ -11,7 +11,7 @@ URL="https://www.kernel.org/pub/linux/kernel/v7.x/linux-${VERSION}.tar.xz"
 CONFIG_FRAGMENT="${REPO_ROOT}/kernel/luna-x86_64.config"
 PATCH_DIR="${REPO_ROOT}/kernel/patches"
 
-for tool in curl tar make; do
+for tool in curl tar make patch; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
@@ -49,6 +49,13 @@ touch .luna-patches-applied
 make O="$SRC/build" ARCH=x86_64 x86_64_defconfig
 cat "$CONFIG_FRAGMENT" >> "$SRC/build/.config"
 make O="$SRC/build" ARCH=x86_64 olddefconfig
+
+if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
+    echo "Project Luna requires CONFIG_RUST=y after olddefconfig" >&2
+    exit 1
+fi
+
+make O="$SRC/build" ARCH=x86_64 rustavailable
 make O="$SRC/build" ARCH=x86_64 -j"$JOBS" bzImage modules
 
 KERNEL_RELEASE="$(make O="$SRC/build" ARCH=x86_64 -s kernelrelease)"
