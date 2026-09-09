@@ -113,7 +113,7 @@ pub fn boot_flow() -> BootResult<()> {
                 prepared = Some(value);
                 break;
             }
-            Err(error) if mode == BootMode::Normal => {
+            Err(error) if matches!(mode, BootMode::Normal) => {
                 log::warn!(
                     "Luna: target {} / kernel {} preparation failed: {error:?}",
                     candidate.system_version,
