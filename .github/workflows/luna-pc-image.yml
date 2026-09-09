@@ -2,9 +2,9 @@ name: Luna PC image
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop"]
   push:
-    branches: ["main"]
+    branches: ["main", "develop"]
   workflow_dispatch:
 
 permissions:
@@ -34,21 +34,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             busybox-static build-essential clang cpio cmake curl dbus \
-            dosfstools doxygen e2fsprogs file fonts-dejavu-core gdisk git graphviz gzip \
-            libadwaita-1-dev libcairo2-dev libdbus-1-dev libdisplay-info-dev \
-            libdrm-dev libegl1-mesa-dev libelf-dev libfontconfig1-dev libfreetype6-dev \
-            libgbm-dev libgles2-mesa-dev libglib2.0-dev libgtk-4-dev \
-            libical-dev libinput-dev libjxl-dev liblua5.4-dev libmd4c-dev \
-            libpam0g-dev libpango1.0-dev libpipewire-0.3-dev libpixman-1-dev \
-            libpolkit-agent-1-dev libpolkit-gobject-1-dev libqalculate-dev \
-            libseat-dev libsecret-1-dev libsndfile1-dev libsodium-dev \
-            libsdbus-c++-dev libstb-dev libsystemd-dev libtomlplusplus-dev \
-            libudev-dev libwayland-dev libwebp-dev libxkbcommon-dev \
-            libxkbcommon-x11-dev libxml2-dev m4 meson mtools musl-tools ninja-build \
-            network-manager bluez pipewire pipewire-pulse wireplumber \
-            libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
-            openssl pkg-config rustfmt squashfs-tools util-linux \
-            wayland-protocols xsltproc
+            dosfstools e2fsprogs file fonts-dejavu-core gdisk graphviz gzip \
+            libadwaita-1-dev libcairo2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libelf-dev libfontconfig1-dev libfreetype6-dev libgbm-dev libgles2-mesa-dev \
+            libglib2.0-dev libgtk-4-dev libinput-dev libpam0g-dev libpango1.0-dev \
+            libpipewire-0.3-dev libpixman-1-dev libseat-dev libsecret-1-dev \
+            libsndfile1-dev libsodium-dev libstb-dev libwayland-dev libwebp-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libxml2-dev m4 meson mtools \
+            musl-tools ninja-build network-manager bluez pipewire pipewire-pulse \
+            wireplumber libspa-0.2-bluetooth pulseaudio-utils udisks2 xdg-utils \
+            openssl pkg-config rustfmt squashfs-tools util-linux wayland-protocols
 
       - name: Prepare development login credential
         run: echo "LUNA_PASSWORD_HASH=$(openssl passwd -6 luna)" >> "$GITHUB_ENV"
@@ -88,7 +83,7 @@ jobs:
 
       - name: Apply Luna graphical session audio bootstrap
         env:
-          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/project-luna/dist/desktop-root
+          LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
         run: bash tools/patch-niri-session.sh
 
       - name: Verify desktop payload
@@ -139,16 +134,21 @@ jobs:
           test -f dist/desktop-root/etc/luna/services/audio.toml
           test -f dist/desktop-root/etc/dbus-1/system.conf
           test -n "$(find dist/desktop-root/usr/share/fonts/truetype/luna -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit)"
-          cat dist/desktop-root/etc/luna/yazi.version
-          cat dist/desktop-root/etc/luna/fonts.toml
-          cat dist/desktop-root/etc/luna/ghostty.conf
-          cat dist/desktop-root/etc/luna/desktop-ready
 
       - name: Build Luna PC image
         env:
           LUNA_TEST_KERNEL: ${{ github.workspace }}/dist/kernel/current/bzImage
           LUNA_DESKTOP_ROOT: ${{ github.workspace }}/dist/desktop-root
         run: bash tools/build-pc-image.sh
+
+      - name: Verify direct luna-init artifacts
+        run: |
+          test -f dist/luna-0.1.0.squashfs
+          test -f dist/luna-system.img
+          test -f dist/luna-data.img
+          test -f dist/luna-pc.img
+          test ! -e dist/luna-initramfs.img
+          mdir -i dist/luna-efi.img ::/EFI/LUNA
 
       - name: Inspect generated image
         run: |
@@ -163,7 +163,6 @@ jobs:
           path: |
             dist/luna-pc.img
             dist/luna-*.squashfs
-            dist/luna-initramfs.img
             dist/BUILD-INFO
             dist/SHA256SUMS
           if-no-files-found: error
