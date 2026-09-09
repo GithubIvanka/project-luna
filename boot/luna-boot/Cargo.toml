@@ -11,7 +11,10 @@ description = "Minimal UEFI bootloader for Project Luna"
 [dependencies]
 uefi = { version = "0.40", features = ["alloc", "global_allocator", "logger", "panic_handler", "log-debugcon"] }
 log = "0.4"
-blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+# UEFI's PE/COFF linker cannot consume the ELF objects emitted by BLAKE3's
+# x86 assembly backend. Force the portable Rust implementation and prevent
+# architecture-specific code generation in this target.
+blake3 = { version = "1.8", default-features = false, features = ["pure", "prefer_intrinsics"] }
 
 [profile.release]
 opt-level = "s"
