@@ -5,13 +5,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 OUT="${REPO_ROOT}/boot/luna-boot/tests/ovmf/out"
 SYSROOT="${OUT}/system-root"
 
-: "${BUSYBOX:?Set BUSYBOX to a static x86_64 BusyBox binary}"
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"
 
 for tool in cargo rustup mksquashfs file; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
-[ -x "$BUSYBOX" ] || { echo "BUSYBOX is not executable: $BUSYBOX" >&2; exit 1; }
 
 RUNTIME_TARGET="x86_64-unknown-linux-musl"
 if ! rustup target list --installed | grep -qx "$RUNTIME_TARGET"; then
@@ -20,7 +18,7 @@ if ! rustup target list --installed | grep -qx "$RUNTIME_TARGET"; then
 fi
 
 rm -rf "$SYSROOT"
-mkdir -p "$SYSROOT"/{bin,sbin,dev,proc,sys,run,tmp,etc,data,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var}
+mkdir -p "$SYSROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,data,boot,home,lib,lib64,media,mnt,opt,root,srv,usr,var}
 mkdir -p "$SYSROOT/usr/bin" "$SYSROOT/usr/lib" "$SYSROOT/usr/sbin" "$SYSROOT/etc/luna"
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
@@ -35,7 +33,7 @@ fi
 
 # `file(1)` reports traditional musl executables as "statically linked" and
 # static PIE binaries as "static-pie linked". Both satisfy Luna's requirement
-# that early userspace has no dynamic loader or external shared-library needs.
+# that direct PID1 needs no external dynamic loader before the System Environment exists.
 for binary in "$RUNTIME" "$LUNA_INIT"; do
     description="$(file "$binary")"
     if [[ "$description" != *"statically linked"* && "$description" != *"static-pie linked"* ]]; then
@@ -45,15 +43,12 @@ for binary in "$RUNTIME" "$LUNA_INIT"; do
     fi
 done
 
-cp "$BUSYBOX" "$SYSROOT/bin/busybox"
-chmod 0755 "$SYSROOT/bin/busybox"
-for applet in sh ls cat mount umount ps pwd echo; do
-    ln -sf busybox "$SYSROOT/bin/$applet"
-done
-
+# The System Image only needs the runtime payload at this stage. luna-init is
+# loaded separately from SYSTEM/images/<version>.init by luna-boot and the kernel.
 cp "$RUNTIME" "$SYSROOT/sbin/luna-system-runtime"
 chmod 0755 "$SYSROOT/sbin/luna-system-runtime"
-ln -sf luna-system-runtime "$SYSROOT/sbin/init"
+printf '/usr/bin/luna-login\n' > "$SYSROOT/etc/luna/graphical-login"
+printf '/usr/bin/niri-session\n' > "$SYSROOT/etc/luna/graphical-session"
 
 mksquashfs "$SYSROOT" "$OUT/luna-test.squashfs" -noappend -comp zstd -all-root -no-xattrs >/dev/null
 
