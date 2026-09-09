@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Project Luna <luna@localhost>
+Date: Wed, 9 Sep 2026 12:59:01 +0700
+Subject: [PATCH 2/3] x86: build Luna boot handoff Rust parser
+
+Upstream base: Linux 7.2.4.
+
+Add the Rust parser object to the x86 kernel build when CONFIG_RUST is
+enabled. Parser source and the C ABI bridge are separate patches.
+
+---
+ arch/x86/kernel/Makefile | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
+--- a/arch/x86/kernel/Makefile
++++ b/arch/x86/kernel/Makefile
+@@ -89,3 +89,4 @@ obj-y += static_call.o
+ obj-y += static_call.o
++obj-$(CONFIG_RUST) += luna_boot.o
+ obj-y += process.o
+ obj-y += fpu/
