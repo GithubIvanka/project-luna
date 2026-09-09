@@ -17,7 +17,6 @@ jobs:
   format:
     name: Rustfmt check
     runs-on: ubuntu-latest
-    # Formatting is advisory everywhere except promotion to the release branch.
     continue-on-error: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.base_ref != 'main') }}
     steps:
       - uses: actions/checkout@v6
@@ -99,13 +98,27 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace --release
 
+  luna-init:
+    name: luna-init musl build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Check luna-init
+        run: cargo check --manifest-path components/luna-init/Cargo.toml --target x86_64-unknown-linux-musl
+      - name: Build luna-init
+        run: cargo build --release --manifest-path components/luna-init/Cargo.toml --target x86_64-unknown-linux-musl
+      - name: Verify luna-init ELF
+        run: file components/luna-init/target/x86_64-unknown-linux-musl/release/luna-init
+
   luna-boot:
     name: luna-boot UEFI build
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' && github.base_ref == 'main' }}
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') || github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'develop') }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: boot/luna-boot
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -122,11 +135,16 @@ jobs:
             ${{ runner.os }}-luna-boot-
       - name: Check bootloader
         run: cargo check --target x86_64-unknown-uefi
+        working-directory: boot/luna-boot
       - name: Build bootloader
         run: cargo build --release --target x86_64-unknown-uefi
-      - name: Upload bootloader artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: luna-boot-efi
-          path: boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
-          if-no-files-found: error
+        working-directory: boot/luna-boot
+      - name: Verify bootloader artifact
+        run: test -f boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
+      - name: Verify kernel integration files
+        run: |
+          test -f kernel/rust/luna_boot.rs
+          test -f tools/apply-luna-kernel-overlay.sh
+          test ! -e kernel/patches/0001-luna-kernel-rust-parser.patch
+          test ! -e kernel/patches/0002-luna-kernel-rust-build.patch
+          test ! -e kernel/patches/0003-luna-kernel-rust-bridge.patch
