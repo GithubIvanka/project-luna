@@ -17,7 +17,7 @@ diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
 @@ -89,4 +89,5 @@ obj-y += static_call.o
  obj-y += static_call.o
-+
+ 
 +obj-$(CONFIG_RUST) += luna_boot.o
  obj-y += process.o
  obj-y += fpu/
