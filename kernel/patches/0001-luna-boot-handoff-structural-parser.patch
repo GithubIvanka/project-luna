@@ -1,17 +1,16 @@
 diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
-@@ -86,6 +86,7 @@ obj-y += irqflags.o
+@@ -89,3 +89,4 @@ obj-y += static_call.o
  obj-y += static_call.o
 +obj-$(CONFIG_RUST) += luna_boot.o
  obj-y += process.o
  obj-y += fpu/
- 
- diff --git a/arch/x86/kernel/luna_boot.rs b/arch/x86/kernel/luna_boot.rs
+diff --git a/arch/x86/kernel/luna_boot.rs b/arch/x86/kernel/luna_boot.rs
 new file mode 100644
 --- /dev/null
 +++ b/arch/x86/kernel/luna_boot.rs
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,259 @@
 +// SPDX-License-Identifier: GPL-2.0
 +
 +#![no_std]
@@ -19,8 +18,8 @@ new file mode 100644
 +
 +//! Project Luna kernel-side boot handoff parser.
 +//!
-+//! The early C kernel provides only the ABI entry point. Luna-specific
-+//! parsing and validation are implemented in Rust.
++//! Early x86 kernel code calls the ABI entry point below. Luna-specific
++//! parsing and validation live in Rust.
 +
 +use core::ffi::c_void;
 +use core::ptr;
@@ -87,7 +86,8 @@ new file mode 100644
 +        return;
 +    }
 +
-+    let base = bindings::early_memremap(phys as bindings::phys_addr_t, len) as *mut u8;
++    let base =
++        bindings::early_memremap(phys as bindings::phys_addr_t, len) as *mut u8;
 +    if base.is_null() {
 +        return;
 +    }
@@ -227,6 +227,7 @@ new file mode 100644
 +        let next = read_u64(node, 0);
 +        let node_type = read_u32(node, 8);
 +        let len = read_u32(node, 12);
++
 +        unmap(node, SETUP_DATA_NODE_SIZE);
 +
 +        if node_type == LUNA_SETUP_DATA_TYPE {
@@ -234,6 +235,7 @@ new file mode 100644
 +                clear_state();
 +                return;
 +            };
++
 +            parse_handoff(payload_phys, len);
 +            return;
 +        }
@@ -268,12 +270,11 @@ new file mode 100644
 +pub unsafe extern "C" fn x86_luna_handoff_size() -> u32 {
 +    LUNA_HANDOFF_SIZE
 +}
-+
-+diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
-+new file mode 100644
-+--- /dev/null
-++++ b/include/linux/luna_boot.h
-+@@ -0,0 +1,25 @@
+diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
+new file mode 100644
+--- /dev/null
++++ b/include/linux/luna_boot.h
+@@ -0,0 +1,25 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +#ifndef _LINUX_LUNA_BOOT_H
 +#define _LINUX_LUNA_BOOT_H
@@ -299,17 +300,19 @@ new file mode 100644
 +#endif
 +
 +#endif /* _LINUX_LUNA_BOOT_H */
-+
-+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
-+--- a/arch/x86/kernel/setup.c
-++++ b/arch/x86/kernel/setup.c
-+@@ -32,6 +32,7 @@
-+ #include <linux/bootconfig.h>
-++#include <linux/luna_boot.h>
-+ #include <linux/console.h>
-+@@ -962,6 +963,7 @@
-+ 	e820__memory_setup();
-+ 	parse_setup_data();
-++	x86_luna_boot_parse(&boot_params);
-+ 
-+ 	copy_edd();
+
+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
+--- a/arch/x86/kernel/setup.c
++++ b/arch/x86/kernel/setup.c
+@@ -1,4 +1,5 @@
+ #include <linux/acpi.h>
+ #include <linux/bootconfig.h>
++#include <linux/luna_boot.h>
+ #include <linux/console.h>
+@@ -959,5 +960,6 @@
+ 	iomem_resource.end = 0;
+ 	e820__memory_setup();
+ 	parse_setup_data();
++	x86_luna_boot_parse(&boot_params);
+ 
+ 	copy_edd();
