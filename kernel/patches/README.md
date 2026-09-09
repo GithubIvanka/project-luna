@@ -1,39 +1,56 @@
-# Luna kernel patch stack
+# Luna kernel integration
 
-This directory contains the minimal Luna-specific changes applied on top of the pinned upstream Linux source tree by `tools/build-luna-kernel.sh`.
+Project Luna builds against the pinned Linux source tree selected by
+`tools/build-luna-kernel.sh`.
 
-The current upstream base is Linux 7.2.4. Patch ordering is lexical (`*.patch` sorted by filename) and the build script applies patches with `--fuzz=0` so context drift fails loudly.
-
-The target architecture is intentionally narrow:
-
-```text
-Linux bzImage
-    -> validate LunaBootHandoffV1
-    -> validate LUNA_INIT_IMAGE
-    -> launch memory-resident luna-init as PID 1
-```
-
-These patches must not turn the kernel into a second `luna-init`, implement System Image policy, or construct Luna's logical root. Those responsibilities belong to `luna-init` and later userspace components.
-
-Luna-specific kernel logic is Rust-first. A minimal C ABI bridge is allowed where Linux's early C initialization path needs to call Rust code directly; the bridge must remain thin and contain no Luna policy or parsing logic.
-
-The bridge passes the existing Linux `setup_data` head pointer into Rust. Rust does not depend on the internal C `struct boot_params` layout for this boundary.
-
-## Patch boundaries
+The kernel integration deliberately does not depend on fragile line-context
+patch files. The build tool applies a deterministic source overlay:
 
 ```text
-0001-luna-kernel-rust-parser.patch
-    Rust parser and private parser state
-
-0002-luna-kernel-rust-build.patch
-    x86 Kbuild / Makefile integration only
-
-0003-luna-kernel-rust-bridge.patch
-    setup_arch() C ABI declaration/invocation only
+kernel/rust/luna_boot.rs
+        ↓
+tools/apply-luna-kernel-overlay.sh
+        ↓
+arch/x86/kernel/luna_boot.rs
+arch/x86/kernel/Makefile
+arch/x86/kernel/setup.c
 ```
 
-`CONFIG_RUST` is mandatory for the Project Luna kernel profile; the bridge must not silently degrade to a no-op implementation when Rust support is disabled.
+The overlay fails closed when an expected Linux insertion point is missing or
+an existing Luna source file differs from the repository copy. This is
+intentional: an upstream kernel layout change must be handled explicitly
+rather than silently applying with fuzz or changing the wrong location.
 
-Keep these boundaries independent. A parser error, build integration error, and C/Rust declaration error must be attributable to one patch rather than debugged inside a combined diff.
+## Kernel-side boundary
 
-The current stack adds only the kernel-side handoff plumbing and structural direct-initial-userspace entry point. It does not execute `luna-init` yet. BLAKE3 verification, boot-memory ownership validation, ELF validation, boot-context FD 3 creation, and direct execution through existing Linux ELF machinery belong to subsequent implementation stages.
+The Rust component parses the LunaBootHandoffV1 `setup_data` node and exposes a
+small C ABI for later kernel startup integration. The early x86 C bridge only
+passes `boot_params.hdr.setup_data` into Rust; it contains no Luna parsing or
+policy.
+
+The parser validates the ABI major version, fixed header size, payload bounds,
+record bounds, required record presence, `LUNA_INIT_IMAGE` structure and
+integer-overflow conditions. Unknown record types remain skippable after their
+bounds have been validated.
+
+## Scope
+
+This layer does **not** implement the full userspace bootstrap itself. Direct
+execution of the validated memory-resident `luna-init` image and installation
+of the mandated boot-context FD 3 remain kernel startup work behind this ABI.
+
+The target architecture remains:
+
+```text
+UEFI
+  ↓
+luna-boot.efi
+  ↓
+Luna Linux kernel
+  ↓
+luna-init (PID 1)
+  ↓
+luna-system-runtime
+```
+
+No separate initramfs userspace layer is introduced by this integration.
