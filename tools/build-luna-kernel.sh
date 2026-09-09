@@ -40,7 +40,7 @@ if [ -d "$PATCH_DIR" ]; then
     shopt -u nullglob
     for patch in "${PATCHES[@]}"; do
         echo "Applying Luna kernel patch: $(basename "$patch")"
-        patch -p1 --forward --batch < "$patch"
+        patch --fuzz=0 -p1 --forward --batch < "$patch"
     done
 fi
 

@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Project Luna <luna@localhost>
-Date: Wed, 9 Sep 2026 12:59:02 +0700
+Date: Wed, 9 Sep 2026 13:14:00 +0700
 Subject: [PATCH 3/3] x86: call Luna Rust handoff parser from setup
 
 Upstream base: Linux 7.2.4.
@@ -13,7 +13,7 @@ Provide CONFIG_RUST-disabled stubs so the header has an explicit contract
 for both configurations.
 
 ---
- arch/x86/kernel/setup.c  | 2 ++
+ arch/x86/kernel/setup.c   |  2 ++
  include/linux/luna_boot.h | 25 +++++++++++++++++++++++++
  2 files changed, 27 insertions(+)
  create mode 100644 include/linux/luna_boot.h
@@ -52,11 +52,18 @@ new file mode 100644
 diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
-@@ -2,2 +2,3 @@
+@@ -4,10 +4,11 @@
+  *
+  * This file contains the setup_arch() code, which handles the architecture-dependent
+  * parts of early kernel initialization.
+  */
+ #include <linux/acpi.h>
  #include <linux/bootconfig.h>
 +#include <linux/luna_boot.h>
  #include <linux/console.h>
-@@ -958,5 +959,6 @@
+ #include <linux/cpu.h>
+ #include <linux/crash_dump.h>
+@@ -958,5 +959,6 @@ void __init setup_arch(char **cmdline_p)
  	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
  	e820__memory_setup();
  	parse_setup_data();
