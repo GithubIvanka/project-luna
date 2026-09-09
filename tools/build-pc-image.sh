@@ -129,6 +129,15 @@ mksquashfs "$SYSTEM_ROOT" "$OUT/luna-${LUNA_VERSION}.squashfs" -noappend -comp z
 SYSTEM_SIZE_MIB="${LUNA_SYSTEM_SIZE_MIB:-768}"
 DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-512}"
 IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1536}"
+SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
+DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
+SYSTEM_START=264192
+SYSTEM_END=$((SYSTEM_START + SYSTEM_SECTORS - 1))
+DATA_START=$((SYSTEM_END + 1))
+DATA_END=$((DATA_START + DATA_SECTORS - 1))
+REQUIRED_SECTORS=$((DATA_END + 34))
+REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
+[ "$IMAGE_SIZE_MIB" -ge "$REQUIRED_MIB" ] || { echo "image size ${IMAGE_SIZE_MIB} MiB is too small; need at least ${REQUIRED_MIB} MiB" >&2; exit 1; }
 
 mkdir -p "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.squashfs"
@@ -148,28 +157,9 @@ arch = "x86_64"
 
 [kernels]
 compatible = ["$KERNEL_VERSION"]
-
-[bootstrap]
-paths = ["/sbin/luna-system-runtime", "/usr/bin/luna-login", "/usr/bin/niri-session", "/etc/os-release", "/etc/hostname", "/etc/passwd", "/etc/group", "/etc/shadow", "/etc/profile", "/etc/luna"]
 EOF
 cp "$MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.toml"
 
-SYSTEM_SIZE_MIB="${LUNA_SYSTEM_SIZE_MIB:-768}"
-DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-512}"
-IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1536}"
-SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
-DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
-SYSTEM_START=264192
-SYSTEM_END=$((SYSTEM_START + SYSTEM_SECTORS - 1))
-DATA_START=$((SYSTEM_END + 1))
-DATA_END=$((DATA_START + DATA_SECTORS - 1))
-REQUIRED_SECTORS=$((DATA_END + 34))
-REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
-[ "$IMAGE_SIZE_MIB" -ge "$REQUIRED_MIB" ] || { echo "image size ${IMAGE_SIZE_MIB} MiB is too small; need at least ${REQUIRED_MIB} MiB" >&2; exit 1; }
-
-mkdir -p "$DATA_ROOT/system/apps" "$DATA_ROOT/system/drivers" "$DATA_ROOT/system/libs" "$DATA_ROOT/system/volumes" "$DATA_ROOT/system/config" "$DATA_ROOT/system/state" "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config" "$DATA_ROOT/cache"
-chown -R 1000:1000 "$DATA_ROOT/users/luna"
-chmod 0700 "$DATA_ROOT/users/luna/home"
 truncate -s "${DATA_SIZE_MIB}M" "$OUT/luna-data.img"
 mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" >/dev/null
 truncate -s "${SYSTEM_SIZE_MIB}M" "$OUT/luna-system.img"
