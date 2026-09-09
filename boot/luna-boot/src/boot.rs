@@ -14,7 +14,6 @@ use crate::kernel::KernelLoader;
 use crate::menu::{BootMenu, BootMenuAction, BootSelection};
 use crate::paging::prepare_identity_map;
 use crate::splash;
-use crate::target::BootTarget;
 
 const PAGE_TABLE_PAGES: usize = 66;
 
@@ -59,14 +58,62 @@ pub fn boot_flow() -> BootResult<()> {
     }
 
     let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
-    let target = match selection.action {
-        BootMenuAction::Recovery => catalog.recovery.clone().ok_or(BootError::RecoveryUnavailable)?,
-        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported("factory environment is unavailable on this installation"))?,
-        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => catalog.targets.get(selection.target_index).cloned().ok_or(BootError::TargetNotFound)?,
+
+    let selected = match selection.action {
+        BootMenuAction::Recovery => catalog
+            .recovery
+            .clone()
+            .ok_or(BootError::RecoveryUnavailable),
+        BootMenuAction::Factory => catalog
+            .factory
+            .clone()
+            .ok_or(BootError::Unsupported("factory environment is unavailable on this installation")),
+        BootMenuAction::Continue
+        | BootMenuAction::SystemImage
+        | BootMenuAction::VerboseBoot => catalog
+            .targets
+            .get(selection.target_index)
+            .cloned()
+            .ok_or(BootError::TargetNotFound),
         BootMenuAction::ExternalBoot => unreachable!(),
+    }?;
+
+    let mode = match selection.action {
+        BootMenuAction::VerboseBoot => BootMode::Detailed,
+        BootMenuAction::Recovery => BootMode::Recovery,
+        BootMenuAction::Factory => BootMode::Factory,
+        _ => BootMode::Normal,
     };
 
-    let mut target = target;
+    // Select a complete target before allocation. A fallback is a new
+    // image+init+kernel tuple, never a replacement kernel for the old target.
+    let mut candidates = Vec::new();
+    candidates.push(selected.clone());
+    if matches!(selection.action, BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot) {
+        candidates.extend(
+            catalog
+                .targets
+                .iter()
+                .skip(selection.target_index + 1)
+                .cloned(),
+        );
+    }
+
+    let (mut target, mut prepared) = loop {
+        let candidate = match candidates.pop() {
+            Some(value) => value,
+            None => return Err(BootError::TargetNotFound),
+        };
+
+        match KernelLoader::new(filesystem).prepare(&candidate) {
+            Ok(prepared) => break (candidate, prepared),
+            Err(error) if !candidates.is_empty() && mode == BootMode::Normal => {
+                log::warn!("Luna: target preparation failed; trying previous compatible target: {error:?}");
+            }
+            Err(error) => return Err(error),
+        }
+    };
+
     if selection.action == BootMenuAction::VerboseBoot {
         target.kernel_cmdline = target
             .kernel_cmdline
@@ -77,34 +124,11 @@ pub fn boot_flow() -> BootResult<()> {
         target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
     }
 
-    let mut prepared = if matches!(selection.action, BootMenuAction::Recovery | BootMenuAction::Factory) {
-        KernelLoader::new(filesystem).prepare(&target)
-    } else {
-        match KernelLoader::new(filesystem).prepare(&target) {
-            Ok(value) => Ok(value),
-            Err(primary) => {
-                let mut fallback = None;
-                for candidate in catalog.targets.iter().skip(selection.target_index + 1) {
-                    if let Ok(value) = KernelLoader::new(filesystem).prepare(candidate) {
-                        fallback = Some(value);
-                        break;
-                    }
-                }
-                fallback.ok_or(primary)
-            }
-        }
-    }?;
-
-    let mode = match selection.action {
-        BootMenuAction::VerboseBoot => BootMode::Detailed,
-        BootMenuAction::Recovery => BootMode::Recovery,
-        BootMenuAction::Factory => BootMode::Factory,
-        _ => BootMode::Normal,
-    };
-
     let manifest_bytes = filesystem.read_file(&target.manifest_path)?;
     let image_bytes = filesystem.read_file(&target.system_image_path)?;
-    let kernel_identity = PreparedIdentity { kernel_digest: prepared.kernel_digest };
+    let kernel_identity = PreparedIdentity {
+        kernel_digest: prepared.kernel_digest,
+    };
     let luna_handoff = LunaHandoff::build(
         &target,
         mode,
@@ -126,6 +150,13 @@ pub fn boot_flow() -> BootResult<()> {
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
     reserved.push((page_table, PAGE_TABLE_PAGES));
 
+    // ExitBootServices is the final UEFI boundary. The final memory map is
+    // converted into Linux E820 entries while Boot Services are already gone.
+    let final_map = unsafe { boot::exit_boot_services(None) };
+    prepared
+        .boot_params
+        .set_e820_from_map_reserved(&final_map, &reserved)?;
+
     let handoff = KernelHandoff {
         kernel_load_address: prepared.kernel_address,
         kernel_entry: prepared.kernel_entry,
@@ -141,10 +172,10 @@ pub fn boot_flow() -> BootResult<()> {
         luna_handoff_pages: luna_handoff.allocation_pages,
     };
 
-    if !handoff.is_ready() { return Err(BootError::InvalidKernel); }
-    let final_map = unsafe { boot::exit_boot_services(None) };
-    let mut handoff = handoff;
-    handoff.boot_params.set_e820_from_map_reserved(&final_map, &reserved)?;
+    if !handoff.is_ready() {
+        return Err(BootError::InvalidKernel);
+    }
+
     unsafe {
         core::ptr::copy_nonoverlapping(
             handoff.boot_params.as_bytes().as_ptr(),
@@ -153,8 +184,4 @@ pub fn boot_flow() -> BootResult<()> {
         );
         handoff.enter();
     }
-}
-
-pub fn handle_boot_error(_error: BootError, _target: &BootTarget) -> BootResult<()> {
-    Err(BootError::Unsupported("boot error display must occur before ExitBootServices"))
 }
