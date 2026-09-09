@@ -5,7 +5,7 @@
 //!
 //! This file is copied into the pinned Linux source tree by the Luna kernel
 //! build tool. Parsing stays in Rust; the x86 C side only provides the Linux
-//! setup_data head pointer and later consumes the exported state.
+//! `setup_data` head pointer and later consumes the exported state.
 
 use core::ffi::c_void;
 use core::ptr;
@@ -214,16 +214,22 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
     HANDOFF_VALID = true;
     INIT_VALID = true;
 
+    // Copy the mutable statics into locals before passing them to the
+    // formatting machinery. Rust 2024 forbids implicit shared references to
+    // `static mut` values even when the read itself is intentional.
+    let init_phys = INIT_PHYS;
+    let init_size = INIT_SIZE;
     kernel::pr_info!(
         "Luna: handoff v1 accepted: {} bytes, init {:#x}+{}\n",
         total_size,
-        INIT_PHYS,
-        INIT_SIZE
+        init_phys,
+        init_size
     );
 
     unmap(base, len);
 }
 
+/// Parse the Luna `setup_data` node chain supplied by the Linux x86 boot protocol.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
     clear_state();
@@ -263,26 +269,31 @@ pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
     clear_state();
 }
 
+/// Return whether a valid Luna boot handoff and init image were parsed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_boot_available() -> bool {
     HANDOFF_VALID && INIT_VALID
 }
 
+/// Return the physical address of the boot-reserved `luna-init` ELF image.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_init_phys() -> u64 {
     INIT_PHYS
 }
 
+/// Return the exact byte size of the boot-reserved `luna-init` ELF image.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_init_size() -> u64 {
     INIT_SIZE
 }
 
+/// Return the physical address of the validated Luna handoff object.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_handoff_phys() -> u64 {
     HANDOFF_PHYS
 }
 
+/// Return the byte size of the validated Luna handoff object.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_handoff_size() -> u32 {
     HANDOFF_SIZE
