@@ -22,6 +22,16 @@ fi
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
 [ -f "$OVERLAY" ] || { echo "missing kernel overlay: $OVERLAY" >&2; exit 1; }
 
+# Ubuntu's packaged Rust toolchains may keep the standard-library sources outside
+# rustc's default discovery path. Kernel Kconfig uses RUST_LIB_SRC when present.
+if command -v rustc >/dev/null; then
+    RUST_SYSROOT="$(rustc --print sysroot)"
+    AUTO_RUST_LIB_SRC="${RUST_SYSROOT}/lib/rustlib/src/rust/library"
+    if [ -d "$AUTO_RUST_LIB_SRC" ] && [ -z "${RUST_LIB_SRC:-}" ]; then
+        export RUST_LIB_SRC="$AUTO_RUST_LIB_SRC"
+    fi
+fi
+
 mkdir -p "$OUT"
 if [ ! -d "$SRC" ]; then
     if [ ! -f "$TARBALL" ]; then
@@ -49,12 +59,21 @@ if [ "$LLVM_MODE" = "1" ]; then
 fi
 MAKE+=(O="$SRC/build" ARCH=x86_64)
 
+# Run the same Rust availability probe used by Kconfig before generating the
+# configuration. This turns a silent CONFIG_RUST=n into an actionable failure.
+if ! "${MAKE[@]}" rustavailable; then
+    echo "Project Luna requires a Rust toolchain accepted by the Linux kernel build system." >&2
+    echo "Install/enable rust-src and bindgen as described by Documentation/rust/quick-start.rst." >&2
+    exit 1
+fi
+
 "${MAKE[@]}" x86_64_defconfig
 cat "$CONFIG_FRAGMENT" >> "$SRC/build/.config"
 "${MAKE[@]}" olddefconfig
 
 if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
     echo "Project Luna requires CONFIG_RUST=y after olddefconfig" >&2
+    echo "Check RUST_IS_AVAILABLE and other CONFIG_RUST dependencies above." >&2
     exit 1
 fi
 
