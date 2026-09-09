@@ -5,68 +5,30 @@ Subject: [PATCH 3/3] x86: call Luna Rust handoff parser from setup
 
 Upstream base: Linux 7.2.4.
 
-Declare the Rust ABI in a dedicated kernel header and call it from the
-existing x86 setup path. Keep the C side limited to declaration and
-invocation; all Luna parsing and validation remains in Rust.
+Keep the early C side limited to the ABI declaration and invocation.
+The setup_arch() path passes only the Linux setup_data head pointer; all
+Luna handoff parsing and validation remains in Rust.
 
-Provide CONFIG_RUST-disabled stubs so the header has an explicit contract
-for both configurations.
+Project Luna requires CONFIG_RUST for this kernel profile. Do not silently
+continue with the Luna handoff path disabled.
 
 ---
- arch/x86/kernel/setup.c   |  2 ++
- include/linux/luna_boot.h | 25 +++++++++++++++++++++++++
- 2 files changed, 27 insertions(+)
- create mode 100644 include/linux/luna_boot.h
-
-diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
-new file mode 100644
---- /dev/null
-+++ b/include/linux/luna_boot.h
-@@ -0,0 +1,25 @@
-+/* SPDX-License-Identifier: GPL-2.0 */
-+#ifndef _LINUX_LUNA_BOOT_H
-+#define _LINUX_LUNA_BOOT_H
-+
-+#include <linux/types.h>
-+
-+struct boot_params;
-+
-+#ifdef CONFIG_RUST
-+void x86_luna_boot_parse(const struct boot_params *params);
-+bool x86_luna_boot_available(void);
-+phys_addr_t x86_luna_init_phys(void);
-+u64 x86_luna_init_size(void);
-+phys_addr_t x86_luna_handoff_phys(void);
-+u32 x86_luna_handoff_size(void);
-+#else
-+static inline void x86_luna_boot_parse(const struct boot_params *params) { }
-+static inline bool x86_luna_boot_available(void) { return false; }
-+static inline phys_addr_t x86_luna_init_phys(void) { return 0; }
-+static inline u64 x86_luna_init_size(void) { return 0; }
-+static inline phys_addr_t x86_luna_handoff_phys(void) { return 0; }
-+static inline u32 x86_luna_handoff_size(void) { return 0; }
-+#endif
-+
-+#endif /* _LINUX_LUNA_BOOT_H */
+ arch/x86/kernel/setup.c | 3 +++
+ 1 file changed, 3 insertions(+)
 
 diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
-@@ -4,10 +4,11 @@
-  *
-  * This file contains the setup_arch() code, which handles the architecture-dependent
-  * parts of early kernel initialization.
-  */
- #include <linux/acpi.h>
- #include <linux/bootconfig.h>
-+#include <linux/luna_boot.h>
- #include <linux/console.h>
- #include <linux/cpu.h>
- #include <linux/crash_dump.h>
-@@ -958,5 +959,6 @@ void __init setup_arch(char **cmdline_p)
+@@ -958,5 +958,8 @@ void __init setup_arch(char **cmdline_p)
  	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
  	e820__memory_setup();
  	parse_setup_data();
-+	x86_luna_boot_parse(&boot_params);
++
++#ifdef CONFIG_RUST
++	extern void x86_luna_boot_parse(u64 setup_data_phys);
++	x86_luna_boot_parse(boot_params.hdr.setup_data);
++#else
++#error "Project Luna requires CONFIG_RUST"
++#endif
  
  	copy_edd();
