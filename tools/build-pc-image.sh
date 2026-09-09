@@ -132,9 +132,10 @@ IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1536}"
 
 mkdir -p "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.squashfs"
+cp "$LUNA_INIT" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.init"
+chmod 0755 "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.init"
 cp "$KERNEL" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION/bzImage"
 
-IMAGE_DIGEST="$(sha256sum "$OUT/luna-${LUNA_VERSION}.squashfs" | cut -d' ' -f1)"
 MANIFEST_TMP="$WORK/luna-${LUNA_VERSION}.toml"
 cat > "$MANIFEST_TMP" <<EOF
 [image]
@@ -153,6 +154,9 @@ paths = ["/sbin/luna-system-runtime", "/usr/bin/luna-login", "/usr/bin/niri-sess
 EOF
 cp "$MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.toml"
 
+SYSTEM_SIZE_MIB="${LUNA_SYSTEM_SIZE_MIB:-768}"
+DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-512}"
+IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1536}"
 SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
 DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
 SYSTEM_START=264192
@@ -189,6 +193,8 @@ Project Luna PC graphical development image
 version=$LUNA_VERSION
 architecture=x86_64
 system_image=luna-${LUNA_VERSION}.squashfs
+system_manifest=luna-${LUNA_VERSION}.toml
+luna_init=luna-${LUNA_VERSION}.init
 system_libc=musl
 bootloader=luna-boot.efi
 uefi_fallback=EFI/BOOT/BOOTX64.EFI
@@ -207,6 +213,6 @@ login_credential=development-only
 early_userspace=direct-memory-resident-luna-init
 initramfs=none
 EOF
-sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$OUT/luna-system.img" "$OUT/luna-data.img" > "$OUT/SHA256SUMS"
+sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$OUT/luna-${LUNA_VERSION}.init" "$OUT/luna-system.img" "$OUT/luna-data.img" > "$OUT/SHA256SUMS"
 
 echo "Built Project Luna graphical PC image: $OUT/luna-pc.img"
