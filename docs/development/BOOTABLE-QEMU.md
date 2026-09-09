@@ -1,7 +1,7 @@
 # QEMU/OVMF bootable development path
 
-This document describes the current development bring-up path for running the
-actual Luna userspace in QEMU. It is not a production installer.
+This document describes the current development bring-up path for validating
+the real Luna boot boundary in QEMU. It is not a production installer.
 
 ## What the path tests
 
@@ -12,34 +12,23 @@ luna-boot.efi
  ↓
 Linux bzImage
  ↓
-CPIO/gzip early userspace
+luna-init ELF (loaded by luna-boot, executed directly by kernel)
  ↓
-luna-init
+luna-init (PID 1)
  ↓
-SYSTEM ext4 + selected SquashFS immutable source
- ↓
-RAM-backed logical /
- ↓
-DATA ext4
- ↓
-luna-system-runtime
- ↓
-UserSession
- ↓
-interactive shell / graphical session
+Luna system runtime (next milestone)
 ```
 
-Luna uses initramfs as early userspace, but the final system root is not a
-persistent filesystem on disk. `luna-init` constructs a RAM-backed logical root
-from controlled sources and then starts `luna-system-runtime`.
+The first bring-up intentionally stops after proving that the kernel can accept
+the Luna boot handoff, create FD 3, execute the selected `luna-init` ELF and keep
+that process alive as PID 1.
 
-The selected System Image is mounted only as an internal immutable source while
-boot-critical resources are materialized. The architecture does not use a
-classic `switch_root` to make the SquashFS itself the final `/`.
+There is no early userspace archive, no BusyBox bootstrap and no root-switching
+stage in this path.
 
 ## Host requirements
 
-Install:
+Install or provide:
 
 - Rust stable;
 - QEMU x86_64;
@@ -47,22 +36,14 @@ Install:
 - `sgdisk`;
 - `mkfs.ext4` and `mkfs.fat`;
 - `mtools` (`mcopy`, `mmd`);
-- `mksquashfs`;
-- `cpio` and `gzip`;
-- a static x86_64 BusyBox binary with `mount`, `sh` and the normal early-userspace
-  filesystem utilities enabled.
-
-A static BusyBox is useful here because it can provide the small set of early
-userspace utilities without requiring a separate libc tree. It is an early
-bootstrap dependency, not the final system init architecture.
+- `mksquashfs`.
 
 ## Environment
 
 ```bash
-export OVMF_CODE=/path/to/OVMF_CODE.fd
-export OVMF_VARS=/path/to/writable/OVMF_VARS.fd
-export LUNA_TEST_KERNEL=/path/to/bzImage
-export BUSYBOX=/path/to/static/x86_64/busybox
+export OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+export OVMF_VARS=/path/to/writable/OVMF_VARS_4M.fd
+export LUNA_TEST_KERNEL=/home/sibitti/source/project-luna/dist/kernel/7.2.4/bzImage
 ```
 
 `OVMF_VARS` must be a writable copy. Do not point the test directly at a shared
@@ -73,19 +54,13 @@ firmware variables file.
 From the repository root:
 
 ```bash
-boot/luna-boot/tests/ovmf/build-and-run.sh
+boot/luna-boot/tests/ovmf/run.sh
 ```
 
-The builder prefers `x86_64-unknown-linux-musl` for `luna-system-runtime` when
-that target is already installed. Otherwise it uses the host Linux target and
-copies the required dynamic loader/libraries into the test System Image.
+The script builds the direct `luna-init` artifact and a small test System Image,
+then constructs the EFI/SYSTEM/DATA GPT disk and starts QEMU.
 
-The Rust musl target is a supported Rust target and is statically linked by
-default, which makes it appropriate for a small early/development image.
-
-## Disk layout
-
-The test disk contains:
+## Test disk layout
 
 ```text
 EFI    64 MiB
@@ -93,60 +68,39 @@ SYSTEM 256 MiB
 DATA   128 MiB
 ```
 
-The SYSTEM partition contains:
+SYSTEM contains:
 
 ```text
-kernels/test/bzImage
-kernels/test/initramfs.img
 images/luna-test.squashfs
+images/luna-test.toml
+images/luna-test.init
+kernels/test/bzImage
 ```
 
-The DATA partition remains physically separate from SYSTEM. The runtime view of
-DATA is assembled into the logical root according to Luna's mapping/runtime
-rules; physical SYSTEM/DATA paths are not the application-facing contract.
-
-## Current early userspace
-
-The dedicated `components/luna-init` implementation is the canonical early
-userspace boundary. Its target behavior is:
-
-1. prepare `/proc`, `/sys`, `/dev`, `/run` and `/tmp` runtime filesystems;
-2. discover SYSTEM and DATA from `/proc/cmdline` / boot context;
-3. validate and mount SYSTEM read-only;
-4. locate and validate the selected SquashFS System Image;
-5. mount that image at an internal source location rather than making it the
-   final `/`;
-6. create the RAM-backed logical root;
-7. materialize the boot-critical system base into RAM;
-8. make DATA and other approved resources available through controlled runtime
-   mappings;
-9. start `luna-system-runtime` as the normal userspace supervisor/PID 1.
-
-Additional immutable resources may be hydrated lazily after the initial base is
-ready. The exact boot-critical manifest/dependency closure and fully independent
-lazy hydration mechanism are still implementation work governed by the accepted
-RAM-hydration decision.
+The `.squashfs` file is the System Image itself. The `.init` file is a separate
+ELF64 `luna-init` artifact loaded and validated independently by `luna-boot`.
 
 ## Expected result
 
-After the kernel and boot messages, `luna-system-runtime` starts and creates the
-initial `UserSession`. The QEMU terminal should therefore become the configured
-Luna development shell or graphical session path, depending on the test image.
+The serial console should contain messages equivalent to:
 
-## Important limitation
+```text
+Luna: handoff v1 accepted: ...
+Luna: staging memory-resident luna-init for direct PID 1
+Luna: executing luna-init as PID 1
+Luna: luna-init is running as PID 1
+```
 
-The current application launcher uses Unix `CommandExt::pre_exec` for namespace
-setup. Rust documents that this hook executes after `fork` in a constrained
-post-fork environment and warns against complex non-async-signal-safe work there.
-It is acceptable for this single-process bring-up prototype, but it is **not**
-the final production process-launch mechanism.
+The VM should remain running because `luna-init` currently waits as PID 1 and
+reaps children. A failure before that point is a kernel/boot ABI problem rather
+than a normal userspace service failure.
 
-Application isolation does not use a separate `luna-app-init` component. The
-system-wide `luna-system-runtime` remains PID 1, while `luna-app-runtime` owns
-ApplicationInstance lifecycle and launches the application directly through the
-namespace/materialization boundary. A PID namespace is not required by the
-default application-isolation model.
+## Current limitation
 
-The next hardening step is a dedicated Linux child-creation/process setup
-primitive for the namespace operations that remain necessary, without creating
-an additional application init layer.
+This milestone does not yet start `luna-system-runtime`, construct the final
+logical filesystem view or launch a graphical session. Those are subsequent
+userspace stages.
+
+The application launcher still uses Rust `CommandExt::pre_exec` for some
+namespace setup. That remains a development limitation and is not the final
+production child-creation primitive.
