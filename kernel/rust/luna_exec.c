@@ -76,6 +76,11 @@ static int luna_install_handoff_fd(void)
 		return ret;
 	}
 
+	/* The descriptor is a read-only boot-context channel by contract. */
+	file->f_mode &= ~(FMODE_WRITE | FMODE_CAN_WRITE);
+	file->f_flags = (file->f_flags & ~O_ACCMODE) | O_RDONLY;
+	file->f_pos = 0;
+
 	/* console_on_rootfs() has already consumed descriptors 0, 1 and 2. */
 	fd = get_unused_fd_flags(0);
 	if (fd < 0) {
