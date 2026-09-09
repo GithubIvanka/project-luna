@@ -8,16 +8,10 @@ mkdir -p "$OUT"
 : "${OVMF_CODE:?Set OVMF_CODE to OVMF_CODE.fd}"
 : "${OVMF_VARS:?Set OVMF_VARS to a writable OVMF_VARS.fd copy}"
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"
-: "${BUSYBOX:?Set BUSYBOX to a static x86_64 BusyBox binary}"
 
-command -v cargo >/dev/null
-command -v qemu-system-x86_64 >/dev/null
-command -v sgdisk >/dev/null
-command -v mkfs.ext4 >/dev/null
-command -v mkfs.fat >/dev/null
-command -v mcopy >/dev/null
-command -v mmd >/dev/null
-command -v dd >/dev/null
+for tool in cargo qemu-system-x86_64 sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd; do
+    command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
+done
 
 bash "$ROOT_DIR/tests/ovmf/build-userspace.sh"
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$ROOT_DIR/Cargo.toml"
