@@ -12,7 +12,7 @@ enabled. Parser source and the C ABI bridge are separate patches.
  arch/x86/kernel/Makefile | 1 +
  1 file changed, 1 insertion(+)
 
- diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
+diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
 @@ -89,4 +89,5 @@ obj-y += static_call.o
