@@ -19,7 +19,6 @@ const O_WRONLY: i32 = 0x0001;
 const O_CREAT: i32 = 0x0040;
 const O_TRUNC: i32 = 0x0200;
 const INIT_MODE: u32 = 0o700;
-
 const MAX_ERRNO: isize = 4095;
 
 unsafe extern "C" {
@@ -130,9 +129,6 @@ unsafe fn stage_init_image() -> Result<(), i32> {
 /// Launch the bootloader-selected `luna-init` as the initial userspace task.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
-    if !bindings::IS_ENABLED_CONFIG_RUST {
-        return -38; // -ENOSYS
-    }
     if !x86_luna_boot_available() {
         return -2; // -ENOENT
     }
@@ -149,10 +145,7 @@ pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     static PATH_ENV: &[u8] = b"PATH=/bin:/sbin:/usr/bin:/usr/sbin\0";
     static DIRECT_ENV: &[u8] = b"LUNA_DIRECT_INIT=1\0";
 
-    let argv: [*const c_char; 2] = [
-        ARG0.as_ptr().cast::<c_char>(),
-        core::ptr::null(),
-    ];
+    let argv: [*const c_char; 2] = [ARG0.as_ptr().cast::<c_char>(), core::ptr::null()];
     let envp: [*const c_char; 3] = [
         PATH_ENV.as_ptr().cast::<c_char>(),
         DIRECT_ENV.as_ptr().cast::<c_char>(),
