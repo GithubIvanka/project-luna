@@ -19,6 +19,12 @@ The direct-init path is kernel-internal. Its responsibilities stop at:
 
 The kernel must not parse System Image policy, mount SquashFS as `/`, construct Luna logical root, manage users, or duplicate `luna-init` responsibilities.
 
+## Rust-first kernel integration
+
+Luna-specific kernel code is implemented in Rust using the Linux kernel Rust infrastructure wherever the required API surface exists. The early `setup_arch()` path may retain a minimal C ABI bridge so existing kernel initialization can call the Rust implementation directly. The bridge is not a policy layer and must not contain handoff parsing or Luna-specific validation.
+
+Direct use of generated C bindings is limited to kernel-core glue where a required early API does not yet have an appropriate safe Rust abstraction. Such usage is expected to shrink as the relevant kernel Rust wrappers mature.
+
 ## Initial implementation boundary
 
 The first implementation is deliberately limited to the `x86_64` built-in Luna boot profile. It must fail closed when:
