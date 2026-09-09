@@ -107,7 +107,10 @@ unsafe fn build_executable_object() -> Result<*mut bindings::file, i32> {
         return Err(-EINVAL);
     }
 
-    let name = b"luna-init-boot-object\0";
+    // Linux uses the private object's dentry name when constructing the task
+    // identity for an AT_EMPTY_PATH execution. Keep it canonical so the new
+    // PID 1 is observable as `luna-init` rather than a synthetic fd name.
+    let name = b"luna-init\0";
     let file = shmem_kernel_file_setup(
         name.as_ptr().cast::<c_char>(),
         size as bindings::loff_t,
@@ -160,8 +163,8 @@ pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     kernel::pr_info!("Luna: executing memory-resident luna-init as PID 1\n");
     let ret = kernel_execve_file(file, argv.as_ptr(), envp.as_ptr());
 
-    // The exec path owns its acquired reference after entry. We retain our
-    // creation reference only until the helper returns on failure.
+    // The exec path acquired and released its own file reference. The Rust
+    // creation reference remains ours until the helper returns on failure.
     fput(file);
     kernel::pr_err!("Luna: direct luna-init execution failed: error {}\n", ret);
     ret
