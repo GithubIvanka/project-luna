@@ -24,18 +24,26 @@ fi
 
 python3 - "$MAKEFILE" "$SETUP_C" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 makefile = Path(sys.argv[1])
 setup = Path(sys.argv[2])
 
 text = makefile.read_text()
-marker = "obj-y += process.o"
 line = "obj-$(CONFIG_RUST) += luna_boot.o\n"
 if line not in text:
-    if marker not in text:
-        raise SystemExit(f"cannot locate stable Kbuild insertion point in {makefile}")
-    text = text.replace(marker, line + marker, 1)
+    # Linux's x86 kernel Makefile has changed ordering over time. Insert
+    # immediately after the first built-in object assignment instead of
+    # relying on one particular object name.
+    match = re.search(r"(?m)^[ \t]*obj-y[ \t]*(?::=|\+=|=)", text)
+    if not match:
+        raise SystemExit(f"cannot locate obj-y Kbuild assignment in {makefile}")
+    line_end = text.find("\n", match.start())
+    if line_end < 0:
+        raise SystemExit(f"cannot locate end of obj-y assignment in {makefile}")
+    insertion = line_end + 1
+    text = text[:insertion] + line + text[insertion:]
     makefile.write_text(text)
 
 text = setup.read_text()
