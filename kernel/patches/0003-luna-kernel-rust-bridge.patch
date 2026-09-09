@@ -13,13 +13,13 @@ Project Luna requires CONFIG_RUST for this kernel profile. Do not silently
 continue with the Luna handoff path disabled.
 
 ---
- arch/x86/kernel/setup.c | 3 +++
- 1 file changed, 3 insertions(+)
+ arch/x86/kernel/setup.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
 
 diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
-@@ -958,5 +958,8 @@ void __init setup_arch(char **cmdline_p)
+@@ -958,5 +958,12 @@ void __init setup_arch(char **cmdline_p)
  	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
  	e820__memory_setup();
  	parse_setup_data();
