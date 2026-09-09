@@ -5,15 +5,15 @@ SRC="$1"
 REPO_ROOT="$2"
 
 RUST_SRC="${REPO_ROOT}/kernel/rust/luna_boot.rs"
+EXEC_SRC="${REPO_ROOT}/kernel/rust/luna_exec.rs"
 RUST_DST="${SRC}/arch/x86/kernel/luna_boot.rs"
-EXEC_SRC="${REPO_ROOT}/kernel/rust/luna_exec.c"
-EXEC_DST="${SRC}/arch/x86/kernel/luna_exec.c"
+EXEC_DST="${SRC}/arch/x86/kernel/luna_exec.rs"
 MAKEFILE="${SRC}/arch/x86/kernel/Makefile"
 SETUP_C="${SRC}/arch/x86/kernel/setup.c"
 INIT_C="${SRC}/init/main.c"
 
 [ -f "$RUST_SRC" ] || { echo "missing Luna Rust source: $RUST_SRC" >&2; exit 1; }
-[ -f "$EXEC_SRC" ] || { echo "missing Luna init launcher: $EXEC_SRC" >&2; exit 1; }
+[ -f "$EXEC_SRC" ] || { echo "missing Luna Rust launcher: $EXEC_SRC" >&2; exit 1; }
 [ -f "$MAKEFILE" ] || { echo "missing Linux x86 kernel Makefile: $MAKEFILE" >&2; exit 1; }
 [ -f "$SETUP_C" ] || { echo "missing Linux x86 setup.c: $SETUP_C" >&2; exit 1; }
 [ -f "$INIT_C" ] || { echo "missing Linux init/main.c: $INIT_C" >&2; exit 1; }
@@ -67,7 +67,7 @@ if "extern int x86_luna_exec_init(void);" not in text:
         raise SystemExit(f"cannot locate binfmts include in {init}")
     text = text.replace(marker, marker + launcher, 1)
 
-call = '''\n\tif (IS_ENABLED(CONFIG_RUST)) {\n\t\tret = x86_luna_exec_init();\n\t\tpanic("Luna: direct luna-init execution failed (error %d).", ret);\n\t}\n'''
+call = '''\n\tif (IS_ENABLED(CONFIG_RUST)) {\n\t\tint luna_ret = x86_luna_exec_init();\n\t\tif (luna_ret)\n\t\t\tpanic("Luna: direct luna-init execution failed (error %d).", luna_ret);\n\t}\n'''
 if "x86_luna_exec_init();" not in text:
     anchor = "\tconsole_on_rootfs();\n"
     if anchor not in text:
