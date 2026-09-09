@@ -1,3 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Project Luna <luna@localhost>
+Date: Wed, 9 Sep 2026 09:35:00 +0700
+Subject: [PATCH] x86: move Luna boot handoff parser to Rust
+
+Make the Luna-specific kernel boot handoff logic Rust-first.
+
+The C side remains only a tiny ABI declaration and call from setup_arch().
+The parser itself lives in Rust and uses the kernel Rust infrastructure.
+
+This first slice intentionally does not execute luna-init and does not
+implement BLAKE3 verification yet.
+
+---
+ arch/x86/kernel/Makefile     |   1 +
+ arch/x86/kernel/luna_boot.rs | 259 +++++++++++++++++++++++++++++++++++++++++++
+ arch/x86/kernel/setup.c      |   2 +
+ 3 files changed, 262 insertions(+)
+ create mode 100644 arch/x86/kernel/luna_boot.rs
+
 diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
@@ -6,6 +26,7 @@ diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 +obj-$(CONFIG_RUST) += luna_boot.o
  obj-y += process.o
  obj-y += fpu/
+
 diff --git a/arch/x86/kernel/luna_boot.rs b/arch/x86/kernel/luna_boot.rs
 new file mode 100644
 --- /dev/null
@@ -270,47 +291,14 @@ new file mode 100644
 +pub unsafe extern "C" fn x86_luna_handoff_size() -> u32 {
 +    LUNA_HANDOFF_SIZE
 +}
-diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
-new file mode 100644
---- /dev/null
-+++ b/include/linux/luna_boot.h
-@@ -0,0 +1,25 @@
-+/* SPDX-License-Identifier: GPL-2.0 */
-+#ifndef _LINUX_LUNA_BOOT_H
-+#define _LINUX_LUNA_BOOT_H
 +
-+#include <linux/types.h>
-+
-+struct boot_params;
-+
-+#ifdef CONFIG_RUST
-+void x86_luna_boot_parse(const struct boot_params *params);
-+bool x86_luna_boot_available(void);
-+phys_addr_t x86_luna_init_phys(void);
-+u64 x86_luna_init_size(void);
-+phys_addr_t x86_luna_handoff_phys(void);
-+u32 x86_luna_handoff_size(void);
-+#else
-+static inline void x86_luna_boot_parse(const struct boot_params *params) { }
-+static inline bool x86_luna_boot_available(void) { return false; }
-+static inline phys_addr_t x86_luna_init_phys(void) { return 0; }
-+static inline u64 x86_luna_init_size(void) { return 0; }
-+static inline phys_addr_t x86_luna_handoff_phys(void) { return 0; }
-+static inline u32 x86_luna_handoff_size(void) { return 0; }
-+#endif
-+
-+#endif /* _LINUX_LUNA_BOOT_H */
-diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
---- a/arch/x86/kernel/setup.c
-+++ b/arch/x86/kernel/setup.c
-@@ -2,2 +2,3 @@
- #include <linux/bootconfig.h>
-+#include <linux/luna_boot.h>
- #include <linux/console.h>
-@@ -958,5 +959,6 @@
- 	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
- 	e820__memory_setup();
- 	parse_setup_data();
-+	x86_luna_boot_parse(&boot_params);
- 
- 	copy_edd();
++diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
++--- a/arch/x86/kernel/setup.c
+++++ b/arch/x86/kernel/setup.c
++@@ -958,5 +958,7 @@
++ 	e820__memory_setup();
++ 	parse_setup_data();
+++	extern void x86_luna_boot_parse(const struct boot_params *params);
+++	x86_luna_boot_parse(&boot_params);
++ 
++ 	copy_edd();
