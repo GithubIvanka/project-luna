@@ -270,7 +270,7 @@ new file mode 100644
 +pub unsafe extern "C" fn x86_luna_handoff_size() -> u32 {
 +    LUNA_HANDOFF_SIZE
 +}
-+diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
+diff --git a/include/linux/luna_boot.h b/include/linux/luna_boot.h
 new file mode 100644
 --- /dev/null
 +++ b/include/linux/luna_boot.h
@@ -300,15 +300,15 @@ new file mode 100644
 +#endif
 +
 +#endif /* _LINUX_LUNA_BOOT_H */
-+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
 @@ -2,2 +2,3 @@
  #include <linux/bootconfig.h>
 +#include <linux/luna_boot.h>
  #include <linux/console.h>
-@@ -959,5 +960,6 @@
- 	iomem_resource.end = 0;
+@@ -958,5 +959,6 @@
+ 	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
  	e820__memory_setup();
  	parse_setup_data();
 +	x86_luna_boot_parse(&boot_params);
