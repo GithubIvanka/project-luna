@@ -85,11 +85,16 @@ pub fn boot_flow() -> BootResult<()> {
         _ => BootMode::Normal,
     };
 
-    // Select a complete target before allocation. A fallback is a new
-    // image+init+kernel tuple, never a replacement kernel for the old target.
+    // A fallback is an atomic image+init+kernel tuple. Never pair a failed
+    // target's manifest/image with another target's prepared kernel.
     let mut candidates = Vec::new();
     candidates.push(selected.clone());
-    if matches!(selection.action, BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot) {
+    if matches!(
+        selection.action,
+        BootMenuAction::Continue
+            | BootMenuAction::SystemImage
+            | BootMenuAction::VerboseBoot
+    ) {
         candidates.extend(
             catalog
                 .targets
@@ -99,19 +104,28 @@ pub fn boot_flow() -> BootResult<()> {
         );
     }
 
-    let (mut target, mut prepared) = loop {
-        let candidate = match candidates.pop() {
-            Some(value) => value,
-            None => return Err(BootError::TargetNotFound),
-        };
-
+    let mut prepared = None;
+    let mut target = None;
+    for candidate in candidates {
         match KernelLoader::new(filesystem).prepare(&candidate) {
-            Ok(prepared) => break (candidate, prepared),
-            Err(error) if !candidates.is_empty() && mode == BootMode::Normal => {
-                log::warn!("Luna: target preparation failed; trying previous compatible target: {error:?}");
+            Ok(value) => {
+                target = Some(candidate);
+                prepared = Some(value);
+                break;
+            }
+            Err(error) if mode == BootMode::Normal => {
+                log::warn!(
+                    "Luna: target {} / kernel {} preparation failed: {error:?}",
+                    candidate.system_version,
+                    candidate.kernel_id
+                );
             }
             Err(error) => return Err(error),
         }
+    }
+    let (mut target, mut prepared) = match (target, prepared) {
+        (Some(target), Some(prepared)) => (target, prepared),
+        _ => return Err(BootError::TargetNotFound),
     };
 
     if selection.action == BootMenuAction::VerboseBoot {
@@ -150,8 +164,6 @@ pub fn boot_flow() -> BootResult<()> {
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
     reserved.push((page_table, PAGE_TABLE_PAGES));
 
-    // ExitBootServices is the final UEFI boundary. The final memory map is
-    // converted into Linux E820 entries while Boot Services are already gone.
     let final_map = unsafe { boot::exit_boot_services(None) };
     prepared
         .boot_params
