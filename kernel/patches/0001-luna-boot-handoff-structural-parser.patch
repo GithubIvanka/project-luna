@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Project Luna <luna@localhost>
-Date: Wed, 9 Sep 2026 08:20:00 +0700
+Date: Wed, 9 Sep 2026 08:30:00 +0700
 Subject: [PATCH] x86: add initial Luna boot handoff parser
 
 Add the first kernel-side slice of the Luna boot contract. The parser walks
@@ -25,12 +25,8 @@ The patch targets the Linux 7.2.y stable tree used by Project Luna.
 diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
 --- a/arch/x86/kernel/Makefile
 +++ b/arch/x86/kernel/Makefile
-@@ -89,4 +89,5 @@ obj-y += resource.o
- obj-y += irqflags.o
- obj-y += static_call.o
-+obj-y += luna_boot.o
- 
- obj-y += process.o
+@@ -89,0 +90 @@
++obj-y			+= luna_boot.o
 
 diff --git a/arch/x86/kernel/luna_boot.c b/arch/x86/kernel/luna_boot.c
 new file mode 100644
@@ -270,13 +266,5 @@ new file mode 100644
 diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
 --- a/arch/x86/kernel/setup.c
 +++ b/arch/x86/kernel/setup.c
-@@ -962,7 +962,8 @@ void __init setup_arch(char **cmdline_p)
- 	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
- 	e820__memory_setup();
- 	parse_setup_data();
+@@ -962,0 +963 @@
 +	x86_luna_boot_parse(&boot_params);
- 
- 	copy_edd();
- 
--- 
-2.46.0
