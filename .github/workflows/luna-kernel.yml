@@ -1,0 +1,53 @@
+name: Luna kernel CI
+
+on:
+  push:
+    branches: ["develop", "main"]
+  pull_request:
+    branches: ["develop", "main"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-kernel:
+    name: Build Luna Linux kernel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential clang cpio flex libelf-dev libssl-dev \
+            llvm lld pahole pkg-config python3 rsync
+
+      - name: Validate required source files
+        run: |
+          test -f tools/build-luna-kernel.sh
+          test -f tools/apply-luna-kernel-overlay.sh
+          test -f kernel/rust/luna_boot.rs
+          test ! -e kernel/patches/0001-luna-kernel-rust-parser.patch
+          test ! -e kernel/patches/0002-luna-kernel-rust-build.patch
+          test ! -e kernel/patches/0003-luna-kernel-rust-bridge.patch
+
+      - name: Build Project Luna kernel
+        env:
+          LUNA_KERNEL_LLVM: "1"
+        run: bash tools/build-luna-kernel.sh
+
+      - name: Verify kernel artifact
+        run: |
+          test -f dist/kernel/current/bzImage
+          file dist/kernel/current/bzImage
+          test -s dist/kernel/current/config
+          test -s dist/kernel/current/System.map
+          cat dist/kernel/current/release
