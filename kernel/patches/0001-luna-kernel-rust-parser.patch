@@ -153,7 +153,7 @@ new file mode 100644
 +
 +            let address = read_u64(base, payload);
 +            let size = read_u64(base, payload + 8);
-+            if address == 0 || size == 0 {
++            if address == 0 || size == 0 || address.checked_add(size).is_none() {
 +                clear_state();
 +                unmap(base, len);
 +                return;
@@ -212,17 +212,13 @@ new file mode 100644
 +}
 +
 +#[unsafe(no_mangle)]
-+pub unsafe extern "C" fn x86_luna_boot_parse(params: *const bindings::boot_params) {
-+    if params.is_null() {
-+        clear_state();
-+        return;
-+    }
++pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
++    clear_state();
 +
-+    let mut phys = (*params).hdr.setup_data;
++    let mut phys = setup_data_phys;
 +
 +    for _ in 0..1024 {
 +        if phys == 0 {
-+            clear_state();
 +            return;
 +        }
 +
