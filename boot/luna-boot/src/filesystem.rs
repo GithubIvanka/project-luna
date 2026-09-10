@@ -40,8 +40,3 @@ impl SystemFilesystem {
     pub fn system_partition(&self) -> &Partition { &self.system_partition }
     pub fn data_partition(&self) -> &Partition { &self.data_partition }
 }
-
-pub fn validate_system_filesystem() -> BootResult<()> {
-    let _ = SystemFilesystem::open()?;
-    Ok(())
-}
