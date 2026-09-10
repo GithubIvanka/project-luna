@@ -123,7 +123,7 @@ pub fn boot_flow() -> BootResult<()> {
             Err(error) => return Err(error),
         }
     }
-    let (mut target, mut prepared) = match (target, prepared) {
+    let (mut target, prepared) = match (target, prepared) {
         (Some(target), Some(prepared)) => (target, prepared),
         _ => return Err(BootError::TargetNotFound),
     };
@@ -175,13 +175,10 @@ pub fn boot_flow() -> BootResult<()> {
         init_address: prepared.init_address,
         init_size: prepared.init_size,
         boot_params_address: prepared.boot_params_address,
-        command_line_address: prepared.command_line_address,
-        setup: prepared.setup,
         boot_params: prepared.boot_params,
         page_table,
         luna_handoff_address: luna_handoff.address,
         luna_handoff_size: luna_handoff.size,
-        luna_handoff_pages: luna_handoff.allocation_pages,
     };
 
     if !handoff.is_ready() {
