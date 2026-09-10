@@ -21,9 +21,6 @@ const EIO: i32 = 5;
 const ENOENT: i32 = 2;
 const MAX_ERRNO: isize = 4095;
 
-// The Linux Rust bindings intentionally keep `struct file` opaque. Raw void
-// pointers are the correct FFI representation here; the C side knows the real
-// type and Rust does not inspect the structure through these declarations.
 type KernelFile = c_void;
 
 unsafe extern "C" {
@@ -111,9 +108,6 @@ unsafe fn build_executable_object() -> Result<*mut KernelFile, i32> {
         return Err(-EINVAL);
     }
 
-    // Linux uses the private object's dentry name when constructing the task
-    // identity for an AT_EMPTY_PATH execution. Keep it canonical so the new
-    // PID 1 is observable as `luna-init` rather than a synthetic fd name.
     let name = b"luna-init\0";
     let file = shmem_kernel_file_setup(
         name.as_ptr().cast::<c_char>(),
@@ -137,6 +131,7 @@ unsafe fn build_executable_object() -> Result<*mut KernelFile, i32> {
 /// The ELF is never staged into a filesystem pathname. The kernel execution
 /// adapter consumes the anonymous memory-backed file and reuses Linux's normal
 /// binfmt/ELF process construction.
+#[unsafe(link_section = ".init.text")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     if !x86_luna_boot_available() {
@@ -167,8 +162,6 @@ pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     kernel::pr_info!("Luna: executing memory-resident luna-init as PID 1\n");
     let ret = kernel_execve_file(file, argv.as_ptr(), envp.as_ptr());
 
-    // The exec path acquired and released its own file reference. The Rust
-    // creation reference remains ours until the helper returns on failure.
     fput(file);
     kernel::pr_err!("Luna: direct luna-init execution failed: error {}\n", ret);
     ret
