@@ -11,15 +11,13 @@ TARBALL="${OUT}/linux-${VERSION}.tar.xz"
 URL="https://www.kernel.org/pub/linux/kernel/v7.x/linux-${VERSION}.tar.xz"
 CONFIG_FRAGMENT="${REPO_ROOT}/kernel/luna-x86_64.config"
 OVERLAY="${REPO_ROOT}/tools/apply-luna-kernel-overlay.sh"
-PROGRESS="${REPO_ROOT}/tools/build-progress.py"
+PROGRESS_BIN="${REPO_ROOT}/target/release/build-progress"
 LOG_DIR="${OUT}/logs"
 LOG_FILE="${LUNA_KERNEL_LOG:-${LOG_DIR}/kernel-${VERSION}-$(date +%Y%m%d-%H%M%S).log}"
 
-for tool in curl tar make python3; do
+for tool in curl tar make cargo; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
-
-[ -f "$PROGRESS" ] || { echo "missing build progress helper: $PROGRESS" >&2; exit 1; }
 
 LLVM_PREFIX=""
 if [ "$LLVM_MODE" = "1" ]; then
@@ -59,6 +57,22 @@ fi
 
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
 [ -f "$OVERLAY" ] || { echo "missing kernel overlay: $OVERLAY" >&2; exit 1; }
+
+ensure_progress_tool() {
+    local root_manifest="${REPO_ROOT}/Cargo.toml"
+    local tool_manifest="${REPO_ROOT}/tools/build-progress/Cargo.toml"
+    if [ ! -x "$PROGRESS_BIN" ] \
+        || [ "$tool_manifest" -nt "$PROGRESS_BIN" ] \
+        || [ "$root_manifest" -nt "$PROGRESS_BIN" ] \
+        || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
+        echo "Building Luna build-progress tool..."
+        cargo build --quiet --release -p luna-build-progress
+    fi
+    [ -x "$PROGRESS_BIN" ] || {
+        echo "missing build progress executable: $PROGRESS_BIN" >&2
+        exit 1
+    }
+}
 
 if command -v rustc >/dev/null; then
     RUST_SYSROOT="$(rustc --print sysroot)"
@@ -111,21 +125,18 @@ fi
 
 "${MAKE[@]}" rustavailable
 
-# Estimate the number of compiler/link/archive commands once. This is an
-# intentionally approximate total used only for the terminal ETA; the build
-# itself remains the normal Kbuild process.
 TOTAL="$(${MAKE[@]} -n bzImage modules 2>/dev/null | awk '
     /(^|[[:space:]])(clang|gcc|rustc|ld\.lld|ld|llvm-ar|ar|as|objcopy|objdump|strip)([[:space:]]|$)/ { count++ }
     END { print count + 0 }
 ')"
 
-PROGRESS_RE='^\s+(HOST)?(CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)'
+ensure_progress_tool
 
-python3 "$PROGRESS" \
+"$PROGRESS_BIN" \
     --label "Linux ${VERSION}" \
     --log "$LOG_FILE" \
     --total "$TOTAL" \
-    --action-regex "$PROGRESS_RE" \
+    --action 'kernel' \
     -- \
     "${MAKE[@]}" -j"$JOBS" bzImage modules
 
