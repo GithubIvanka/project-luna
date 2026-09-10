@@ -48,6 +48,7 @@ ensure_progress_tool
 "$PROGRESS_BIN" \
     --label "luna-boot" \
     --log "$LOG_FILE" \
+    --action "Finished" \
     -- \
     "${COMMAND[@]}"
 
