@@ -103,7 +103,7 @@ if ! "${MAKE[@]}" rustavailable; then
 fi
 
 "${MAKE[@]}" x86_64_defconfig
-KCONFIG_CONFIG="$SRC/build/.config" "$SRC/scripts/kconfig/merge_config.sh" -m -r "$SRC/build/.config" "$CONFIG_FRAGMENT"
+KCONFIG_CONFIG="$SRC/build/.config" "$SRC/scripts/kconfig/merge_config.sh" -m -Q "$SRC/build/.config" "$CONFIG_FRAGMENT"
 "${MAKE[@]}" olddefconfig
 
 if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
@@ -114,17 +114,11 @@ fi
 
 "${MAKE[@]}" rustavailable
 
-TOTAL="$(${MAKE[@]} -n bzImage modules 2>/dev/null | awk '
-    /(^|[[:space:]])(clang|gcc|rustc|ld\.lld|ld|llvm-ar|ar|as|objcopy|objdump|strip)([[:space:]]|$)/ { count++ }
-    END { print count + 0 }
-')"
-
 ensure_progress_tool
 
 "$PROGRESS_BIN" \
     --label "Linux ${VERSION}" \
     --log "$LOG_FILE" \
-    --total "$TOTAL" \
     -- "${MAKE[@]}" -j"$JOBS" bzImage modules
 
 KERNEL_RELEASE="$("${MAKE[@]}" -s kernelrelease)"
