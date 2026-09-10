@@ -120,7 +120,9 @@ impl BootParams {
                     }
                 }
                 segment_count = next_count;
-                for i in 0..segment_count { segments[i] = (next[i].0, next[i].1 & !(1u64 << 63)); }
+                for segment in segments.iter_mut().take(segment_count) {
+                    segment.1 &= !(1u64 << 63);
+                }
                 for i in 0..segment_count {
                     if segments[i].0 < segments[i].1 && segments[i].0 >= rstart && segments[i].1 <= rend && typ != 2 {
                         segments[i].1 |= 1u64 << 63;
