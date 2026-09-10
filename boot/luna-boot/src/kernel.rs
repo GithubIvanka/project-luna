@@ -14,6 +14,7 @@ use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;
 
 pub struct PreparedKernel {
+    #[allow(dead_code)]
     pub setup: LinuxSetupHeader,
     pub kernel_address: u64,
     pub kernel_entry: u64,
@@ -22,6 +23,7 @@ pub struct PreparedKernel {
     pub init_size: usize,
     pub init_digest: [u8; 32],
     pub boot_params_address: u64,
+    #[allow(dead_code)]
     pub command_line_address: u64,
     pub boot_params: BootParams,
     pub allocations: Vec<(u64, usize)>,
@@ -141,10 +143,15 @@ fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u6
     let pages = div_ceil(size + alignment as usize, PAGE_SIZE);
     if preferred != 0 {
         let aligned = (preferred + alignment - 1) & !(alignment - 1);
-        if aligned < 0x1_0000_0000 && aligned + size as u64 <= 0x1_0000_0000 {
-            if let Ok(ptr) = boot::allocate_pages(AllocateType::Address(aligned), MemoryType::LOADER_DATA, pages) {
-                return Ok(ptr.as_ptr() as u64 + (aligned - ptr.as_ptr() as u64));
-            }
+        if aligned < 0x1_0000_0000
+            && aligned + size as u64 <= 0x1_0000_0000
+            && let Ok(ptr) = boot::allocate_pages(
+                AllocateType::Address(aligned),
+                MemoryType::LOADER_DATA,
+                pages,
+            )
+        {
+            return Ok(ptr.as_ptr() as u64 + (aligned - ptr.as_ptr() as u64));
         }
     }
     let ptr = boot::allocate_pages(AllocateType::MaxAddress(0xffff_ffff), MemoryType::LOADER_DATA, pages)
@@ -175,4 +182,4 @@ fn allocate_low_cmdline_page() -> BootResult<u64> {
     Ok(address)
 }
 
-const fn div_ceil(value: usize, divisor: usize) -> usize { (value + divisor - 1) / divisor }
+fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
