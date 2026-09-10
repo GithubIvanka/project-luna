@@ -32,12 +32,11 @@ pub fn find_data_partition<D: BlockDevice>(device: &mut D) -> BootResult<Partiti
 
 fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootResult<Partition> {
     let bs = device.block_size();
-    if bs < 512 || bs > 4096 || bs % 512 != 0 {
+    if !(512..=4096).contains(&bs) || !bs.is_multiple_of(512) {
         return Err(BootError::Unsupported("unsupported GPT block size"));
     }
 
-    let mut header = Vec::new();
-    header.resize(bs as usize, 0);
+    let mut header = vec![0; bs as usize];
     device.read_at(GPT_HEADER_LBA * bs, &mut header)?;
     if &header[..8] != GPT_SIGNATURE {
         return Err(BootError::InvalidFilesystem);
@@ -57,8 +56,7 @@ fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootRes
     let mut index = 0u32;
     while index < entry_count {
         let count = (entry_count - index).min(entries_per_read as u32);
-        let mut raw = Vec::new();
-        raw.resize(count as usize * entry_size as usize, 0);
+        let mut raw = vec![0; count as usize * entry_size as usize];
         device.read_at(entries_lba * bs + index as u64 * entry_size as u64, &mut raw)?;
 
         for n in 0..count as usize {
