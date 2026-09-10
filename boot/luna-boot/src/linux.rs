@@ -26,6 +26,7 @@ const MIN_HEADER: usize = 0x268;
 const HDRS: u32 = 0x5372_6448;
 const PROTOCOL_64BIT_MIN: u16 = 0x020c;
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct LinuxSetupHeader {
     pub setup_sects: u8,
@@ -145,6 +146,7 @@ impl LinuxSetupHeader {
         0x200
     }
 
+    #[allow(dead_code)]
     pub const fn supports_above_4g(&self) -> bool {
         self.xloadflags & (1 << 1) != 0
     }
