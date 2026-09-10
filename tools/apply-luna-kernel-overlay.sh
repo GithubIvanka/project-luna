@@ -12,6 +12,7 @@ MAKEFILE="${SRC}/arch/x86/kernel/Makefile"
 SETUP_C="${SRC}/arch/x86/kernel/setup.c"
 INIT_C="${SRC}/init/main.c"
 EXEC_C="${SRC}/fs/exec.c"
+BINFMT_H="${SRC}/include/linux/binfmts.h"
 
 [ -f "$RUST_SRC" ] || { echo "missing Luna Rust source: $RUST_SRC" >&2; exit 1; }
 [ -f "$EXEC_SRC" ] || { echo "missing Luna Rust launcher: $EXEC_SRC" >&2; exit 1; }
@@ -19,6 +20,7 @@ EXEC_C="${SRC}/fs/exec.c"
 [ -f "$SETUP_C" ] || { echo "missing Linux x86 setup.c: $SETUP_C" >&2; exit 1; }
 [ -f "$INIT_C" ] || { echo "missing Linux init/main.c: $INIT_C" >&2; exit 1; }
 [ -f "$EXEC_C" ] || { echo "missing Linux fs/exec.c: $EXEC_C" >&2; exit 1; }
+[ -f "$BINFMT_H" ] || { echo "missing Linux include/linux/binfmts.h: $BINFMT_H" >&2; exit 1; }
 
 for pair in "$RUST_SRC:$RUST_DST" "$EXEC_SRC:$EXEC_DST"; do
     SRC_FILE="${pair%%:*}"
@@ -33,7 +35,7 @@ for pair in "$RUST_SRC:$RUST_DST" "$EXEC_SRC:$EXEC_DST"; do
     fi
 done
 
-python3 - "$MAKEFILE" "$SETUP_C" "$INIT_C" "$EXEC_C" <<'PY'
+python3 - "$MAKEFILE" "$SETUP_C" "$INIT_C" "$EXEC_C" "$BINFMT_H" <<'PY'
 from pathlib import Path
 import sys
 
@@ -41,6 +43,7 @@ makefile = Path(sys.argv[1])
 setup = Path(sys.argv[2])
 init = Path(sys.argv[3])
 exec_c = Path(sys.argv[4])
+binfmt_h = Path(sys.argv[5])
 
 text = makefile.read_text()
 for line in (
@@ -91,6 +94,17 @@ if "int kernel_execve_file(struct file *file," not in text:
     bridge = '''\n/*\n * Luna-only kernel-internal adapter. The caller supplies an already-created\n * memory-backed executable object; this helper only feeds it through the\n * existing kernel exec path so Linux keeps ownership of ELF loading, VM\n * construction, credentials and process setup. The object is never opened by\n * pathname.\n */\nint kernel_execve_file(struct file *file,\n\t\t\t       const char *const *argv,\n\t\t\t       const char *const *envp)\n{\n\tint fd, retval;\n\n\tif (!file)\n\t\treturn -EINVAL;\n\n\t/* The anonymous shmem object is kernel-created and trusted by Luna.\n\t * Give the VFS execute permission required by do_open_execat(). */\n\tinode_lock(file_inode(file));\n\tfile_inode(file)->i_mode = (file_inode(file)->i_mode & S_IFMT) | 0700;\n\tinode_unlock(file_inode(file));\n\n\tfd = get_unused_fd_flags(O_CLOEXEC);\n\tif (fd < 0)\n\t\treturn fd;\n\n\tget_file(file);\n\tfd_install(fd, file);\n\n\t{\n\t\tCLASS(filename_kernel, filename)("");\n\t\tCLASS(bprm, bprm)(fd, filename, AT_EMPTY_PATH);\n\t\n\t\tif (IS_ERR(bprm)) {\n\t\t\tretval = PTR_ERR(bprm);\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = count_strings_kernel(argv);\n\t\tif (WARN_ON_ONCE(retval == 0)) {\n\t\t\tclose_fd(fd);\n\t\t\treturn -EINVAL;\n\t\t}\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->argc = retval;\n\n\t\tretval = count_strings_kernel(envp);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->envc = retval;\n\n\t\tretval = bprm_stack_limits(bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = copy_string_kernel(bprm->filename, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->exec = bprm->p;\n\n\t\tretval = copy_strings_kernel(bprm->envc, envp, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = copy_strings_kernel(bprm->argc, argv, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = bprm_execve(bprm);\n\t}\n\n\tclose_fd(fd);\n\treturn retval;\n}\nEXPORT_SYMBOL_GPL(kernel_execve_file);\n\n'''
     text = text.replace(marker, bridge + marker, 1)
     exec_c.write_text(text)
+
+# The Rust launcher calls this Luna kernel-internal adapter. Keep its public
+# prototype in the normal exec header so the kernel's -Wmissing-prototypes
+# check sees the declaration in fs/exec.c.
+text = binfmt_h.read_text()
+prototype = '''\n/* Project Luna: execute a kernel-created memory-backed file. */\nint kernel_execve_file(struct file *file,\n\t\t\t       const char *const *argv,\n\t\t\t       const char *const *envp);\n'''
+if "int kernel_execve_file(struct file *file," not in text:
+    if not text.endswith("\n"):
+        text += "\n"
+    text += prototype
+    binfmt_h.write_text(text)
 PY
 
 echo "Applied Luna kernel overlay to: $SRC"
