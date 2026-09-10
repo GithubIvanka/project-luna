@@ -212,36 +212,19 @@ fn render_progress(label: &str, completed: u64, total: Option<u64>, elapsed: Dur
     print!("\r\x1b[2K{} [{}]{}", label, bar, suffix); let _ = io::stdout().flush();
 }
 
-fn refresh_progress_at_top(label: &str, completed: u64, total: Option<u64>, elapsed: Duration, recent_steps: &VecDeque<Instant>, lines_below: usize) {
-    print!("\x1b[s");
-    if lines_below > 0 {
-        print!("\x1b[{}A", lines_below);
-    }
-    render_progress(label, completed, total, elapsed, recent_steps);
-    print!("\x1b[u");
-    let _ = io::stdout().flush();
-}
-
-fn print_problem(problem: &Diagnostic) -> usize {
-    let mut lines = 1;
+fn print_problem(problem: &Diagnostic) {
     println!("\x1b[{}m[BUILD {}]\x1b[0m {}", problem.severity.color(), problem.severity.label(), problem.message);
     match &problem.location { Some(location) => println!("  Где: {}", location), None => println!("  Где: компилятор не указал место") }
-    lines += 1;
     if !problem.context.is_empty() {
         println!("  Контекст:");
-        lines += 1;
-        for context in &problem.context {
-            println!("    | {}", context.trim_end());
-            lines += 1;
-        }
+        for context in &problem.context { println!("    | {}", context.trim_end()); }
     }
-    lines
 }
 
-fn flush_problem(active: &mut Option<Diagnostic>, problems: &mut Vec<Diagnostic>, lines_below: &mut usize) {
+fn flush_problem(active: &mut Option<Diagnostic>, problems: &mut Vec<Diagnostic>) {
     let Some(problem) = active.take() else { return };
     if problems.len() < MAX_PROBLEMS {
-        *lines_below += print_problem(&problem);
+        print_problem(&problem);
         problems.push(problem);
     }
 }
@@ -298,31 +281,39 @@ fn run(config: Config) -> io::Result<i32> {
     let mut recent_steps = VecDeque::with_capacity(RATE_WINDOW);
     let mut problems = Vec::new();
     let mut active_problem = None;
-    let mut lines_below = 1usize;
+    let mut diagnostics_started = false;
 
     render_progress(&config.label, completed, config.total, Duration::ZERO, &recent_steps);
-    println!();
     for line in rx {
         writeln!(log, "{}", line)?;
         if let Some(diagnostic) = Diagnostic::from_start(&line) {
-            flush_problem(&mut active_problem, &mut problems, &mut lines_below);
+            if !diagnostics_started {
+                println!();
+                diagnostics_started = true;
+            }
+            flush_problem(&mut active_problem, &mut problems);
             active_problem = Some(diagnostic);
         } else if active_problem.is_some() && is_diagnostic_context(&line) {
             if let Some(problem) = active_problem.as_mut() { problem.add_line(&line); }
         } else if matches_action(&line, &config.action_patterns) {
-            flush_problem(&mut active_problem, &mut problems, &mut lines_below);
+            flush_problem(&mut active_problem, &mut problems);
             completed += 1;
             let now = Instant::now(); recent_steps.push_back(now);
             while recent_steps.len() > RATE_WINDOW { recent_steps.pop_front(); }
+            if !diagnostics_started {
+                render_progress(&config.label, completed, config.total, start.elapsed(), &recent_steps);
+            }
         } else if active_problem.is_some() {
-            flush_problem(&mut active_problem, &mut problems, &mut lines_below);
+            flush_problem(&mut active_problem, &mut problems);
         }
-        refresh_progress_at_top(&config.label, completed, config.total, start.elapsed(), &recent_steps, lines_below);
     }
-    flush_problem(&mut active_problem, &mut problems, &mut lines_below);
+    flush_problem(&mut active_problem, &mut problems);
     let status = child.wait()?;
     let elapsed = start.elapsed();
-    refresh_progress_at_top(&config.label, completed, config.total, elapsed, &recent_steps, lines_below);
+    if !diagnostics_started {
+        render_progress(&config.label, completed, config.total, elapsed, &recent_steps);
+        println!();
+    }
     print_final(&config.label, &status, completed, elapsed, &config.log, &problems);
     Ok(status.code().unwrap_or(1))
 }
