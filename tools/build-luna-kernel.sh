@@ -136,7 +136,6 @@ ensure_progress_tool
     --label "Linux ${VERSION}" \
     --log "$LOG_FILE" \
     --total "$TOTAL" \
-    --action 'kernel' \
     -- \
     "${MAKE[@]}" -j"$JOBS" bzImage modules
 
