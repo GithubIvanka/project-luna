@@ -56,6 +56,7 @@ ensure_progress_tool
 "$PROGRESS_BIN" \
     --label "Cargo ${component}" \
     --log "$LOG_FILE" \
+    --action "Finished" \
     -- \
     "${COMMAND[@]}"
 
