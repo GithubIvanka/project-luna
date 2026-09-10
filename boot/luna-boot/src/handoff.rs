@@ -278,7 +278,3 @@ impl KernelHandoff {
         unsafe { luna_linux_entry(self.kernel_entry, self.boot_params_address, self.page_table) }
     }
 }
-
-pub fn validate(handoff: &KernelHandoff) -> BootResult<()> {
-    if handoff.is_ready() { Ok(()) } else { Err(BootError::InvalidKernel) }
-}
