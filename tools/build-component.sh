@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROGRESS="${REPO_ROOT}/tools/build-progress.py"
+LOG_DIR="${REPO_ROOT}/dist/logs"
 
 component="${1:-}"
 if [ -z "$component" ]; then
@@ -12,6 +14,7 @@ fi
 shift
 
 command -v cargo >/dev/null 2>&1 || { echo "Ошибка: не найден cargo." >&2; exit 1; }
+[ -f "$PROGRESS" ] || { echo "Ошибка: не найден build progress helper: $PROGRESS" >&2; exit 1; }
 
 case "$component" in
     luna-boot)
@@ -23,11 +26,21 @@ case "$component" in
 esac
 
 cd "$REPO_ROOT"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LUNA_COMPONENT_LOG:-${LOG_DIR}/${component}-$(date +%Y%m%d-%H%M%S).log}"
+
 echo "Сборка workspace crate: $component"
+
 if [ "$#" -eq 0 ]; then
-    cargo build -p "$component"
+    COMMAND=(cargo build -p "$component")
 else
-    cargo build -p "$component" "$@"
+    COMMAND=(cargo build -p "$component" "$@")
 fi
+
+python3 "$PROGRESS" \
+    --label "Cargo ${component}" \
+    --log "$LOG_FILE" \
+    --action-regex '^\s*Compiling\s+' \
+    -- "${COMMAND[@]}"
 
 echo "Готово: crate $component"
