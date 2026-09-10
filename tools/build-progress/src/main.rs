@@ -91,7 +91,6 @@ impl Diagnostic {
     fn add_line(&mut self, line: &str) {
         if let Some(location) = parse_rust_location(line) {
             self.location = Some(location);
-            return;
         }
 
         if self.context.len() < MAX_CONTEXT_LINES && is_diagnostic_context(line) {
@@ -222,28 +221,29 @@ fn is_problem(line: &str, action_patterns: &[String]) -> bool {
     if matches_action(line, action_patterns) {
         return false;
     }
-    let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("error:")
-        || lower.starts_with("error[")
-        || lower.starts_with("warning:")
-        || lower.starts_with("warning[")
-        || lower.starts_with("fatal:")
-        || lower.starts_with("fatal ")
-        || lower.starts_with("collect2:")
-        || lower.starts_with("ld.lld:")
-        || lower.starts_with("clang:")
-        || lower.starts_with("gcc:")
-        || lower.starts_with("cc1:")
-        || lower.starts_with("rustc:")
-        || lower.starts_with("make: ***")
-        || (lower.contains("make[") && lower.contains(": ***"))
-        || lower.starts_with("ninja: build stopped")
-        || lower.starts_with("undefined reference")
-        || lower.contains("section mismatch")
-        || lower.contains("undefined symbol")
-        || lower.contains("relocation truncated")
-        || lower.contains(": error:")
-        || lower.contains(": warning:")
+
+    Diagnostic::from_start(line).is_some()
+        || line
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("fatal:")
+        || line.trim_start().to_ascii_lowercase().starts_with("fatal ")
+        || line.trim_start().to_ascii_lowercase().starts_with("collect2:")
+        || line.trim_start().to_ascii_lowercase().starts_with("ld.lld:")
+        || line.trim_start().to_ascii_lowercase().starts_with("clang:")
+        || line.trim_start().to_ascii_lowercase().starts_with("gcc:")
+        || line.trim_start().to_ascii_lowercase().starts_with("cc1:")
+        || line.trim_start().to_ascii_lowercase().starts_with("rustc:")
+        || line.trim_start().to_ascii_lowercase().starts_with("make: ***")
+        || (line.trim_start().to_ascii_lowercase().contains("make[")
+            && line.trim_start().to_ascii_lowercase().contains(": ***"))
+        || line.trim_start().to_ascii_lowercase().starts_with("ninja: build stopped")
+        || line.trim_start().to_ascii_lowercase().starts_with("undefined reference")
+        || line.trim_start().to_ascii_lowercase().contains("section mismatch")
+        || line.trim_start().to_ascii_lowercase().contains("undefined symbol")
+        || line.trim_start().to_ascii_lowercase().contains("relocation truncated")
+        || line.trim_start().to_ascii_lowercase().contains(": error:")
+        || line.trim_start().to_ascii_lowercase().contains(": warning:")
 }
 
 fn timestamp() -> String {
@@ -341,7 +341,7 @@ fn print_problem(problem: &Diagnostic) {
     }
     println!("  Сообщение компилятора: {}", problem.message);
     for context in &problem.context {
-        println!("  | {}", context.trim());
+        println!("  | {}", context.trim_end());
     }
 }
 
@@ -444,9 +444,17 @@ fn run(config: Config) -> io::Result<i32> {
     for line in rx {
         writeln!(log, "{}", line)?;
 
-        if let Some(diagnostic) = Diagnostic::from_start(&line) {
+        if is_problem(&line, &config.action_patterns) {
             flush_problem(&mut active_problem, &mut problems);
-            active_problem = Some(diagnostic);
+            active_problem = Diagnostic::from_start(&line);
+            if active_problem.is_none() {
+                active_problem = Some(Diagnostic {
+                    severity: Severity::Error,
+                    message: line.trim().to_string(),
+                    location: None,
+                    context: Vec::new(),
+                });
+            }
         } else if active_problem.is_some() && is_diagnostic_context(&line) {
             if let Some(problem) = active_problem.as_mut() {
                 problem.add_line(&line);
