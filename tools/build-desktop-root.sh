@@ -69,7 +69,7 @@ if ! command -v zig >/dev/null 2>&1 || ! zig version | grep -qx "$GHOSTTY_ZIG_VE
     export PATH="$SRC/zig-linux-x86_64-$GHOSTTY_ZIG_VERSION:$PATH"
 fi
 
-for tool in cargo meson ninja zig cmake pkg-config ldd python3; do
+for tool in cargo meson ninja zig cmake pkg-config ldd; do
     command -v "$tool" >/dev/null || { echo "missing required build tool: $tool" >&2; exit 1; }
 done
 
@@ -102,13 +102,7 @@ export PKG_CONFIG_PATH="$OUT/usr/lib/pkgconfig:$OUT/usr/share/pkgconfig:$OUT/usr
     DESTDIR="$OUT" meson install -C build-luna
 )
 
-python3 - "$SRC/noctalia-greeter/meson.build" <<'PY'
-from pathlib import Path
-p = Path(__import__('sys').argv[1])
-s = p.read_text()
-s = s.replace("    '-march=native', '-mtune=native',\n", "")
-p.write_text(s)
-PY
+bash "$REPO_ROOT/tools/patch-noctalia-greeter.sh" "$SRC/noctalia-greeter/meson.build"
 
 (
     cd "$SRC/niri"
