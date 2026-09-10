@@ -20,6 +20,14 @@ const RECORD_ALIGN: usize = 8;
 const SETUP_DATA_TYPE: u32 = 0x4c55_4e41;
 const MAX_HANDOFF_SIZE: usize = 64 * 1024;
 
+pub const RECORD_SYSTEM_PARTITION: u16 = 1;
+pub const RECORD_DATA_PARTITION: u16 = 2;
+pub const RECORD_SYSTEM_IMAGE: u16 = 3;
+pub const RECORD_KERNEL_IDENTITY: u16 = 4;
+pub const RECORD_LUNA_INIT_IMAGE: u16 = 5;
+pub const RECORD_BOOT_MODE: u16 = 6;
+pub const RECORD_BOOT_STATE: u16 = 7;
+
 #[derive(Clone, Copy)]
 pub enum BootMode { Normal = 0, Detailed = 1, Recovery = 2, Factory = 3, #[allow(dead_code)] External = 4 }
 
