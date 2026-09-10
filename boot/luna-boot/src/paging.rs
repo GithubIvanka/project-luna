@@ -24,7 +24,7 @@ pub fn prepare_identity_map() -> BootResult<u64> {
 
     let pml4 = base as *mut u64;
     let pdpt = (base + PAGE_SIZE as u64) as *mut u64;
-    unsafe { pml4.add(0).write(base + PAGE_SIZE as u64 | 0x3); }
+    unsafe { pml4.add(0).write((base + PAGE_SIZE as u64) | 0x3); }
 
     for pd_index in 0..PD_COUNT {
         let pd = base + (2 + pd_index) as u64 * PAGE_SIZE as u64;
