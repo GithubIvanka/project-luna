@@ -81,7 +81,9 @@ impl<D: BlockDevice> Ext4<D> {
         if inode_size < 128 || inode_size as u32 > block_size || !inode_size.is_power_of_two() { return Err(BootError::InvalidFilesystem); }
         if descriptor_size < 32 || descriptor_size as u32 > block_size { return Err(BootError::InvalidFilesystem); }
         let blocks = blocks_lo as u64;
-        let groups = (blocks.saturating_sub(first_data_block as u64) + blocks_per_group as u64 - 1) / blocks_per_group as u64;
+        let groups = blocks
+            .saturating_sub(first_data_block as u64)
+            .div_ceil(blocks_per_group as u64);
         Ok(Self {
             device,
             geometry: Ext4Geometry { block_size, inode_size, inodes_per_group, inode_count, descriptor_size, groups: groups.min(u32::MAX as u64) as u32 },
