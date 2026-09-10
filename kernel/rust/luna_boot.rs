@@ -214,9 +214,6 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
     HANDOFF_VALID = true;
     INIT_VALID = true;
 
-    // Copy the mutable statics into locals before passing them to the
-    // formatting machinery. Rust 2024 forbids implicit shared references to
-    // `static mut` values even when the read itself is intentional.
     let init_phys = INIT_PHYS;
     let init_size = INIT_SIZE;
     kernel::pr_info!(
@@ -230,6 +227,7 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
 }
 
 /// Parse the Luna `setup_data` node chain supplied by the Linux x86 boot protocol.
+#[unsafe(link_section = ".init.text")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
     clear_state();
