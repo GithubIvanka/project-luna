@@ -244,10 +244,9 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let staging = match PendingStagingRoot::create(context.staging_parent(), id) {
             Ok(staging) => staging,
             Err(error) => {
-                self.model.instance_mut(id)?.record_failure(
-                    FailureStage::Starting,
-                    error.to_string(),
-                )?;
+                self.model
+                    .instance_mut(id)?
+                    .record_failure(FailureStage::Starting, error.to_string())?;
                 return Err(error);
             }
         };
@@ -282,10 +281,9 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let process = match process {
             Ok(process) => process,
             Err(error) => {
-                self.model.instance_mut(id)?.record_failure(
-                    FailureStage::Starting,
-                    error.to_string(),
-                )?;
+                self.model
+                    .instance_mut(id)?
+                    .record_failure(FailureStage::Starting, error.to_string())?;
                 return Err(error.into());
             }
         };
@@ -293,10 +291,9 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let attach_result = self.model.instance_mut(id)?.attach_process(process);
         if let Err(error) = attach_result {
             let _ = runtime.terminate_supervised_process(process);
-            self.model.instance_mut(id)?.record_failure(
-                FailureStage::Starting,
-                error.to_string(),
-            )?;
+            self.model
+                .instance_mut(id)?
+                .record_failure(FailureStage::Starting, error.to_string())?;
             return Err(error);
         }
 
@@ -306,10 +303,9 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             .transition(InstanceState::Running);
         if let Err(error) = transition_result {
             let _ = runtime.terminate_supervised_process(process);
-            self.model.instance_mut(id)?.record_failure(
-                FailureStage::Starting,
-                error.to_string(),
-            )?;
+            self.model
+                .instance_mut(id)?
+                .record_failure(FailureStage::Starting, error.to_string())?;
             return Err(error);
         }
 

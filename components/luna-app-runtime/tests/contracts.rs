@@ -1,15 +1,10 @@
 use luna_app_runtime::{
-    ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime,
-    ExecutableSpec,
+    ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime, ExecutableSpec,
 };
-use luna_bundle::{
-    BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
-};
+use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess};
 use luna_common::{BundleId, RuntimeSpec, UserId, Version};
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
-use luna_security::{
-    AuthorizationRequest, Decision, PolicyAuthority, SecurityError,
-};
+use luna_security::{AuthorizationRequest, Decision, PolicyAuthority, SecurityError};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
 struct AllowAll;
@@ -80,8 +75,7 @@ fn plan(session: &UserSession) -> ApplicationPlan {
     );
     let mut manifest = BundleManifest::new(metadata);
     manifest.add_resource(
-        BundleResource::new("/bin/app", "resources/bin/app")
-            .with_access([ResourceAccess::Execute]),
+        BundleResource::new("/bin/app", "resources/bin/app").with_access([ResourceAccess::Execute]),
     );
 
     let logical = LogicalPath::new("/bin/app").expect("logical path");
@@ -135,7 +129,10 @@ fn authorization_denial_never_reaches_process_launch_boundary() {
         resource: luna_security::Resource::Runtime(luna_common::RuntimeKind::Luna),
         permission: luna_security::Permission::Use,
     };
-    assert_eq!(runtime.authorize(&AllowAll, &request).unwrap(), Decision::Allow);
+    assert_eq!(
+        runtime.authorize(&AllowAll, &request).unwrap(),
+        Decision::Allow
+    );
 }
 
 #[test]
