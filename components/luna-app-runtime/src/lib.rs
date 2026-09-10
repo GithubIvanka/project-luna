@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 
 use luna_bundle::{BundleManifest, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
@@ -266,6 +266,13 @@ impl ApplicationInstance {
         &mut self,
         status: ExitStatus,
     ) -> Result<(), RuntimeError> {
+        match self.process {
+            None => return Err(RuntimeError::NoProcess),
+            Some(process) if process.exit.is_some() => {
+                return Err(RuntimeError::ProcessAlreadyExited);
+            }
+            Some(_) => {}
+        }
         let outcome = ProcessExit::from_status(&status);
         let next = if status.success() {
             InstanceState::Stopped
@@ -273,23 +280,23 @@ impl ApplicationInstance {
             InstanceState::Crashed
         };
         self.transition(next)?;
-        let process = self.process.as_mut().ok_or(RuntimeError::NoProcess)?;
-        if process.exit.is_some() {
-            return Err(RuntimeError::ProcessAlreadyExited);
-        }
-        process.exit = Some(outcome);
+        self.process.as_mut().expect("process checked above").exit = Some(outcome);
         Ok(())
     }
     pub(crate) fn record_requested_stop(
         &mut self,
         status: ExitStatus,
     ) -> Result<(), RuntimeError> {
-        self.transition(InstanceState::Stopped)?;
-        let process = self.process.as_mut().ok_or(RuntimeError::NoProcess)?;
-        if process.exit.is_some() {
-            return Err(RuntimeError::ProcessAlreadyExited);
+        match self.process {
+            None => return Err(RuntimeError::NoProcess),
+            Some(process) if process.exit.is_some() => {
+                return Err(RuntimeError::ProcessAlreadyExited);
+            }
+            Some(_) => {}
         }
-        process.exit = Some(ProcessExit::from_status(&status));
+        self.transition(InstanceState::Stopped)?;
+        self.process.as_mut().expect("process checked above").exit =
+            Some(ProcessExit::from_status(&status));
         Ok(())
     }
 }
@@ -434,7 +441,7 @@ impl InMemoryApplicationRuntime {
         mapping.materialize().map_err(RuntimeError::Mapping)?;
         Ok(())
     }
-    fn validate_session(
+    pub(crate) fn validate_session(
         expected: SessionId,
         session: &UserSession,
     ) -> Result<(), RuntimeError> {
@@ -723,6 +730,18 @@ mod lifecycle_tests {
             .unwrap();
         assert_eq!(instance.state(), InstanceState::Failed);
         assert_eq!(instance.failure().unwrap().stage(), FailureStage::Starting);
+    }
+
+    #[test]
+    fn stopping_can_fail() {
+        let mut instance = instance();
+        instance.transition(InstanceState::Starting).unwrap();
+        instance.transition(InstanceState::Running).unwrap();
+        instance.transition(InstanceState::Stopping).unwrap();
+        instance
+            .record_failure(FailureStage::Stopping, "termination failed")
+            .unwrap();
+        assert_eq!(instance.state(), InstanceState::Failed);
     }
 
     #[test]
