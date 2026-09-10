@@ -123,7 +123,7 @@ pub fn boot_flow() -> BootResult<()> {
             Err(error) => return Err(error),
         }
     }
-    let (mut target, prepared) = match (target, prepared) {
+    let (mut target, mut prepared) = match (target, prepared) {
         (Some(target), Some(prepared)) => (target, prepared),
         _ => return Err(BootError::TargetNotFound),
     };
