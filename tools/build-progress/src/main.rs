@@ -90,8 +90,19 @@ fn simple_pattern_match(pattern: &str, line: &str) -> bool {
         p if p.contains("HOST)?") && p.contains("ZOFFSET") => {
             let trimmed = line.trim_start();
             [
-                "CC ", "CXX ", "RUSTC ", "AR ", "LD ", "AS ", "OBJCOPY ",
-                "OBJDUMP ", "STRIP ", "GEN ", "BUILD ", "BINDGEN ", "MODPOST ",
+                "CC ",
+                "CXX ",
+                "RUSTC ",
+                "AR ",
+                "LD ",
+                "AS ",
+                "OBJCOPY ",
+                "OBJDUMP ",
+                "STRIP ",
+                "GEN ",
+                "BUILD ",
+                "BINDGEN ",
+                "MODPOST ",
                 "ZOFFSET ",
             ]
             .iter()
@@ -112,23 +123,35 @@ fn simple_pattern_match(pattern: &str, line: &str) -> bool {
     }
 }
 
-fn is_problem(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    [
-        " error:",
-        " error ",
-        "warning:",
-        " fatal",
-        "undefined reference",
-        "section mismatch",
-        "panic",
-        "failed",
-        "failure",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-        || lower.trim_start().starts_with("error:")
-        || lower.trim_start().starts_with("warning:")
+fn is_problem(line: &str, action_patterns: &[String]) -> bool {
+    if matches_action(line, action_patterns) {
+        return false;
+    }
+
+    let lower = line.trim_start().to_ascii_lowercase();
+
+    // Match explicit diagnostics rather than generic words such as "panic"
+    // or "failed", which commonly occur in legitimate build target names.
+    lower.starts_with("error:")
+        || lower.starts_with("error[")
+        || lower.starts_with("warning:")
+        || lower.starts_with("fatal:")
+        || lower.starts_with("fatal ")
+        || lower.starts_with("collect2:")
+        || lower.starts_with("ld.lld:")
+        || lower.starts_with("clang:")
+        || lower.starts_with("gcc:")
+        || lower.starts_with("cc1:")
+        || lower.starts_with("rustc:")
+        || lower.starts_with("make: ***")
+        || (lower.contains("make[") && lower.contains(": ***"))
+        || lower.starts_with("ninja: build stopped")
+        || lower.starts_with("undefined reference")
+        || lower.contains("section mismatch")
+        || lower.contains("undefined symbol")
+        || lower.contains("relocation truncated")
+        || lower.contains(": error:")
+        || lower.contains(": warning:")
 }
 
 fn timestamp() -> String {
@@ -230,7 +253,11 @@ fn render_progress(
             } else {
                 (completed as usize) % (bar_width * 2).max(1)
             };
-            let pos = if pos >= bar_width { bar_width * 2 - pos - 1 } else { pos };
+            let pos = if pos >= bar_width {
+                bar_width * 2 - pos - 1
+            } else {
+                pos
+            };
             let mut chars = vec!['░'; bar_width];
             if bar_width > 0 {
                 chars[pos.min(bar_width - 1)] = '█';
@@ -364,7 +391,7 @@ fn run(config: Config) -> io::Result<i32> {
             }
         }
 
-        if is_problem(&line) && problems.len() < MAX_PROBLEMS {
+        if is_problem(&line, &config.action_patterns) && problems.len() < MAX_PROBLEMS {
             let problem = Problem { line: line.clone() };
             print_problem(&line);
             problems.push(problem);
@@ -398,4 +425,35 @@ fn main() -> io::Result<()> {
     let config = parse_args();
     let code = run(config)?;
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn patterns() -> Vec<String> {
+        vec![
+            "^\\s+(?:HOST)?(?:CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)".into(),
+        ]
+    }
+
+    #[test]
+    fn build_target_name_is_not_a_problem() {
+        assert!(!is_problem("  CC      kernel/panic.o", &patterns()));
+        assert!(!is_problem("  CC      drivers/gpu/drm/i915/i915_panic.o", &patterns()));
+    }
+
+    #[test]
+    fn real_diagnostics_are_problems() {
+        assert!(is_problem("kernel/foo.c:42:7: error: expected ';'", &patterns()));
+        assert!(is_problem("warning: unused variable: x", &patterns()));
+        assert!(is_problem("make[1]: *** [Makefile:123: target] Error 2", &patterns()));
+        assert!(is_problem("ld.lld: error: undefined symbol: foo", &patterns()));
+    }
+
+    #[test]
+    fn generic_failed_and_panic_words_are_not_problems() {
+        assert!(!is_problem("target test failed previously", &patterns()));
+        assert!(!is_problem("kernel/panic.c contains panic handling", &patterns()));
+    }
 }
