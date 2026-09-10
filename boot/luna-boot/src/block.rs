@@ -97,7 +97,7 @@ impl UefiBlockDevice {
         let io = open_shared::<BlockIO>(handle)?;
         let media = io.media();
         let block_size = media.block_size() as u64;
-        if block_size == 0 || IO_CHUNK as u64 % block_size != 0 {
+        if block_size == 0 || !(IO_CHUNK as u64).is_multiple_of(block_size) {
             return Err(BootError::Unsupported("UEFI block size is not supported by the loader I/O buffer"));
         }
         Ok(Self { io, start_lba, block_size })
@@ -126,11 +126,10 @@ impl BlockDevice for UefiBlockDevice {
         let in_block = (absolute % self.block_size) as usize;
 
         let total = in_block + dst.len();
-        let blocks = (total + self.block_size as usize - 1) / self.block_size as usize;
+        let blocks = total.div_ceil(self.block_size as usize);
         let bytes = blocks * self.block_size as usize;
 
-        let mut temp = Vec::new();
-        temp.resize(bytes, 0);
+        let mut temp = vec![0; bytes];
         let mut copied = 0usize;
         let mut remaining = bytes;
         let mut lba = first_lba;
