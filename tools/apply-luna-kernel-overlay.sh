@@ -35,76 +35,194 @@ for pair in "$RUST_SRC:$RUST_DST" "$EXEC_SRC:$EXEC_DST"; do
     fi
 done
 
-python3 - "$MAKEFILE" "$SETUP_C" "$INIT_C" "$EXEC_C" "$BINFMT_H" <<'PY'
-from pathlib import Path
-import sys
+if ! grep -Fq 'obj-$(CONFIG_RUST) += luna_boot.o' "$MAKEFILE"; then
+    printf '%s\n' 'obj-$(CONFIG_RUST) += luna_boot.o' >> "$MAKEFILE"
+fi
+if ! grep -Fq 'obj-$(CONFIG_RUST) += luna_exec.o' "$MAKEFILE"; then
+    printf '%s\n' 'obj-$(CONFIG_RUST) += luna_exec.o' >> "$MAKEFILE"
+fi
 
-makefile = Path(sys.argv[1])
-setup = Path(sys.argv[2])
-init = Path(sys.argv[3])
-exec_c = Path(sys.argv[4])
-binfmt_h = Path(sys.argv[5])
+if ! grep -Fq 'x86_luna_boot_parse(boot_params.hdr.setup_data);' "$SETUP_C"; then
+    setup_snippet="$(mktemp)"
+    trap 'rm -f "$setup_snippet" "$init_include_snippet" "$init_call_snippet" "$exec_bridge" 2>/dev/null || true' EXIT
+    cat > "$setup_snippet" <<'EOF'
+#ifdef CONFIG_RUST
+extern void x86_luna_boot_parse(u64 setup_data_phys);
+x86_luna_boot_parse(boot_params.hdr.setup_data);
+#else
+#error "Project Luna requires CONFIG_RUST"
+#endif
+EOF
+    awk -v snippet="$setup_snippet" '
+        /^[[:space:]]*parse_setup_data\(\);[[:space:]]*$/ {
+            while ((getline line < snippet) > 0) print line
+            close(snippet)
+        }
+        { print }
+    ' "$SETUP_C" > "$SETUP_C.tmp"
+    mv "$SETUP_C.tmp" "$SETUP_C"
+fi
 
-text = makefile.read_text()
-for line in (
-    "obj-$(CONFIG_RUST) += luna_boot.o\n",
-    "obj-$(CONFIG_RUST) += luna_exec.o\n",
-):
-    if line not in text:
-        if not text.endswith("\n"):
-            text += "\n"
-        text += line
-makefile.write_text(text)
+if ! grep -Fq 'extern int x86_luna_exec_init(void);' "$INIT_C"; then
+    init_include_snippet="$(mktemp)"
+    cat > "$init_include_snippet" <<'EOF'
+#ifdef CONFIG_RUST
+extern int x86_luna_exec_init(void);
+#endif
+EOF
+    awk -v snippet="$init_include_snippet" '
+        /#include <linux\/binfmts\.h>/ {
+            print
+            while ((getline line < snippet) > 0) print line
+            close(snippet)
+            next
+        }
+        { print }
+    ' "$INIT_C" > "$INIT_C.tmp"
+    mv "$INIT_C.tmp" "$INIT_C"
+fi
 
-text = setup.read_text()
-bridge = '''\n#ifdef CONFIG_RUST\nextern void x86_luna_boot_parse(u64 setup_data_phys);\nx86_luna_boot_parse(boot_params.hdr.setup_data);\n#else\n#error "Project Luna requires CONFIG_RUST"\n#endif\n'''
-if "x86_luna_boot_parse(boot_params.hdr.setup_data);" not in text:
-    anchor = "\tparse_setup_data();\n"
-    if anchor not in text:
-        raise SystemExit(f"cannot locate setup_data parser in {setup}")
-    text = text.replace(anchor, anchor + bridge, 1)
-setup.write_text(text)
+if ! grep -Fq 'x86_luna_exec_init();' "$INIT_C"; then
+    init_call_snippet="$(mktemp)"
+    cat > "$init_call_snippet" <<'EOF'
 
-text = init.read_text()
-launcher = '''\n#ifdef CONFIG_RUST\nextern int x86_luna_exec_init(void);\n#endif\n'''
-if "extern int x86_luna_exec_init(void);" not in text:
-    marker = "#include <linux/binfmts.h>\n"
-    if marker not in text:
-        raise SystemExit(f"cannot locate binfmts include in {init}")
-    text = text.replace(marker, marker + launcher, 1)
-
-call = '''\n\tif (IS_ENABLED(CONFIG_RUST)) {\n\t\tint luna_ret = x86_luna_exec_init();\n\t\tif (luna_ret)\n\t\t\tpanic("Luna: direct luna-init execution failed (error %d).", luna_ret);\n\t}\n'''
-if "x86_luna_exec_init();" not in text:
-    anchor = "\tconsole_on_rootfs();\n"
-    if anchor not in text:
-        raise SystemExit(f"cannot locate console_on_rootfs() in {init}")
-    text = text.replace(anchor, anchor + call, 1)
-init.write_text(text)
+#ifdef CONFIG_RUST
+	if (IS_ENABLED(CONFIG_RUST)) {
+		int luna_ret = x86_luna_exec_init();
+		if (luna_ret)
+			panic("Luna: direct luna-init execution failed (error %d).", luna_ret);
+	}
+#endif
+EOF
+    awk -v snippet="$init_call_snippet" '
+        /^[[:space:]]*console_on_rootfs\(\);[[:space:]]*$/ {
+            print
+            while ((getline line < snippet) > 0) print line
+            close(snippet)
+            next
+        }
+        { print }
+    ' "$INIT_C" > "$INIT_C.tmp"
+    mv "$INIT_C.tmp" "$INIT_C"
+fi
 
 # Keep the Luna-specific execution policy in Rust while adding only the
 # smallest generic bridge needed to feed a kernel-created anonymous file into
 # Linux's existing kernel_execve/binfmt machinery. No Luna storage, rootfs, or
 # bootstrap policy belongs in this C hook.
-text = exec_c.read_text()
-if "int kernel_execve_file(struct file *file," not in text:
-    marker = "void set_binfmt(struct linux_binfmt *new)\n"
-    if marker not in text:
-        raise SystemExit(f"cannot locate set_binfmt() in {exec_c}")
+if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$EXEC_C"; then
+    exec_bridge="$(mktemp)"
+    cat > "$exec_bridge" <<'EOF'
 
-    bridge = '''\n/*\n * Luna-only kernel-internal adapter. The caller supplies an already-created\n * memory-backed executable object; this helper only feeds it through the\n * existing kernel exec path so Linux keeps ownership of ELF loading, VM\n * construction, credentials and process setup. The object is never opened by\n * pathname.\n */\nint kernel_execve_file(struct file *file,\n\t\t\t       const char *const *argv,\n\t\t\t       const char *const *envp)\n{\n\tint fd, retval;\n\n\tif (!file)\n\t\treturn -EINVAL;\n\n\t/* The anonymous shmem object is kernel-created and trusted by Luna.\n\t * Give the VFS execute permission required by do_open_execat(). */\n\tinode_lock(file_inode(file));\n\tfile_inode(file)->i_mode = (file_inode(file)->i_mode & S_IFMT) | 0700;\n\tinode_unlock(file_inode(file));\n\n\tfd = get_unused_fd_flags(O_CLOEXEC);\n\tif (fd < 0)\n\t\treturn fd;\n\n\tget_file(file);\n\tfd_install(fd, file);\n\n\t{\n\t\tCLASS(filename_kernel, filename)("");\n\t\tCLASS(bprm, bprm)(fd, filename, AT_EMPTY_PATH);\n\t\n\t\tif (IS_ERR(bprm)) {\n\t\t\tretval = PTR_ERR(bprm);\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = count_strings_kernel(argv);\n\t\tif (WARN_ON_ONCE(retval == 0)) {\n\t\t\tclose_fd(fd);\n\t\t\treturn -EINVAL;\n\t\t}\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->argc = retval;\n\n\t\tretval = count_strings_kernel(envp);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->envc = retval;\n\n\t\tretval = bprm_stack_limits(bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = copy_string_kernel(bprm->filename, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\t\tbprm->exec = bprm->p;\n\n\t\tretval = copy_strings_kernel(bprm->envc, envp, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = copy_strings_kernel(bprm->argc, argv, bprm);\n\t\tif (retval < 0) {\n\t\t\tclose_fd(fd);\n\t\t\treturn retval;\n\t\t}\n\n\t\tretval = bprm_execve(bprm);\n\t}\n\n\tclose_fd(fd);\n\treturn retval;\n}\nEXPORT_SYMBOL_GPL(kernel_execve_file);\n\n'''
-    text = text.replace(marker, bridge + marker, 1)
-    exec_c.write_text(text)
+/*
+ * Luna-only kernel-internal adapter. The caller supplies an already-created
+ * memory-backed executable object; this helper only feeds it through the
+ * existing kernel exec path so Linux keeps ownership of ELF loading, VM
+ * construction, credentials and process setup. The object is never opened by
+ * pathname.
+ */
+int kernel_execve_file(struct file *file,
+			       const char *const *argv,
+			       const char *const *envp)
+{
+	int fd, retval;
 
-# The Rust launcher calls this Luna kernel-internal adapter. Keep its public
-# prototype in the normal exec header so the kernel's -Wmissing-prototypes
-# check sees the declaration in fs/exec.c.
-text = binfmt_h.read_text()
-prototype = '''\n/* Project Luna: execute a kernel-created memory-backed file. */\nint kernel_execve_file(struct file *file,\n\t\t\t       const char *const *argv,\n\t\t\t       const char *const *envp);\n'''
-if "int kernel_execve_file(struct file *file," not in text:
-    if not text.endswith("\n"):
-        text += "\n"
-    text += prototype
-    binfmt_h.write_text(text)
-PY
+	if (!file)
+		return -EINVAL;
+
+	/* The anonymous shmem object is kernel-created and trusted by Luna.
+	 * Give the VFS execute permission required by do_open_execat(). */
+	inode_lock(file_inode(file));
+	file_inode(file)->i_mode = (file_inode(file)->i_mode & S_IFMT) | 0700;
+	inode_unlock(file_inode(file));
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0)
+		return fd;
+
+	get_file(file);
+	fd_install(fd, file);
+
+	{
+		CLASS(filename_kernel, filename)("");
+		CLASS(bprm, bprm)(fd, filename, AT_EMPTY_PATH);
+
+		if (IS_ERR(bprm)) {
+			retval = PTR_ERR(bprm);
+			close_fd(fd);
+			return retval;
+		}
+
+		retval = count_strings_kernel(argv);
+		if (WARN_ON_ONCE(retval == 0)) {
+			close_fd(fd);
+			return -EINVAL;
+		}
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+		bprm->argc = retval;
+
+		retval = count_strings_kernel(envp);
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+		bprm->envc = retval;
+
+		retval = bprm_stack_limits(bprm);
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+
+		retval = copy_string_kernel(bprm->filename, bprm);
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+		bprm->exec = bprm->p;
+
+		retval = copy_strings_kernel(bprm->envc, envp, bprm);
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+
+		retval = copy_strings_kernel(bprm->argc, argv, bprm);
+		if (retval < 0) {
+			close_fd(fd);
+			return retval;
+		}
+
+		retval = bprm_execve(bprm);
+	}
+
+	close_fd(fd);
+	return retval;
+}
+EXPORT_SYMBOL_GPL(kernel_execve_file);
+
+EOF
+    awk -v snippet="$exec_bridge" '
+        /^void set_binfmt\(struct linux_binfmt \*new\)/ {
+            while ((getline line < snippet) > 0) print line
+            close(snippet)
+        }
+        { print }
+    ' "$EXEC_C" > "$EXEC_C.tmp"
+    mv "$EXEC_C.tmp" "$EXEC_C"
+fi
+
+if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$BINFMT_H"; then
+    cat >> "$BINFMT_H" <<'EOF'
+
+/* Project Luna: execute a kernel-created memory-backed file. */
+int kernel_execve_file(struct file *file,
+			       const char *const *argv,
+			       const char *const *envp);
+EOF
+fi
 
 echo "Applied Luna kernel overlay to: $SRC"
