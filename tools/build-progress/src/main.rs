@@ -32,6 +32,13 @@ impl Severity {
             Self::Error => "ERROR",
         }
     }
+
+    fn color(self) -> &'static str {
+        match self {
+            Self::Warning => "1;33",
+            Self::Error => "1;31",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,23 +63,19 @@ impl Diagnostic {
             let message = value.split_once(']').map(|(_, rest)| rest.trim()).unwrap_or(value);
             (Severity::Error, message)
         } else if let Some((prefix, message)) = split_inline_diagnostic(trimmed, ": warning:") {
-            let mut diagnostic = Self {
+            return Some(Self {
                 severity: Severity::Warning,
                 message: message.trim().to_string(),
                 location: Some(prefix.trim().to_string()),
                 context: Vec::new(),
-            };
-            diagnostic.push_context_if_useful(trimmed);
-            return Some(diagnostic);
+            });
         } else if let Some((prefix, message)) = split_inline_diagnostic(trimmed, ": error:") {
-            let mut diagnostic = Self {
+            return Some(Self {
                 severity: Severity::Error,
                 message: message.trim().to_string(),
                 location: Some(prefix.trim().to_string()),
                 context: Vec::new(),
-            };
-            diagnostic.push_context_if_useful(trimmed);
-            return Some(diagnostic);
+            });
         } else {
             return None;
         };
@@ -152,9 +155,7 @@ fn parse_args() -> Config {
         match arg.as_str() {
             "--label" => label = args.next(),
             "--log" => log = args.next().map(PathBuf::from),
-            "--total" => {
-                total = args.next().and_then(|value| value.parse::<u64>().ok());
-            }
+            "--total" => total = args.next().and_then(|value| value.parse::<u64>().ok()),
             "--action" => {
                 if let Some(pattern) = args.next() {
                     action_patterns.push(pattern);
@@ -183,13 +184,7 @@ fn parse_args() -> Config {
         ];
     }
 
-    Config {
-        label,
-        log,
-        total,
-        action_patterns,
-        command,
-    }
+    Config { label, log, total, action_patterns, command }
 }
 
 fn matches_action(line: &str, patterns: &[String]) -> bool {
@@ -266,13 +261,9 @@ fn format_duration(duration: Duration) -> String {
     seconds %= 3_600;
     let minutes = seconds / 60;
     seconds %= 60;
-    if days > 0 {
-        format!("{}d {:02}:{:02}:{:02}", days, hours, minutes, seconds)
-    } else if hours > 0 {
-        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-    } else {
-        format!("{:02}:{:02}", minutes, seconds)
-    }
+    if days > 0 { format!("{}d {:02}:{:02}:{:02}", days, hours, minutes, seconds) }
+    else if hours > 0 { format!("{:02}:{:02}:{:02}", hours, minutes, seconds) }
+    else { format!("{:02}:{:02}", minutes, seconds) }
 }
 
 fn terminal_width() -> usize {
@@ -283,13 +274,7 @@ fn terminal_width() -> usize {
         .unwrap_or(100)
 }
 
-fn render_progress(
-    label: &str,
-    completed: u64,
-    total: Option<u64>,
-    elapsed: Duration,
-    recent_steps: &VecDeque<Instant>,
-) {
+fn render_progress(label: &str, completed: u64, total: Option<u64>, elapsed: Duration, recent_steps: &VecDeque<Instant>) {
     let rate = if recent_steps.len() >= 2 {
         let first = recent_steps.front().unwrap();
         let last = recent_steps.back().unwrap();
@@ -297,18 +282,14 @@ fn render_progress(
         if span > 0.0 { (recent_steps.len() - 1) as f64 / span } else { 0.0 }
     } else if elapsed.as_secs_f64() > 0.0 {
         completed as f64 / elapsed.as_secs_f64()
-    } else {
-        0.0
-    };
+    } else { 0.0 };
 
     let (percent, eta) = match total.filter(|&value| value > 0) {
         Some(total) => {
             let ratio = (completed as f64 / total as f64).clamp(0.0, 1.0);
             let eta = if rate > 0.0 && completed < total {
                 Some(Duration::from_secs_f64((total - completed) as f64 / rate))
-            } else {
-                None
-            };
+            } else { None };
             (Some(ratio), eta)
         }
         None => (None, None),
@@ -324,12 +305,7 @@ fn render_progress(
             eta.map(format_duration).unwrap_or_else(|| "--:--".into()),
             rate,
         ),
-        None => format!(
-            " {:>9}  elapsed {}  {:>5.2}/s",
-            completed,
-            format_duration(elapsed),
-            rate,
-        ),
+        None => format!(" {:>9}  elapsed {}  {:>5.2}/s", completed, format_duration(elapsed), rate),
     };
 
     let fixed = label.len() + suffix.len() + 8;
@@ -353,13 +329,17 @@ fn render_progress(
 }
 
 fn print_problem(problem: &Diagnostic) {
-    println!("\n\x1b[1;31m[BUILD {}]\x1b[0m {}", problem.severity.label(), problem.message);
-    if let Some(location) = &problem.location {
-        println!("  Где: {}", location);
-    } else {
-        println!("  Где: не указано компилятором");
+    println!(
+        "\n\x1b[{}m[BUILD {}]\x1b[0m {}",
+        problem.severity.color(),
+        problem.severity.label(),
+        problem.message
+    );
+    match &problem.location {
+        Some(location) => println!("  Где: {}", location),
+        None => println!("  Где: компилятор не указал место"),
     }
-    println!("  Причина: {}", problem.message);
+    println!("  Сообщение компилятора: {}", problem.message);
     for context in &problem.context {
         println!("  | {}", context.trim());
     }
@@ -373,14 +353,7 @@ fn flush_problem(active: &mut Option<Diagnostic>, problems: &mut Vec<Diagnostic>
     }
 }
 
-fn print_final(
-    label: &str,
-    status: &ExitStatus,
-    completed: u64,
-    elapsed: Duration,
-    log: &Path,
-    problems: &[Diagnostic],
-) {
+fn print_final(label: &str, status: &ExitStatus, completed: u64, elapsed: Duration, log: &Path, problems: &[Diagnostic]) {
     println!("\n{}: {}", label, if status.success() { "успешно" } else { "ОШИБКА" });
     println!("Время: {}", format_duration(elapsed));
     println!("Шагов: {}", completed);
@@ -388,7 +361,15 @@ fn print_final(
     if !problems.is_empty() {
         println!("\nПроблемы ({} диагностик):", problems.len());
         for problem in problems {
-            println!("  [{}] {}{}", problem.severity.label(), problem.message, problem.location.as_deref().map(|value| format!(" @ {}", value)).unwrap_or_default());
+            println!(
+                "  [{}] {}{}",
+                problem.severity.label(),
+                problem.message,
+                problem.location
+                    .as_deref()
+                    .map(|value| format!(" @ {}", value))
+                    .unwrap_or_default()
+            );
         }
     }
 }
