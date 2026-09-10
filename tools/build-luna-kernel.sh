@@ -11,16 +11,18 @@ TARBALL="${OUT}/linux-${VERSION}.tar.xz"
 URL="https://www.kernel.org/pub/linux/kernel/v7.x/linux-${VERSION}.tar.xz"
 CONFIG_FRAGMENT="${REPO_ROOT}/kernel/luna-x86_64.config"
 OVERLAY="${REPO_ROOT}/tools/apply-luna-kernel-overlay.sh"
+PROGRESS="${REPO_ROOT}/tools/build-progress.py"
+LOG_DIR="${OUT}/logs"
+LOG_FILE="${LUNA_KERNEL_LOG:-${LOG_DIR}/kernel-${VERSION}-$(date +%Y%m%d-%H%M%S).log}"
 
 for tool in curl tar make python3; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 
+[ -f "$PROGRESS" ] || { echo "missing build progress helper: $PROGRESS" >&2; exit 1; }
+
 LLVM_PREFIX=""
 if [ "$LLVM_MODE" = "1" ]; then
-    # Prefer a complete LLVM installation. Ubuntu commonly keeps versioned
-    # LLVM binaries under /usr/lib/llvm-XX/bin instead of exposing unsuffixed
-    # llvm-ar/llvm-nm/etc. through PATH.
     candidates=()
     if [ -n "${LUNA_LLVM_BIN:-}" ]; then
         candidates+=("$LUNA_LLVM_BIN")
@@ -58,8 +60,6 @@ fi
 [ -f "$CONFIG_FRAGMENT" ] || { echo "missing kernel config: $CONFIG_FRAGMENT" >&2; exit 1; }
 [ -f "$OVERLAY" ] || { echo "missing kernel overlay: $OVERLAY" >&2; exit 1; }
 
-# Ubuntu's packaged Rust toolchains may keep the standard-library sources outside
-# rustc's default discovery path. Kernel Kconfig uses RUST_LIB_SRC when present.
 if command -v rustc >/dev/null; then
     RUST_SYSROOT="$(rustc --print sysroot)"
     AUTO_RUST_LIB_SRC="${RUST_SYSROOT}/lib/rustlib/src/rust/library"
@@ -68,7 +68,7 @@ if command -v rustc >/dev/null; then
     fi
 fi
 
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$LOG_DIR"
 if [ ! -d "$SRC" ]; then
     if [ ! -f "$TARBALL" ]; then
         curl --fail --location --retry 3 --output "$TARBALL" "$URL"
@@ -78,8 +78,6 @@ fi
 
 cd "$SRC"
 
-# A source tree that has already received the Luna overlay is never silently
-# reused. Delete it (or use another LUNA_KERNEL_OUT) for a clean application.
 if [ -e .luna-overlay-applied ]; then
     echo "refusing to reuse an already overlaid kernel source: $SRC" >&2
     echo "remove $SRC or build with a fresh LUNA_KERNEL_OUT" >&2
@@ -95,8 +93,6 @@ if [ "$LLVM_MODE" = "1" ]; then
 fi
 MAKE+=(O="$SRC/build" ARCH=x86_64)
 
-# Run the same Rust availability probe used by Kconfig before generating the
-# configuration. This turns a silent CONFIG_RUST=n into an actionable failure.
 if ! "${MAKE[@]}" rustavailable; then
     echo "Project Luna requires a Rust toolchain accepted by the Linux kernel build system." >&2
     echo "Install/enable rust-src and bindgen as described by Documentation/rust/quick-start.rst." >&2
@@ -114,7 +110,24 @@ if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
 fi
 
 "${MAKE[@]}" rustavailable
-"${MAKE[@]}" -j"$JOBS" bzImage modules
+
+# Estimate the number of compiler/link/archive commands once. This is an
+# intentionally approximate total used only for the terminal ETA; the build
+# itself remains the normal Kbuild process.
+TOTAL="$(${MAKE[@]} -n bzImage modules 2>/dev/null | awk '
+    /(^|[[:space:]])(clang|gcc|rustc|ld\.lld|ld|llvm-ar|ar|as|objcopy|objdump|strip)([[:space:]]|$)/ { count++ }
+    END { print count + 0 }
+')"
+
+PROGRESS_RE='^\s+(HOST)?(CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)'
+
+python3 "$PROGRESS" \
+    --label "Linux ${VERSION}" \
+    --log "$LOG_FILE" \
+    --total "$TOTAL" \
+    --action-regex "$PROGRESS_RE" \
+    -- \
+    "${MAKE[@]}" -j"$JOBS" bzImage modules
 
 KERNEL_RELEASE="$("${MAKE[@]}" -s kernelrelease)"
 mkdir -p "$OUT/$KERNEL_RELEASE"
