@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const BAR_WIDTH: usize = 32;
 const RATE_WINDOW: usize = 64;
 const MAX_PROBLEMS: usize = 200;
+const MAX_CONTEXT_LINES: usize = 8;
 
 struct Config {
     label: String,
@@ -18,8 +19,118 @@ struct Config {
     command: Vec<String>,
 }
 
-struct Problem {
-    line: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Severity {
+    Warning,
+    Error,
+}
+
+impl Severity {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Warning => "WARNING",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Diagnostic {
+    severity: Severity,
+    message: String,
+    location: Option<String>,
+    context: Vec<String>,
+}
+
+impl Diagnostic {
+    fn from_start(line: &str) -> Option<Self> {
+        let trimmed = line.trim_start();
+        let (severity, message) = if let Some(value) = trimmed.strip_prefix("warning:") {
+            (Severity::Warning, value.trim())
+        } else if let Some(value) = trimmed.strip_prefix("error:") {
+            (Severity::Error, value.trim())
+        } else if let Some(value) = trimmed.strip_prefix("warning[") {
+            let message = value.split_once(']').map(|(_, rest)| rest.trim()).unwrap_or(value);
+            (Severity::Warning, message)
+        } else if let Some(value) = trimmed.strip_prefix("error[") {
+            let message = value.split_once(']').map(|(_, rest)| rest.trim()).unwrap_or(value);
+            (Severity::Error, message)
+        } else if let Some((prefix, message)) = split_inline_diagnostic(trimmed, ": warning:") {
+            let mut diagnostic = Self {
+                severity: Severity::Warning,
+                message: message.trim().to_string(),
+                location: Some(prefix.trim().to_string()),
+                context: Vec::new(),
+            };
+            diagnostic.push_context_if_useful(trimmed);
+            return Some(diagnostic);
+        } else if let Some((prefix, message)) = split_inline_diagnostic(trimmed, ": error:") {
+            let mut diagnostic = Self {
+                severity: Severity::Error,
+                message: message.trim().to_string(),
+                location: Some(prefix.trim().to_string()),
+                context: Vec::new(),
+            };
+            diagnostic.push_context_if_useful(trimmed);
+            return Some(diagnostic);
+        } else {
+            return None;
+        };
+
+        Some(Self {
+            severity,
+            message: message.to_string(),
+            location: None,
+            context: Vec::new(),
+        })
+    }
+
+    fn add_line(&mut self, line: &str) {
+        if let Some(location) = parse_rust_location(line) {
+            self.location = Some(location);
+            return;
+        }
+
+        if self.context.len() < MAX_CONTEXT_LINES && is_diagnostic_context(line) {
+            self.push_context_if_useful(line);
+        }
+    }
+
+    fn push_context_if_useful(&mut self, line: &str) {
+        let value = line.trim_end();
+        if value.is_empty() || self.context.iter().any(|item| item == value) {
+            return;
+        }
+        if self.context.len() < MAX_CONTEXT_LINES {
+            self.context.push(value.to_string());
+        }
+    }
+}
+
+fn split_inline_diagnostic<'a>(line: &'a str, marker: &str) -> Option<(&'a str, &'a str)> {
+    line.find(marker).map(|index| {
+        let (prefix, rest) = line.split_at(index);
+        (prefix, &rest[marker.len()..])
+    })
+}
+
+fn parse_rust_location(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("-->")?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
+fn is_diagnostic_context(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    line.starts_with(' ')
+        || line.starts_with('\t')
+        || trimmed.starts_with("note:")
+        || trimmed.starts_with("help:")
+        || trimmed.starts_with("For more information")
 }
 
 fn usage() -> ! {
@@ -116,12 +227,11 @@ fn is_problem(line: &str, action_patterns: &[String]) -> bool {
     if matches_action(line, action_patterns) {
         return false;
     }
-
     let lower = line.trim_start().to_ascii_lowercase();
-
     lower.starts_with("error:")
         || lower.starts_with("error[")
         || lower.starts_with("warning:")
+        || lower.starts_with("warning[")
         || lower.starts_with("fatal:")
         || lower.starts_with("fatal ")
         || lower.starts_with("collect2:")
@@ -156,7 +266,6 @@ fn format_duration(duration: Duration) -> String {
     seconds %= 3_600;
     let minutes = seconds / 60;
     seconds %= 60;
-
     if days > 0 {
         format!("{}d {:02}:{:02}:{:02}", days, hours, minutes, seconds)
     } else if hours > 0 {
@@ -185,11 +294,7 @@ fn render_progress(
         let first = recent_steps.front().unwrap();
         let last = recent_steps.back().unwrap();
         let span = last.saturating_duration_since(*first).as_secs_f64();
-        if span > 0.0 {
-            (recent_steps.len() - 1) as f64 / span
-        } else {
-            0.0
-        }
+        if span > 0.0 { (recent_steps.len() - 1) as f64 / span } else { 0.0 }
     } else if elapsed.as_secs_f64() > 0.0 {
         completed as f64 / elapsed.as_secs_f64()
     } else {
@@ -235,20 +340,10 @@ fn render_progress(
             format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled))
         }
         None => {
-            let pos = if bar_width == 0 {
-                0
-            } else {
-                (completed as usize) % (bar_width * 2).max(1)
-            };
-            let pos = if pos >= bar_width {
-                bar_width * 2 - pos - 1
-            } else {
-                pos
-            };
+            let pos = if bar_width == 0 { 0 } else { (completed as usize) % (bar_width * 2).max(1) };
+            let pos = if pos >= bar_width { bar_width * 2 - pos - 1 } else { pos };
             let mut chars = vec!['░'; bar_width];
-            if bar_width > 0 {
-                chars[pos.min(bar_width - 1)] = '█';
-            }
+            if bar_width > 0 { chars[pos.min(bar_width - 1)] = '█'; }
             chars.into_iter().collect()
         }
     };
@@ -257,8 +352,25 @@ fn render_progress(
     let _ = io::stdout().flush();
 }
 
-fn print_problem(problem: &str) {
-    println!("\n\x1b[1;31m[BUILD PROBLEM]\x1b[0m {}", problem.trim_end());
+fn print_problem(problem: &Diagnostic) {
+    println!("\n\x1b[1;31m[BUILD {}]\x1b[0m {}", problem.severity.label(), problem.message);
+    if let Some(location) = &problem.location {
+        println!("  Где: {}", location);
+    } else {
+        println!("  Где: не указано компилятором");
+    }
+    println!("  Причина: {}", problem.message);
+    for context in &problem.context {
+        println!("  | {}", context.trim());
+    }
+}
+
+fn flush_problem(active: &mut Option<Diagnostic>, problems: &mut Vec<Diagnostic>) {
+    let Some(problem) = active.take() else { return };
+    if problems.len() < MAX_PROBLEMS {
+        print_problem(&problem);
+        problems.push(problem);
+    }
 }
 
 fn print_final(
@@ -267,20 +379,16 @@ fn print_final(
     completed: u64,
     elapsed: Duration,
     log: &Path,
-    problems: &[Problem],
+    problems: &[Diagnostic],
 ) {
     println!("\n{}: {}", label, if status.success() { "успешно" } else { "ОШИБКА" });
     println!("Время: {}", format_duration(elapsed));
     println!("Шагов: {}", completed);
     println!("Лог:   {}", log.display());
     if !problems.is_empty() {
-        println!("\nПроблемы ({} строк):", problems.len());
-        let mut seen = Vec::new();
+        println!("\nПроблемы ({} диагностик):", problems.len());
         for problem in problems {
-            if !seen.iter().any(|line: &String| line == &problem.line) {
-                println!("  {}", problem.line);
-                seen.push(problem.line.clone());
-            }
+            println!("  [{}] {}{}", problem.severity.label(), problem.message, problem.location.as_deref().map(|value| format!(" @ {}", value)).unwrap_or_default());
         }
     }
 }
@@ -289,10 +397,7 @@ fn command_string(command: &[String]) -> String {
     command
         .iter()
         .map(|arg| {
-            if arg
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "_./-:=+".contains(c))
-            {
+            if arg.chars().all(|c| c.is_ascii_alphanumeric() || "_./-:=+".contains(c)) {
                 arg.clone()
             } else {
                 format!("'{}'", arg.replace('\'', "'\\''"))
@@ -303,10 +408,7 @@ fn command_string(command: &[String]) -> String {
 }
 
 fn run(config: Config) -> io::Result<i32> {
-    if let Some(parent) = config.log.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
+    if let Some(parent) = config.log.parent() { fs::create_dir_all(parent)?; }
     let mut log = File::create(&config.log)?;
     writeln!(log, "# Project Luna build log")?;
     writeln!(log, "# started={}", timestamp())?;
@@ -327,9 +429,7 @@ fn run(config: Config) -> io::Result<i32> {
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
-                Ok(line) => {
-                    let _ = tx_out.send(line);
-                }
+                Ok(line) => { let _ = tx_out.send(line); }
                 Err(error) => {
                     let _ = tx_out.send(format!("[build-progress stdout read error: {}]", error));
                     break;
@@ -342,9 +442,7 @@ fn run(config: Config) -> io::Result<i32> {
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines() {
             match line {
-                Ok(line) => {
-                    let _ = tx_err.send(line);
-                }
+                Ok(line) => { let _ = tx_err.send(line); }
                 Err(error) => {
                     let _ = tx_err.send(format!("[build-progress stderr read error: {}]", error));
                     break;
@@ -358,53 +456,38 @@ fn run(config: Config) -> io::Result<i32> {
     let mut completed = 0u64;
     let mut recent_steps = VecDeque::with_capacity(RATE_WINDOW);
     let mut problems = Vec::new();
+    let mut active_problem = None;
 
-    render_progress(
-        &config.label,
-        completed,
-        config.total,
-        Duration::ZERO,
-        &recent_steps,
-    );
+    render_progress(&config.label, completed, config.total, Duration::ZERO, &recent_steps);
 
     for line in rx {
         writeln!(log, "{}", line)?;
-        if matches_action(&line, &config.action_patterns) {
+
+        if let Some(diagnostic) = Diagnostic::from_start(&line) {
+            flush_problem(&mut active_problem, &mut problems);
+            active_problem = Some(diagnostic);
+        } else if active_problem.is_some() && is_diagnostic_context(&line) {
+            if let Some(problem) = active_problem.as_mut() {
+                problem.add_line(&line);
+            }
+        } else if matches_action(&line, &config.action_patterns) {
+            flush_problem(&mut active_problem, &mut problems);
             completed += 1;
             let now = Instant::now();
             recent_steps.push_back(now);
-            while recent_steps.len() > RATE_WINDOW {
-                recent_steps.pop_front();
-            }
+            while recent_steps.len() > RATE_WINDOW { recent_steps.pop_front(); }
+        } else if active_problem.is_some() {
+            flush_problem(&mut active_problem, &mut problems);
         }
 
-        if is_problem(&line, &config.action_patterns) && problems.len() < MAX_PROBLEMS {
-            let problem = Problem { line: line.clone() };
-            print_problem(&line);
-            problems.push(problem);
-        }
-
-        render_progress(
-            &config.label,
-            completed,
-            config.total,
-            start.elapsed(),
-            &recent_steps,
-        );
+        render_progress(&config.label, completed, config.total, start.elapsed(), &recent_steps);
     }
 
+    flush_problem(&mut active_problem, &mut problems);
     let status = child.wait()?;
     let elapsed = start.elapsed();
     render_progress(&config.label, completed, config.total, elapsed, &recent_steps);
-    print_final(
-        &config.label,
-        &status,
-        completed,
-        elapsed,
-        &config.log,
-        &problems,
-    );
-
+    print_final(&config.label, &status, completed, elapsed, &config.log, &problems);
     Ok(status.code().unwrap_or(1))
 }
 
@@ -419,9 +502,7 @@ mod tests {
     use super::*;
 
     fn patterns() -> Vec<String> {
-        vec![
-            "^\\s+(?:HOST)?(?:CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)".into(),
-        ]
+        vec!["^\\s+(?:HOST)?(?:CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)".into()]
     }
 
     #[test]
@@ -436,5 +517,16 @@ mod tests {
         assert!(is_problem("warning: unused variable: x", &patterns()));
         assert!(is_problem("make[1]: *** [Makefile:123: target] Error 2", &patterns()));
         assert!(is_problem("ld.lld: error: undefined symbol: foo", &patterns()));
+    }
+
+    #[test]
+    fn rust_diagnostic_keeps_location_and_context() {
+        let mut diagnostic = Diagnostic::from_start("warning: struct `TargetManager` is never constructed").unwrap();
+        diagnostic.add_line(" --> src/target.rs:24:1");
+        diagnostic.add_line("  | ");
+        diagnostic.add_line("24 | pub struct TargetManager { targets: Vec<BootTarget>, default_index: Option<usize> }");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert_eq!(diagnostic.location.as_deref(), Some("src/target.rs:24:1"));
+        assert!(diagnostic.context.iter().any(|line| line.contains("pub struct TargetManager")));
     }
 }
