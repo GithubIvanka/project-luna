@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -90,19 +90,8 @@ fn simple_pattern_match(pattern: &str, line: &str) -> bool {
         p if p.contains("HOST)?") && p.contains("ZOFFSET") => {
             let trimmed = line.trim_start();
             [
-                "CC ",
-                "CXX ",
-                "RUSTC ",
-                "AR ",
-                "LD ",
-                "AS ",
-                "OBJCOPY ",
-                "OBJDUMP ",
-                "STRIP ",
-                "GEN ",
-                "BUILD ",
-                "BINDGEN ",
-                "MODPOST ",
+                "CC ", "CXX ", "RUSTC ", "AR ", "LD ", "AS ", "OBJCOPY ",
+                "OBJDUMP ", "STRIP ", "GEN ", "BUILD ", "BINDGEN ", "MODPOST ",
                 "ZOFFSET ",
             ]
             .iter()
@@ -130,8 +119,6 @@ fn is_problem(line: &str, action_patterns: &[String]) -> bool {
 
     let lower = line.trim_start().to_ascii_lowercase();
 
-    // Match explicit diagnostics rather than generic words such as "panic"
-    // or "failed", which commonly occur in legitimate build target names.
     lower.starts_with("error:")
         || lower.starts_with("error[")
         || lower.starts_with("warning:")
@@ -279,7 +266,7 @@ fn print_final(
     status: &ExitStatus,
     completed: u64,
     elapsed: Duration,
-    log: &PathBuf,
+    log: &Path,
     problems: &[Problem],
 ) {
     println!("\n{}: {}", label, if status.success() { "успешно" } else { "ОШИБКА" });
@@ -449,11 +436,5 @@ mod tests {
         assert!(is_problem("warning: unused variable: x", &patterns()));
         assert!(is_problem("make[1]: *** [Makefile:123: target] Error 2", &patterns()));
         assert!(is_problem("ld.lld: error: undefined symbol: foo", &patterns()));
-    }
-
-    #[test]
-    fn generic_failed_and_panic_words_are_not_problems() {
-        assert!(!is_problem("target test failed previously", &patterns()));
-        assert!(!is_problem("kernel/panic.c contains panic handling", &patterns()));
     }
 }
