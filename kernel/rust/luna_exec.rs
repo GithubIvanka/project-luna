@@ -21,21 +21,26 @@ const EIO: i32 = 5;
 const ENOENT: i32 = 2;
 const MAX_ERRNO: isize = 4095;
 
+// The Linux Rust bindings intentionally keep `struct file` opaque. Raw void
+// pointers are the correct FFI representation here; the C side knows the real
+// type and Rust does not inspect the structure through these declarations.
+type KernelFile = c_void;
+
 unsafe extern "C" {
     fn shmem_kernel_file_setup(
         name: *const c_char,
         size: bindings::loff_t,
         vma_flags: u64,
-    ) -> *mut bindings::file;
+    ) -> *mut KernelFile;
     fn kernel_write(
-        file: *mut bindings::file,
+        file: *mut KernelFile,
         buf: *const c_void,
         count: usize,
         pos: *mut bindings::loff_t,
     ) -> isize;
-    fn fput(file: *mut bindings::file);
+    fn fput(file: *mut KernelFile);
     fn kernel_execve_file(
-        file: *mut bindings::file,
+        file: *mut KernelFile,
         argv: *const *const c_char,
         envp: *const *const c_char,
     ) -> i32;
@@ -57,7 +62,7 @@ fn ptr_err<T>(ptr: *mut T) -> i32 {
 }
 
 unsafe fn copy_phys_to_file(
-    file: *mut bindings::file,
+    file: *mut KernelFile,
     phys: u64,
     size: usize,
 ) -> Result<(), i32> {
@@ -98,7 +103,7 @@ unsafe fn copy_phys_to_file(
     result
 }
 
-unsafe fn build_executable_object() -> Result<*mut bindings::file, i32> {
+unsafe fn build_executable_object() -> Result<*mut KernelFile, i32> {
     let phys = x86_luna_init_phys();
     let size = x86_luna_init_size();
 
