@@ -24,4 +24,5 @@ members = [
   "components/luna-network",
   "components/luna-bluetooth",
   "components/luna-files",
+  "tools/build-progress",
 ]
