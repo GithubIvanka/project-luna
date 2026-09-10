@@ -26,7 +26,7 @@ fi
 
 : "${BUSYBOX:?Ошибка: не найден статический BusyBox. Укажите BUSYBOX=/path/to/busybox.}"
 
-for command_name in cargo rustup curl git make meson ninja zig cmake pkg-config ldd python3 sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd mksquashfs cpio gzip file; do
+for command_name in cargo rustup curl git make meson ninja zig cmake pkg-config ldd sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd mksquashfs cpio gzip file; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "Ошибка: не найден обязательный инструмент: $command_name" >&2
         exit 1
