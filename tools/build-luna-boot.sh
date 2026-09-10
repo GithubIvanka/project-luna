@@ -29,8 +29,6 @@ else
 fi
 
 echo "Building Luna build-progress tool..."
-cargo build --manifest-path "$ROOT_MANIFEST" --quiet --release -p luna-build-progress
-
 cargo run \
     --manifest-path "$ROOT_MANIFEST" \
     --quiet \
@@ -40,8 +38,7 @@ cargo run \
     --label "luna-boot" \
     --log "$LOG_FILE" \
     --action "Finished" \
-    -- \
-    "${COMMAND[@]}"
+    -- "${COMMAND[@]}"
 
 [ -f "$ARTIFACT" ] || { echo "Ошибка: результат сборки не найден: $ARTIFACT" >&2; exit 1; }
 
