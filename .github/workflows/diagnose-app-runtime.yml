@@ -1,0 +1,42 @@
+name: Diagnose app runtime validation
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/diagnose-app-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: develop
+      - name: Install native GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Capture formatting and clippy diagnostics
+        run: |
+          {
+            echo '# cargo fmt diff'
+            cargo fmt --all
+            git diff --name-only
+            git diff -- components/luna-app-runtime
+            echo '# cargo clippy output'
+            cargo clippy --workspace --all-targets --all-features -- -D warnings
+          } > ci-app-runtime-report.txt 2>&1 || true
+      - name: Commit diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f ci-app-runtime-report.txt
+          git commit -m "ci: capture app runtime diagnostics"
+          git push origin HEAD:develop
