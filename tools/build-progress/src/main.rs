@@ -20,7 +20,6 @@ struct Config {
 
 struct Problem {
     line: String,
-    first_seen: Instant,
 }
 
 fn usage() -> ! {
@@ -87,15 +86,16 @@ fn matches_action(line: &str, patterns: &[String]) -> bool {
 }
 
 fn simple_pattern_match(pattern: &str, line: &str) -> bool {
-    // This tool deliberately avoids external regex crates. The build scripts
-    // pass a small set of stable token patterns, so support the useful kernel,
-    // Cargo and Ninja forms directly.
     match pattern {
         p if p.contains("HOST)?") && p.contains("ZOFFSET") => {
             let trimmed = line.trim_start();
-            ["CC ", "CXX ", "RUSTC ", "AR ", "LD ", "AS ", "OBJCOPY ", "OBJDUMP ", "STRIP ", "GEN ", "BUILD ", "BINDGEN ", "MODPOST ", "ZOFFSET "]
-                .iter()
-                .any(|prefix| trimmed.starts_with(prefix))
+            [
+                "CC ", "CXX ", "RUSTC ", "AR ", "LD ", "AS ", "OBJCOPY ",
+                "OBJDUMP ", "STRIP ", "GEN ", "BUILD ", "BINDGEN ", "MODPOST ",
+                "ZOFFSET ",
+            ]
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
                 || ["HOSTCC ", "HOSTCXX ", "HOSTRUSTC "]
                     .iter()
                     .any(|prefix| trimmed.starts_with(prefix))
@@ -275,7 +275,10 @@ fn command_string(command: &[String]) -> String {
     command
         .iter()
         .map(|arg| {
-            if arg.chars().all(|c| c.is_ascii_alphanumeric() || "_./-:=+".contains(c)) {
+            if arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_./-:=+".contains(c))
+            {
                 arg.clone()
             } else {
                 format!("'{}'", arg.replace('\'', "'\\''"))
@@ -321,14 +324,15 @@ fn run(config: Config) -> io::Result<i32> {
         }
     });
 
+    let tx_err = tx.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines() {
             match line {
                 Ok(line) => {
-                    let _ = tx.send(line);
+                    let _ = tx_err.send(line);
                 }
                 Err(error) => {
-                    let _ = tx.send(format!("[build-progress stderr read error: {}]", error));
+                    let _ = tx_err.send(format!("[build-progress stderr read error: {}]", error));
                     break;
                 }
             }
@@ -360,15 +364,10 @@ fn run(config: Config) -> io::Result<i32> {
             }
         }
 
-        if is_problem(&line) {
-            if problems.len() < MAX_PROBLEMS {
-                let problem = Problem {
-                    line: line.clone(),
-                    first_seen: Instant::now(),
-                };
-                print_problem(&line);
-                problems.push(problem);
-            }
+        if is_problem(&line) && problems.len() < MAX_PROBLEMS {
+            let problem = Problem { line: line.clone() };
+            print_problem(&line);
+            problems.push(problem);
         }
 
         render_progress(
