@@ -159,20 +159,6 @@ fn simple_pattern_match(pattern: &str, line: &str) -> bool {
     }
 }
 
-fn is_problem(line: &str, action_patterns: &[String]) -> bool {
-    if matches_action(line, action_patterns) { return false; }
-    let lower = line.trim_start().to_ascii_lowercase();
-    Diagnostic::from_start(line).is_some()
-        || lower.starts_with("fatal:") || lower.starts_with("fatal ")
-        || lower.starts_with("collect2:") || lower.starts_with("ld.lld:")
-        || lower.starts_with("clang:") || lower.starts_with("gcc:") || lower.starts_with("cc1:")
-        || lower.starts_with("rustc:") || lower.starts_with("make: ***")
-        || (lower.contains("make[") && lower.contains(": ***"))
-        || lower.starts_with("ninja: build stopped") || lower.starts_with("undefined reference")
-        || lower.contains("section mismatch") || lower.contains("undefined symbol")
-        || lower.contains("relocation truncated") || lower.contains(": error:") || lower.contains(": warning:")
-}
-
 fn timestamp() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) { Ok(d) => format!("unix={}s", d.as_secs()), Err(_) => "unix=unknown".into() }
 }
@@ -325,10 +311,6 @@ fn main() -> io::Result<()> { let config = parse_args(); let code = run(config)?
 mod tests {
     use super::*;
 
-    fn patterns() -> Vec<String> {
-        vec!["^\\s+(?:HOST)?(?:CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)".into()]
-    }
-
     #[test]
     fn rust_diagnostic_keeps_location_and_context() {
         let mut diagnostic = Diagnostic::from_start("warning: struct `TargetManager` is never constructed").unwrap();
@@ -343,7 +325,7 @@ mod tests {
     #[test]
     fn build_target_name_is_not_a_problem() {
         let line = "  CC      kernel/panic.o";
-        assert!(matches_action(line, &patterns()));
+        assert!(matches_action(line, &["^\\s+(?:HOST)?(?:CC|CXX|RUSTC|AR|LD|AS|OBJCOPY|OBJDUMP|STRIP|GEN|BUILD|BINDGEN|MODPOST|ZOFFSET)".into()]));
         assert!(Diagnostic::from_start(line).is_none());
     }
 
