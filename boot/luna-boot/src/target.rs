@@ -18,6 +18,7 @@ pub struct BootTarget {
 }
 
 impl BootTarget {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         image_family: impl Into<String>,
