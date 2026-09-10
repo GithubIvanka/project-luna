@@ -31,18 +31,13 @@ if [ "$LLVM_MODE" = "1" ]; then
 
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
-        if [ -x "$candidate/clang" ] \
-            && [ -x "$candidate/ld.lld" ] \
-            && [ -x "$candidate/llvm-ar" ]; then
+        if [ -x "$candidate/clang" ] && [ -x "$candidate/ld.lld" ] && [ -x "$candidate/llvm-ar" ]; then
             LLVM_PREFIX="$(cd "$candidate" && pwd)"
             break
         fi
     done
 
-    if [ -z "$LLVM_PREFIX" ] \
-        && command -v clang >/dev/null 2>&1 \
-        && command -v ld.lld >/dev/null 2>&1 \
-        && command -v llvm-ar >/dev/null 2>&1; then
+    if [ -z "$LLVM_PREFIX" ] && command -v clang >/dev/null 2>&1 && command -v ld.lld >/dev/null 2>&1 && command -v llvm-ar >/dev/null 2>&1; then
         LLVM_PREFIX="$(dirname "$(command -v clang)")"
     fi
 
@@ -61,17 +56,11 @@ fi
 ensure_progress_tool() {
     local root_manifest="${REPO_ROOT}/Cargo.toml"
     local tool_manifest="${REPO_ROOT}/tools/build-progress/Cargo.toml"
-    if [ ! -x "$PROGRESS_BIN" ] \
-        || [ "$tool_manifest" -nt "$PROGRESS_BIN" ] \
-        || [ "$root_manifest" -nt "$PROGRESS_BIN" ] \
-        || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
+    if [ ! -x "$PROGRESS_BIN" ] || [ "$tool_manifest" -nt "$PROGRESS_BIN" ] || [ "$root_manifest" -nt "$PROGRESS_BIN" ] || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
         echo "Building Luna build-progress tool..."
         cargo build --quiet --release -p luna-build-progress
     fi
-    [ -x "$PROGRESS_BIN" ] || {
-        echo "missing build progress executable: $PROGRESS_BIN" >&2
-        exit 1
-    }
+    [ -x "$PROGRESS_BIN" ] || { echo "missing build progress executable: $PROGRESS_BIN" >&2; exit 1; }
 }
 
 if command -v rustc >/dev/null; then
@@ -114,7 +103,7 @@ if ! "${MAKE[@]}" rustavailable; then
 fi
 
 "${MAKE[@]}" x86_64_defconfig
-cat "$CONFIG_FRAGMENT" >> "$SRC/build/.config"
+KCONFIG_CONFIG="$SRC/build/.config" "$SRC/scripts/kconfig/merge_config.sh" -m -r "$SRC/build/.config" "$CONFIG_FRAGMENT"
 "${MAKE[@]}" olddefconfig
 
 if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
@@ -136,8 +125,7 @@ ensure_progress_tool
     --label "Linux ${VERSION}" \
     --log "$LOG_FILE" \
     --total "$TOTAL" \
-    -- \
-    "${MAKE[@]}" -j"$JOBS" bzImage modules
+    -- "${MAKE[@]}" -j"$JOBS" bzImage modules
 
 KERNEL_RELEASE="$("${MAKE[@]}" -s kernelrelease)"
 mkdir -p "$OUT/$KERNEL_RELEASE"
