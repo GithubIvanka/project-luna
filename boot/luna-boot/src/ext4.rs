@@ -28,10 +28,8 @@ pub trait BlockDevice {
 pub struct Ext4Geometry {
     pub block_size: u32,
     pub inode_size: u16,
-    pub blocks_per_group: u32,
     pub inodes_per_group: u32,
     pub inode_count: u32,
-    pub first_data_block: u32,
     pub descriptor_size: u16,
     pub groups: u32,
 }
@@ -86,12 +84,10 @@ impl<D: BlockDevice> Ext4<D> {
         let groups = (blocks.saturating_sub(first_data_block as u64) + blocks_per_group as u64 - 1) / blocks_per_group as u64;
         Ok(Self {
             device,
-            geometry: Ext4Geometry { block_size, inode_size, blocks_per_group, inodes_per_group, inode_count, first_data_block, descriptor_size, groups: groups.min(u32::MAX as u64) as u32 },
+            geometry: Ext4Geometry { block_size, inode_size, inodes_per_group, inode_count, descriptor_size, groups: groups.min(u32::MAX as u64) as u32 },
             has_64bit,
         })
     }
-
-    pub fn geometry(&self) -> Ext4Geometry { self.geometry }
 
     pub fn read_file(&mut self, path: &str) -> BootResult<Vec<u8>> {
         let inode = self.resolve_path(path)?;
