@@ -1,4 +1,4 @@
-//! Process-launch integration for [`ApplicationPlan`].
+//! Process-launch integration for [`ApplicationPlan`](crate::ApplicationPlan).
 //!
 //! Authorization is intentionally completed before this module is entered.
 //! The launcher only consumes an `AuthorizedApplicationPlan`, validates that
@@ -14,11 +14,12 @@ use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
 use luna_root_mapping::{LogicalPath, MappingKind};
 use luna_security::{CapabilityName, CapabilityRegistry, Principal};
 use luna_system_runtime::SystemRuntimeService;
+use luna_user_session::UserSession;
 
 use crate::application_plan::AuthorizedApplicationPlan;
 use crate::{
-    ApplicationInstance, ApplicationInstanceId, InstanceState, LinuxApplicationRuntime,
-    RuntimeError,
+    ApplicationInstance, ApplicationInstanceId, FailureStage, InMemoryApplicationRuntime,
+    InstanceState, LinuxApplicationRuntime, RuntimeError,
 };
 
 /// Immutable execution environment selected by the system runtime for one
@@ -73,11 +74,6 @@ impl ApplicationLaunchContext {
 
     /// Validate filesystem roots before any staging directory or child process
     /// is created.
-    ///
-    /// Both roots must be absolute and lexically normalized. Runtime staging
-    /// must live outside the immutable System Image tree and must never target
-    /// the host root. Physical mapping roots are also system-selected and must
-    /// be explicit; they are never inferred from bundle-supplied paths.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if !self.base_root.is_absolute() || !self.staging_parent.is_absolute() {
             return Err(RuntimeError::Staging(
@@ -136,15 +132,81 @@ fn has_navigation_syntax(path: &Path) -> bool {
         .any(|component| component == "." || component == "..")
 }
 
+/// A newly-created staging root is removed unless ownership is explicitly
+/// committed to the running process maps. This keeps every early-return path
+/// fail-closed without duplicating cleanup branches.
+struct PendingStagingRoot {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl PendingStagingRoot {
+    fn create(parent: &Path, instance: ApplicationInstanceId) -> Result<Self, RuntimeError> {
+        fs::create_dir_all(parent).map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        let path = parent.join(format!("instance-{}", instance.get()));
+        if path.exists() {
+            return Err(RuntimeError::Staging(format!(
+                "staging root already exists: {}",
+                path.display()
+            )));
+        }
+        fs::create_dir(&path).map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        Ok(Self {
+            path,
+            committed: false,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn commit(mut self) -> PathBuf {
+        self.committed = true;
+        self.path.clone()
+    }
+}
+
+impl Drop for PendingStagingRoot {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 #[cfg(unix)]
 pub trait ApplicationPlanLauncher {
-    /// Launch an already-authorized plan in an explicit execution context.
+    /// Launch an already-authorized plan for the same currently active session
+    /// against which the plan was validated.
     ///
     /// No policy evaluation occurs here. The caller must obtain the
     /// `AuthorizedApplicationPlan` from `ApplicationPlan::authorize` first.
+    ///
+    /// A plain `ApplicationPlan` cannot cross this boundary:
+    ///
+    /// ```compile_fail
+    /// use luna_app_runtime::{
+    ///     ApplicationLaunchContext, ApplicationPlan, ApplicationPlanLauncher,
+    ///     LinuxApplicationRuntime,
+    /// };
+    /// use luna_system_runtime::SystemRuntimeService;
+    /// use luna_user_session::UserSession;
+    ///
+    /// fn invalid_launch(
+    ///     launcher: &mut LinuxApplicationRuntime,
+    ///     plan: ApplicationPlan,
+    ///     session: &UserSession,
+    ///     runtime: &mut SystemRuntimeService,
+    ///     context: &ApplicationLaunchContext,
+    /// ) {
+    ///     launcher.launch_authorized_plan(plan, session, runtime, context);
+    /// }
+    /// ```
     fn launch_authorized_plan(
         &mut self,
         plan: AuthorizedApplicationPlan,
+        session: &UserSession,
         runtime: &mut SystemRuntimeService,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError>;
@@ -155,9 +217,11 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
     fn launch_authorized_plan(
         &mut self,
         plan: AuthorizedApplicationPlan,
+        session: &UserSession,
         runtime: &mut SystemRuntimeService,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
+        InMemoryApplicationRuntime::validate_session(plan.session(), session)?;
         context.validate()?;
         validate_mapping_access(&plan)?;
         validate_capabilities(&plan)?;
@@ -166,25 +230,32 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
         })?;
 
-        fs::create_dir_all(context.staging_parent())
-            .map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        let id = self.model.allocate_instance_id();
+        let mut instance = ApplicationInstance::new_with_runtime(
+            id,
+            plan.application().clone(),
+            plan.version(),
+            plan.session(),
+            plan.runtime(),
+        );
+        instance.transition(InstanceState::Starting)?;
+        self.model.insert(instance);
 
-        let id = ApplicationInstanceId::new(self.model.next_id);
-        let root = context
-            .staging_parent()
-            .join(format!("instance-{}", id.get()));
-        if root.exists() {
-            return Err(RuntimeError::Staging(format!(
-                "staging root already exists: {}",
-                root.display()
-            )));
-        }
-        fs::create_dir(&root).map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        let staging = match PendingStagingRoot::create(context.staging_parent(), id) {
+            Ok(staging) => staging,
+            Err(error) => {
+                self.model.instance_mut(id)?.record_failure(
+                    FailureStage::Starting,
+                    error.to_string(),
+                )?;
+                return Err(error);
+            }
+        };
 
         let mapping = plan.mapping().clone();
         let base_root = context.base_root().to_path_buf();
         let trusted_source_roots = context.trusted_source_roots().to_vec();
-        let root_for_child = root.clone();
+        let root_for_child = staging.path().to_path_buf();
         let args = plan.executable().args().to_vec();
         let namespace = context.namespace();
         let profile = RuntimeProfile::minimal();
@@ -211,33 +282,38 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let process = match process {
             Ok(process) => process,
             Err(error) => {
-                let _ = fs::remove_dir_all(&root);
+                self.model.instance_mut(id)?.record_failure(
+                    FailureStage::Starting,
+                    error.to_string(),
+                )?;
                 return Err(error.into());
             }
         };
 
-        self.model.next_id = self.model.next_id.saturating_add(1);
-        let mut instance = ApplicationInstance::new_with_runtime(
-            id,
-            plan.application().clone(),
-            plan.version(),
-            plan.session(),
-            plan.runtime(),
-        );
-
-        if let Err(error) = instance.attach_process(process) {
+        let attach_result = self.model.instance_mut(id)?.attach_process(process);
+        if let Err(error) = attach_result {
             let _ = runtime.terminate_supervised_process(process);
-            let _ = fs::remove_dir_all(&root);
+            self.model.instance_mut(id)?.record_failure(
+                FailureStage::Starting,
+                error.to_string(),
+            )?;
             return Err(error);
         }
 
-        if let Err(error) = instance.transition(InstanceState::Running) {
+        let transition_result = self
+            .model
+            .instance_mut(id)?
+            .transition(InstanceState::Running);
+        if let Err(error) = transition_result {
             let _ = runtime.terminate_supervised_process(process);
-            let _ = fs::remove_dir_all(&root);
+            self.model.instance_mut(id)?.record_failure(
+                FailureStage::Starting,
+                error.to_string(),
+            )?;
             return Err(error);
         }
 
-        self.model.instances.insert(id, instance);
+        let root = staging.commit();
         self.processes.insert(process, id);
         self.roots.insert(process, root);
         Ok(id)
@@ -295,10 +371,11 @@ fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), Runtime
 
 #[cfg(test)]
 mod tests {
-    use super::ApplicationLaunchContext;
-    use crate::RuntimeError;
+    use super::{ApplicationLaunchContext, PendingStagingRoot};
+    use crate::{ApplicationInstanceId, RuntimeError};
     use luna_namespace::LinuxMountNamespace;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn launch_context_accepts_distinct_absolute_roots() {
@@ -405,5 +482,26 @@ mod tests {
         )
         .with_trusted_source_root(Path::new("/luna/data/apps"));
         assert!(context.validate().is_ok());
+    }
+
+    #[test]
+    fn uncommitted_staging_root_is_cleaned_up() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!(
+            "luna-app-runtime-staging-{}-{nonce}",
+            std::process::id()
+        ));
+        let path;
+        {
+            let staging = PendingStagingRoot::create(&parent, ApplicationInstanceId::new(11))
+                .expect("create staging root");
+            path = staging.path().to_path_buf();
+            assert!(path.exists());
+        }
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(parent);
     }
 }
