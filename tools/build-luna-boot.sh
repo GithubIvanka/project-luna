@@ -23,22 +23,48 @@ echo "Сборка luna-boot для $TARGET ($PROFILE)..."
 if [ "$PROFILE" = "release" ]; then
     COMMAND=(cargo build --release --target "$TARGET")
     ARTIFACT="target/$TARGET/release/luna-boot.efi"
+    PROGRESS_PROFILE="release"
 else
     COMMAND=(cargo build --target "$TARGET")
     ARTIFACT="target/$TARGET/debug/luna-boot.efi"
+    PROGRESS_PROFILE="debug"
 fi
 
-echo "Building Luna build-progress tool..."
-cargo run \
-    --manifest-path "$ROOT_MANIFEST" \
-    --quiet \
-    --release \
-    -p luna-build-progress \
-    -- \
+resolve_target_dir() {
+    cargo metadata \
+        --manifest-path "$ROOT_MANIFEST" \
+        --no-deps \
+        --format-version 1 \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' \
+        | head -n 1
+}
+
+PROGRESS_TARGET_DIR="$(resolve_target_dir)"
+[ -n "$PROGRESS_TARGET_DIR" ] || {
+    echo "Ошибка: Cargo metadata не вернул target directory для build-progress." >&2
+    exit 1
+}
+PROGRESS_BIN="${PROGRESS_TARGET_DIR}/${PROGRESS_PROFILE}/build-progress"
+
+if [ ! -x "$PROGRESS_BIN" ] \
+    || [ "$ROOT_MANIFEST" -nt "$PROGRESS_BIN" ] \
+    || [ "$REPO_ROOT/tools/build-progress/Cargo.toml" -nt "$PROGRESS_BIN" ] \
+    || find "$REPO_ROOT/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
+    echo "Building Luna build-progress tool..."
+    cargo build --manifest-path "$ROOT_MANIFEST" --quiet --release -p luna-build-progress
+fi
+
+[ -x "$PROGRESS_BIN" ] || {
+    echo "Ошибка: не найден build progress executable: $PROGRESS_BIN" >&2
+    exit 1
+}
+
+"$PROGRESS_BIN" \
     --label "luna-boot" \
     --log "$LOG_FILE" \
     --action "Finished" \
-    -- "${COMMAND[@]}"
+    -- \
+    "${COMMAND[@]}"
 
 [ -f "$ARTIFACT" ] || { echo "Ошибка: результат сборки не найден: $ARTIFACT" >&2; exit 1; }
 
