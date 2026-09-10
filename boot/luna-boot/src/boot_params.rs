@@ -64,27 +64,11 @@ impl BootParams {
         Ok(())
     }
 
-    pub fn set_ramdisk(&mut self, address: u64, size: u64) -> BootResult<()> {
-        if address > u32::MAX as u64 || size > u32::MAX as u64 {
-            self.bytes[0xc0..0xc4].copy_from_slice(&((address >> 32) as u32).to_le_bytes());
-            self.bytes[0xc4..0xc8].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
-        } else {
-            self.bytes[0xc0..0xc8].fill(0);
-        }
-        self.bytes[0x218..0x21c].copy_from_slice(&(address as u32).to_le_bytes());
-        self.bytes[0x21c..0x220].copy_from_slice(&(size as u32).to_le_bytes());
-        Ok(())
-    }
-
     pub fn set_e820(&mut self, entries: &[E820Entry]) -> BootResult<()> {
         if entries.len() > E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
         self.bytes[0x1e8] = entries.len() as u8;
         for (i, entry) in entries.iter().enumerate() { self.write_e820(i, entry); }
         Ok(())
-    }
-
-    pub fn set_e820_from_map(&mut self, map: &impl uefi::mem::memory_map::MemoryMap) -> BootResult<()> {
-        self.set_e820_from_map_reserved(map, &[])
     }
 
     pub fn set_e820_from_map_reserved(
