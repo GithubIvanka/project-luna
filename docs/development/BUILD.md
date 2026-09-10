@@ -9,11 +9,13 @@
 
 - Rust stable и `rustup`;
 - Cargo targets `x86_64-unknown-linux-musl` и `x86_64-unknown-uefi`;
-- `git`, `curl`, `make`, `meson`, `ninja`, `cmake`, `pkg-config`, `python3`, `zig`;
+- `git`, `curl`, `make`, `meson`, `ninja`, `cmake`, `pkg-config`, `zig`;
 - инструменты ext4/FAT/GPT: `mkfs.ext4`, `mkfs.fat`, `sgdisk`, `mcopy`, `mmd`, `dd`;
 - инструменты образов: `mksquashfs`, `cpio`, `gzip`, `file`;
 - для UEFI/QEMU: `qemu-system-x86_64` и OVMF;
 - статический x86_64 BusyBox для текущего PC image flow.
+
+Скрипты Project Luna не требуют запуска `python3`, `pip` или сторонних Python-пакетов. В частности, progress-инструмент сборки реализован на Rust.
 
 Ubuntu используется как host/CI environment. Сам Linux kernel собирается из upstream Linux sources.
 
@@ -60,6 +62,8 @@ bash tools/build-luna-kernel.sh
 ```
 
 Текущая версия по умолчанию задаётся внутри скрипта. Результат находится в `dist/kernel/`, а `dist/kernel/current/` указывает на выбранную версию.
+
+Kernel config fragment объединяется штатным `scripts/kconfig/merge_config.sh`, после чего выполняется `olddefconfig`. Фрагмент больше не дописывается в `.config` простым `cat`.
 
 ## 6. Desktop root
 
