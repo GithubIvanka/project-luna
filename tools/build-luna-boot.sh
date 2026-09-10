@@ -19,7 +19,7 @@ ensure_progress_tool() {
         || [ "$root_manifest" -nt "$PROGRESS_BIN" ] \
         || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
         echo "Building Luna build-progress tool..."
-        cargo build --quiet --release -p luna-build-progress
+        cargo --manifest-path "$root_manifest" build --quiet --release -p luna-build-progress
     fi
     [ -x "$PROGRESS_BIN" ] || {
         echo "Ошибка: не найден build progress executable: $PROGRESS_BIN" >&2
