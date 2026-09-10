@@ -1,6 +1,6 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan`, `RuntimeSpec`/`RuntimeKind` и typed authorized-process launch boundary реализованы; production lifecycle integration и полноценный kernel/provider enforcement продолжаются.
+**Статус:** `ApplicationInstance`, явная execution state machine, `ApplicationPlan`, `RuntimeSpec`/`RuntimeKind` и typed authorized-process launch boundary реализованы; полноценный kernel/provider enforcement и durable recovery продолжаются.
 
 ## Назначение
 
@@ -49,11 +49,34 @@ ApplicationInstance
 - session identity;
 - `RuntimeSpec`, включая `RuntimeKind`;
 - lifecycle state;
-- supervised process identity, если процесс создан.
+- typed supervised process identity/PID, если процесс создан;
+- terminal process outcome (`exit code`, `signal` или unknown abnormal outcome);
+- typed failure stage и диагностическое сообщение для runtime/setup failures.
 
-`ApplicationInstance` является конкретным execution context, над которым `luna-app-runtime` выполняет lifecycle management.
+Process identity сохраняется после завершения процесса вместе с exit/crash outcome. Mutable lifecycle/process APIs не экспортируются: внешний caller может только наблюдать instance, а переходы выполняются внутри `luna-app-runtime`.
 
 `ApplicationInstance` не принимает security decisions. Authorization, mapping validation и capability approval должны завершиться до запуска процесса.
+
+## Lifecycle state machine
+
+Новый instance создаётся в `Created`. Поддерживаемые переходы ограничены runtime-контрактом:
+
+```text
+Created  → Starting
+Starting → Running
+Starting → Failed
+Running  → Stopping
+Running  → Stopped
+Running  → Crashed
+Running  → Failed
+Stopping → Stopped
+Stopping → Crashed
+Stopping → Failed
+```
+
+`Stopped`, `Crashed` и `Failed` являются terminal states и не имеют исходящих переходов. В частности, `Stopped → Running`, `Failed → Running` и `Created → Stopped` запрещены.
+
+Нормальный самостоятельный exit процесса переводит instance в `Stopped`. Ненулевой exit или signal переводит его в `Crashed`. Явно запрошенное и успешно завершённое runtime termination проходит через `Stopping → Stopped`; ошибка termination переводит `Stopping → Failed`.
 
 ## RuntimeSpec / RuntimeKind
 
@@ -71,7 +94,7 @@ Runtime selection является частью `luna-app-runtime`. Runtime/mapp
 ## Поток запуска
 
 ```text
-ApplicationInstance
+ApplicationInstance / Created
   │
   ├── RuntimeSpec / RuntimeKind
   │
@@ -87,7 +110,7 @@ ApplicationInstance
   │      ↓
   ├── AuthorizedApplicationPlan
   │      ↓
-  └── trusted setup layer
+  └── trusted setup layer / Starting
            ↓
       Linux process + execution environment
            ↓
@@ -118,13 +141,7 @@ luna-security
 AuthorizedApplicationPlan
 ```
 
-`luna-root-mapping` отвечает за:
-
-- logical path semantics;
-- source selection;
-- file/subtree mappings;
-- dependency/resource mappings;
-- validation и построение `MappingPlan`.
+`luna-root-mapping` отвечает за logical path semantics, source selection, file/subtree mappings, dependency/resource mappings, validation и построение `MappingPlan`.
 
 `luna-app-runtime` владеет lifecycle и только координирует использование этих слоёв в рамках `ApplicationInstance`.
 
@@ -150,9 +167,19 @@ trusted setup layer
 luna-namespace / process launch primitives
 ```
 
-`Deny`, policy errors и неподдержанные `Constrained` decisions являются fail-closed. Launcher не принимает обычный `ApplicationPlan`, только уже авторизованный тип.
+`Deny`, policy errors и неподдержанные `Constrained` decisions являются fail-closed. Runtime и Linux launcher принимают только уже авторизованный тип; обычный `ApplicationPlan` не может пересечь launch boundary.
 
 Capability identity также отделена от authorization: `CapabilityRegistry` определяет известный capability и provider, а `CapabilityGrant` появляется только после успешной authorization. Provider не принимает policy decision и не может расширить выданный grant.
+
+## Session boundary
+
+Authorized launch требует явный текущий `UserSession`. Непосредственно перед любыми staging/process side effects runtime повторно проверяет:
+
+- session существует как typed launch argument;
+- session находится в `Active`;
+- session identity совпадает с identity, зафиксированной в `AuthorizedApplicationPlan`.
+
+Inactive или foreign session приводит к fail-closed отказу без создания staging root и process. Это защищает от запуска уже авторизованного плана после logout/session replacement.
 
 ## Trusted setup layer
 
@@ -175,27 +202,7 @@ trusted setup layer
         └── execve()
 ```
 
-Trusted setup **не может**:
-
-- добавлять новые mappings вне `AuthorizedApplicationPlan`;
-- расширять security grants;
-- самостоятельно разрешать denied resources;
-- выдавать capability grants, которых нет в authorized plan;
-- расширять resource limits;
-- обходить `luna-security`.
-
-Таким образом:
-
-```text
-luna-root-mapping
-    = что и откуда должно попасть в logical environment
-
-luna-security
-    = что действительно разрешено
-
-trusted setup
-    = как разрешённое материализуется средствами Linux
-```
+Trusted setup **не может** добавлять mappings вне `AuthorizedApplicationPlan`, расширять security grants, разрешать denied resources, выдавать новые capability grants, расширять resource limits или обходить `luna-security`.
 
 Trusted setup является фазой подготовки того же процесса, который после завершения подготовки делает `execve()`. Отдельный постоянный environment-helper daemon не является частью принятой архитектуры.
 
@@ -203,18 +210,11 @@ Trusted setup является фазой подготовки того же п�
 
 `RuntimeProfile` — явный набор trusted logical resources, которые система предоставляет execution environment независимо от пользовательских DATA mapping.
 
-Текущий baseline-профиль `minimal` описывает:
-
-```text
-/etc
-/lib
-/lib64
-/usr
-```
+Текущий baseline-профиль `minimal` описывает `/etc`, `/lib`, `/lib64` и `/usr`.
 
 `luna-namespace` материализует профиль в отдельный RAM-backed logical root. Production launch path не использует полный System Image как OverlayFS lower и не создаёт persistent upper/work слой для `/`.
 
-Физический System Image остаётся immutable source. Он не становится application `/` и не раскрывается приложению целиком. Boot/runtime слой материализует boot-critical system base в RAM, а дополнительные immutable resources могут гидратироваться лениво. Приложение получает только те системные и собственные ресурсы, которые входят в его authorized execution context.
+Физический System Image остаётся immutable source. Он не становится application `/` и не раскрывается приложению целиком. Приложение получает только те системные и собственные ресурсы, которые входят в его authorized execution context.
 
 ## Per-application Linux environment
 
@@ -240,9 +240,7 @@ privileged devices
 host namespaces/services
 ```
 
-Видимость и доступ — разные свойства. Наличие `/etc` не означает доступ ко всему физическому `/etc` хоста; наличие `/dev` не означает доступ к устройствам. Каждое внешнее filesystem mapping и capability должны пройти policy authorization.
-
-Capabilities также не являются скрытым продолжением filesystem. Например, grant `network` означает только ту сетевую возможность, которую предоставляет runtime/provider; он не открывает host filesystem или произвольные namespaces.
+Видимость и доступ — разные свойства. Каждое внешнее filesystem mapping и capability должны пройти policy authorization.
 
 ## PID boundary
 
@@ -250,28 +248,17 @@ Capabilities также не являются скрытым продолжен�
 
 `luna-system-runtime` остаётся PID 1 нормального Luna userspace process namespace. `luna-app-runtime` не является дополнительным init-процессом, и `luna-app-init` не существует.
 
-Если отдельный PID namespace когда-либо потребуется для конкретного сценария, это требует отдельного архитектурного решения и не должно молча добавлять новый runtime layer.
-
 ## Executable boundary
 
-Executable path является частью plan и должен:
-
-1. быть абсолютным;
-2. не содержать parent/current-directory traversal syntax;
-3. быть представлен в `MappingTable`;
-4. иметь `Execute` access в Bundle declaration.
+Executable path является частью plan и должен быть абсолютным, не содержать parent/current-directory traversal syntax, быть представлен в `MappingTable` и иметь `Execute` access в Bundle declaration.
 
 Проверка navigation syntax выполняется по исходному pathname до возможной нормализации `Path`, чтобы `.` и `..` не исчезали из security check.
 
 ## Launch context boundary
 
-`ApplicationLaunchContext` является типизированным execution context для одного запуска и содержит:
+`ApplicationLaunchContext` является типизированным execution context для одного запуска и содержит process-local Linux namespaces, immutable System Image source, отдельный staging parent для runtime state и явно доверенные source roots.
 
-- process-local Linux namespaces;
-- immutable System Image source;
-- отдельный staging parent для runtime state.
-
-До создания staging directory context проверяется. Оба filesystem roots должны быть абсолютными, без `.`/`..`, а staging parent должен находиться вне System Image base-root tree. Runtime state не должен записываться в immutable System Image.
+До создания staging directory context проверяется. Все roots должны быть абсолютными, без `.`/`..`; staging parent должен находиться вне System Image base-root tree; trusted source roots не могут указывать на host root или staging content. Runtime state не записывается в immutable System Image.
 
 ## Namespace materialization
 
@@ -279,9 +266,9 @@ Executable path является частью plan и должен:
 
 Logical root создаётся как tmpfs в private mount namespace; staging directory на persistent storage является только mountpoint и не является backing store для `/`.
 
-Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`. Это устраняет pathname TOCTOU между проверкой source и bind operation.
+Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`.
 
-Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
+Создание process staging и logical root происходит только после успешной authorization и session revalidation. Не committed staging root защищён cleanup guard и удаляется при setup/spawn/exec failure. После process exit runtime удаляет staging root и namespace support directory.
 
 ## Ownership model
 
@@ -295,19 +282,6 @@ luna-app-runtime
 ApplicationInstance
 ```
 
-Внутри ApplicationInstance:
-
-```text
-ApplicationInstance
-    ├── ApplicationPlan
-    ├── RuntimeSpec / RuntimeKind
-    ├── luna-root-mapping
-    │      └── MappingPlan
-    ├── luna-security
-    │      └── AuthorizedApplicationPlan
-    └── trusted-setup
-```
-
 `luna-system-runtime` остаётся system-wide supervisor. `luna-app-runtime` владеет application execution lifecycle и внутренним trusted setup layer. Generic `luna-runtime` daemon отсутствует.
 
 ## Не владеет
@@ -316,28 +290,26 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 
 ## Тестовый контракт
 
-План проверяется отдельно от Linux mount/exec tests:
+План и lifecycle проверяются отдельно от privileged Linux mount/exec tests:
 
-- inactive session отклоняется;
-- невалидный bundle отклоняется;
-- runtime/mapping mismatch отклоняется до authorization;
-- executable вне mapping отклоняется;
-- navigation syntax `.`/`..` отклоняется;
-- foreign principal отклоняется;
-- `Deny` не создаёт authorized plan;
-- `Allow` создаёт typed `AuthorizedApplicationPlan`;
-- authorization ordering сохраняется;
-- отказ останавливает дальнейшую authorization pipeline;
+- `Created → Starting → Running → Stopping → Stopped` разрешён;
+- `Starting → Failed`, `Running → Crashed` и `Stopping → Failed` разрешены;
+- terminal states не могут перейти обратно в `Running`;
+- lifecycle/process mutation APIs недоступны внешнему caller;
+- inactive и foreign session отклоняются на launch boundary;
+- runtime принимает только `AuthorizedApplicationPlan`;
+- authorization denial не достигает launch boundary;
+- process identity и exit/crash outcome сохраняются;
+- normal exit переводит instance в `Stopped`;
+- abnormal exit переводит instance в `Crashed`;
+- uncommitted staging root удаляется;
 - invalid launch context отклоняет запуск до создания staging directory;
-- staging внутри System Image root отклоняется;
-- launcher принимает только authorized plan type;
 - trusted setup не может материализовать resource вне authorized plan;
-- trusted setup не может расширить capability/resource grant;
 - capability names неизвестные Registry не могут получить grant;
 - default application launch не требует PID namespace supervisor.
 
-Linux integration дополнительно проверяет cleanup staging root, mount namespace lifecycle, process lifecycle и process reaping.
+Linux integration дополнительно проверяет mount namespace lifecycle, process lifecycle и process reaping.
 
 ## Открыто
 
-Target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; production lifecycle reconciliation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; `/proc` visibility model; `/sys` visibility model; полноценный kernel enforcement.
+Production-safe child creation protocol, который отдельно передаёт trusted-setup и final `execve()` diagnostics вместо зависимости от `Command::pre_exec`; durable lifecycle recovery после restart supervisor; target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; `/proc` visibility model; `/sys` visibility model; полноценный kernel enforcement.
