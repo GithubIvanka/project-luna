@@ -42,9 +42,17 @@ if ! grep -Fq 'obj-$(CONFIG_RUST) += luna_exec.o' "$MAKEFILE"; then
     printf '%s\n' 'obj-$(CONFIG_RUST) += luna_exec.o' >> "$MAKEFILE"
 fi
 
+setup_snippet=''
+init_include_snippet=''
+init_call_snippet=''
+exec_bridge=''
+cleanup() {
+    rm -f "${setup_snippet:-}" "${init_include_snippet:-}" "${init_call_snippet:-}" "${exec_bridge:-}"
+}
+trap cleanup EXIT
+
 if ! grep -Fq 'x86_luna_boot_parse(boot_params.hdr.setup_data);' "$SETUP_C"; then
     setup_snippet="$(mktemp)"
-    trap 'rm -f "$setup_snippet" "$init_include_snippet" "$init_call_snippet" "$exec_bridge" 2>/dev/null || true' EXIT
     cat > "$setup_snippet" <<'EOF'
 #ifdef CONFIG_RUST
 extern void x86_luna_boot_parse(u64 setup_data_phys);
