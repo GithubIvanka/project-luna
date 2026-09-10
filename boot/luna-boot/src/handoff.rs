@@ -8,7 +8,6 @@ use uefi::boot::{self, AllocateType, MemoryType, PAGE_SIZE};
 use crate::boot_params::BootParams;
 use crate::error::{BootError, BootResult};
 use crate::gpt::Partition;
-use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;
 
 const ABI_MAJOR: u16 = 1;
@@ -31,18 +30,12 @@ pub const RECORD_BOOT_STATE: u16 = 7;
 #[derive(Clone, Copy)]
 pub enum BootMode { Normal = 0, Detailed = 1, Recovery = 2, Factory = 3, #[allow(dead_code)] External = 4 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct BootState {
     pub fallback_depth: u8,
     pub previous_attempt_failed: bool,
     pub previous_attempt_id: u64,
     pub failure_code: u32,
-}
-
-impl Default for BootState {
-    fn default() -> Self {
-        Self { fallback_depth: 0, previous_attempt_failed: false, previous_attempt_id: 0, failure_code: 0 }
-    }
 }
 
 pub struct LunaHandoff {
@@ -55,6 +48,7 @@ pub struct LunaHandoff {
 }
 
 impl LunaHandoff {
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         target: &BootTarget,
         mode: BootMode,
@@ -198,12 +192,12 @@ fn push_record(bytes: &mut Vec<u8>, ty: u16, flags: u16, payload: &[u8]) -> Boot
     bytes.extend_from_slice(&flags.to_le_bytes());
     bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     bytes.extend_from_slice(payload);
-    while bytes.len() % RECORD_ALIGN != 0 { bytes.push(0); }
+    while !bytes.len().is_multiple_of(RECORD_ALIGN) { bytes.push(0); }
     Ok(())
 }
 
 fn magic() -> u64 { u64::from_le_bytes(*b"LUNAHD01") }
-const fn div_ceil(value: usize, divisor: usize) -> usize { (value + divisor - 1) / divisor }
+fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
 
 global_asm!(r#"
     .section .text.luna_handoff,"ax"
