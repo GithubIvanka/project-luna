@@ -1,5 +1,6 @@
 //! UEFI Block I/O adapter used by the read-only ext4 layer.
 
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Deref;
 use core::ptr::NonNull;
