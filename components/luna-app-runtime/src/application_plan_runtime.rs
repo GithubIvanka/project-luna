@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use luna_common::RuntimeProfile;
 use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
 use luna_root_mapping::{LogicalPath, MappingKind};
-use luna_security::{CapabilityName, CapabilityRegistry, Principal};
+use luna_security::{CapabilityName, CapabilityRegistry};
 use luna_system_runtime::SystemRuntimeService;
 use luna_user_session::UserSession;
 
@@ -352,15 +352,16 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
 #[cfg(unix)]
 fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
     let registry = CapabilityRegistry::with_default_providers();
-    let principal = Principal::Application(plan.application().clone());
     for capability in plan.manifest().capabilities() {
         let name = CapabilityName::new(capability.to_owned())
             .map_err(|error| RuntimeError::Security(error.to_string()))?;
-        // The plan has already passed policy authorization. This second step
-        // only verifies that the approved capability has a registered provider.
-        registry
-            .grant(principal.clone(), name)
-            .map_err(|error| RuntimeError::Security(error.to_string()))?;
+        // The plan already carries policy authorization. Registry lookup only
+        // verifies that the approved capability has a provider.
+        if registry.provider_for(&name).is_none() {
+            return Err(RuntimeError::Security(format!(
+                "unknown capability provider: {name}"
+            )));
+        }
     }
     Ok(())
 }

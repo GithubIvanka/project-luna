@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
-use luna_bundle::{BundleManifest, validate_manifest};
+use luna_bundle::validate_manifest;
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_namespace::{LinuxMountNamespace, LogicalRoot, NamespaceError};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
@@ -262,10 +262,7 @@ impl ApplicationInstance {
         self.failure = Some(InstanceFailure::new(stage, message));
         Ok(())
     }
-    pub(crate) fn record_process_exit(
-        &mut self,
-        status: ExitStatus,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) fn record_process_exit(&mut self, status: ExitStatus) -> Result<(), RuntimeError> {
         match self.process {
             None => return Err(RuntimeError::NoProcess),
             Some(process) if process.exit.is_some() => {
@@ -283,10 +280,7 @@ impl ApplicationInstance {
         self.process.as_mut().expect("process checked above").exit = Some(outcome);
         Ok(())
     }
-    pub(crate) fn record_requested_stop(
-        &mut self,
-        status: ExitStatus,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) fn record_requested_stop(&mut self, status: ExitStatus) -> Result<(), RuntimeError> {
         match self.process {
             None => return Err(RuntimeError::NoProcess),
             Some(process) if process.exit.is_some() => {
@@ -333,7 +327,10 @@ impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidTransition { from, to } => {
-                write!(f, "invalid application instance transition from {from:?} to {to:?}")
+                write!(
+                    f,
+                    "invalid application instance transition from {from:?} to {to:?}"
+                )
             }
             Self::InvalidBundle(e) => write!(f, "invalid bundle: {e}"),
             Self::Mapping(e) => write!(f, "mapping error: {e}"),
@@ -556,8 +553,11 @@ impl ApplicationRuntime for InMemoryApplicationRuntime {
         validate_manifest(plan.manifest())
             .map_err(|e| RuntimeError::InvalidBundle(e.to_string()))?;
         for resource in plan.manifest().resources() {
-            let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
-            plan.mapping().resolve(&logical).map_err(RuntimeError::Mapping)?;
+            let logical =
+                LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
+            plan.mapping()
+                .resolve(&logical)
+                .map_err(RuntimeError::Mapping)?;
         }
         let id = self.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
@@ -647,10 +647,9 @@ impl LinuxApplicationRuntime {
         let status = match runtime.terminate_supervised_process(process) {
             Ok(status) => status,
             Err(error) => {
-                self.model.instance_mut(id)?.record_failure(
-                    FailureStage::Stopping,
-                    error.to_string(),
-                )?;
+                self.model
+                    .instance_mut(id)?
+                    .record_failure(FailureStage::Stopping, error.to_string())?;
                 return Err(error.into());
             }
         };
