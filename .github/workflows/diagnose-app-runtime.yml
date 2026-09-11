@@ -1,8 +1,8 @@
-name: Diagnose app runtime validation
+name: Apply app runtime boundary fixes
 
 on:
   push:
-    branches: [develop]
+    branches: [sol/app-runtime-work]
     paths:
       - .github/workflows/diagnose-app-runtime.yml
 
@@ -10,33 +10,171 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
-      - name: Install native GUI build dependencies
+          ref: sol/app-runtime-work
+      - name: Apply scoped fixes
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev pkg-config
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('components/luna-app-runtime/src/lib.rs')
+          s = p.read_text()
+          s = s.replace('use luna_bundle::{BundleManifest, validate_manifest};', 'use luna_bundle::validate_manifest;')
+          p.write_text(s)
+
+          p = Path('components/luna-app-runtime/src/application_plan_runtime.rs')
+          s = p.read_text()
+          s = s.replace('use luna_security::{CapabilityName, CapabilityRegistry, Principal};', 'use luna_security::{CapabilityName, CapabilityRegistry};')
+          old = '''    let registry = CapabilityRegistry::with_default_providers();
+              let principal = Principal::Application(plan.application().clone());
+              for capability in plan.manifest().capabilities() {
+                  let name = CapabilityName::new(capability.to_owned())
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+                  // The plan has already passed policy authorization. This second step
+                  // only verifies that the approved capability has a registered provider.
+                  registry
+                      .grant(principal.clone(), name)
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+              }
+          '''
+          new = '''    let registry = CapabilityRegistry::with_default_providers();
+              for capability in plan.manifest().capabilities() {
+                  let name = CapabilityName::new(capability.to_owned())
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+                  // Authorization is already represented by AuthorizedApplicationPlan.
+                  // Registry lookup only verifies that an approved capability has a provider.
+                  if registry.provider_for(&name).is_none() {
+                      return Err(RuntimeError::Security(format!(
+                          "unknown capability provider: {name}"
+                      )));
+                  }
+              }
+          '''
+          if old not in s:
+              raise SystemExit('capability validation block not found')
+          p.write_text(s.replace(old, new))
+
+          p = Path('components/luna-security/src/capability.rs')
+          s = p.read_text()
+          old = '''impl CapabilityGrant {
+              pub(crate) fn new(
+                  principal: Principal,
+                  capability: CapabilityName,
+                  provider: impl Into<String>,
+              ) -> Self {
+                  Self {
+                      principal,
+                      capability,
+                      provider: provider.into(),
+                  }
+              }
+
+          '''
+          if old not in s:
+              raise SystemExit('grant constructor block not found')
+          s = s.replace(old, 'impl CapabilityGrant {\n')
+          old = '''    pub fn grant(
+                  &self,
+                  principal: Principal,
+                  capability: CapabilityName,
+              ) -> Result<CapabilityGrant, SecurityError> {
+                  let provider = self
+                      .provider_for(&capability)
+                      .ok_or_else(|| SecurityError::new(format!("unknown capability: {capability}")))?;
+                  Ok(CapabilityGrant::new(principal, capability, provider))
+              }
+
+          '''
+          if old not in s:
+              raise SystemExit('registry grant block not found')
+          s = s.replace(old, '')
+          s = s.replace('    use crate::Principal;\n    use luna_common::BundleId;\n', '')
+          old = '''    #[test]
+              fn unknown_capability_cannot_be_granted() {
+                  let registry = CapabilityRegistry::new();
+                  let principal = Principal::Application(BundleId::from("example.app"));
+                  let result = registry.grant(principal, CapabilityName::new("network").unwrap());
+                  assert!(result.is_err());
+              }
+
+              #[test]
+              fn registered_capability_produces_typed_grant() {
+                  let mut registry = CapabilityRegistry::new();
+                  let name = CapabilityName::new("network").unwrap();
+                  registry.register(name.clone(), "network").unwrap();
+                  let principal = Principal::Application(BundleId::from("example.app"));
+                  let grant = registry.grant(principal.clone(), name.clone()).unwrap();
+                  assert_eq!(grant.principal(), &principal);
+                  assert_eq!(grant.capability(), &name);
+                  assert_eq!(grant.provider(), "network");
+              }
+
+          '''
+          new = '''    #[test]
+              fn registry_lookup_does_not_create_a_grant() {
+                  let mut registry = CapabilityRegistry::new();
+                  let name = CapabilityName::new("network").unwrap();
+                  assert_eq!(registry.provider_for(&name), None);
+                  registry.register(name.clone(), "network").unwrap();
+                  assert_eq!(registry.provider_for(&name), Some("network"));
+              }
+
+          '''
+          if old not in s:
+              raise SystemExit('grant tests block not found')
+          p.write_text(s.replace(old, new))
+
+          p = Path('components/luna-common/src/profile.rs')
+          s = p.read_text()
+          old = '''        profile
+                      .add_resource("/etc", [ResourceAccess::Read])
+                      .expect("built-in profile resource is valid");
+          '''
+          if old not in s:
+              raise SystemExit('/etc profile block not found')
+          s = s.replace(old, '')
+          s = s.replace('assert_eq!(resources.len(), 4);', 'assert_eq!(resources.len(), 3);')
+          s = s.replace('''        assert_eq!(resources[0].0, "/etc");
+                  assert_eq!(resources[1].0, "/lib");
+                  assert_eq!(resources[2].0, "/lib64");
+                  assert_eq!(resources[3].0, "/usr");
+                  assert_eq!(
+                      resources[0].1.iter().copied().collect::<Vec<_>>(),
+                      vec![ResourceAccess::Read]
+                  );
+          ''', '''        assert_eq!(resources[0].0, "/lib");
+                  assert_eq!(resources[1].0, "/lib64");
+                  assert_eq!(resources[2].0, "/usr");
+                  assert!(resources.iter().all(|(_, access)| {
+                      access.contains(&ResourceAccess::Read)
+                          && access.contains(&ResourceAccess::Execute)
+                  }));
+          ''')
+          p.write_text(s)
+          PY
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
-      - name: Capture formatting and clippy diagnostics
+      - name: Format scoped Rust files
+        run: rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs components/luna-security/src/capability.rs components/luna-common/src/profile.rs
+      - name: Validate affected crates
         run: |
-          {
-            echo '# cargo fmt diff'
-            cargo fmt --all
-            git diff --name-only
-            git diff -- components/luna-app-runtime
-            echo '# cargo clippy output'
-            cargo clippy --workspace --all-targets --all-features -- -D warnings
-          } > ci-app-runtime-report.txt 2>&1 || true
-      - name: Commit diagnostics
+          cargo check -p luna-app-runtime -p luna-security -p luna-common
+          cargo test -p luna-app-runtime -p luna-security -p luna-common
+          cargo clippy -p luna-app-runtime -p luna-security -p luna-common --all-targets --all-features -- -D warnings
+      - name: Commit scoped fixes and remove diagnostics artifacts
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f ci-app-runtime-report.txt
-          git commit -m "ci: capture app runtime diagnostics"
-          git push origin HEAD:develop
+          rm -f .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt
+          git add -A .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt \
+            components/luna-app-runtime/src/lib.rs \
+            components/luna-app-runtime/src/application_plan_runtime.rs \
+            components/luna-security/src/capability.rs \
+            components/luna-common/src/profile.rs
+          git commit -m "fix(app-runtime): enforce capability and runtime profile boundaries"
+          git push origin HEAD:sol/app-runtime-work
