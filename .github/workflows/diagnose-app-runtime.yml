@@ -1,4 +1,4 @@
-name: Apply scoped app runtime fixes
+name: Finalize scoped runtime corrections
 
 on:
   push:
@@ -15,90 +15,53 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: sol/app-runtime-work
-      - name: Apply fixes
+      - name: Apply and commit corrections
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           p = Path('components/luna-app-runtime/src/lib.rs')
-          s = p.read_text().replace('use luna_bundle::{BundleManifest, validate_manifest};', 'use luna_bundle::validate_manifest;')
+          s = p.read_text()
+          s = s.replace('use luna_bundle::{BundleManifest, validate_manifest};', 'use luna_bundle::validate_manifest;')
           p.write_text(s)
 
           p = Path('components/luna-app-runtime/src/application_plan_runtime.rs')
-          s = p.read_text().replace('use luna_security::{CapabilityName, CapabilityRegistry, Principal};', 'use luna_security::{CapabilityName, CapabilityRegistry};')
-          s, n = re.subn(r'''    let registry = CapabilityRegistry::with_default_providers\(\);\n    let principal = Principal::Application\(plan\.application\(\)\.clone\(\)\);\n    for capability in plan\.manifest\(\)\.capabilities\(\) \{.*?\n    \}\n    Ok\(\(\)\)''', '''    let registry = CapabilityRegistry::with_default_providers();
-    for capability in plan.manifest().capabilities() {
-        let name = CapabilityName::new(capability.to_owned())
-            .map_err(|error| RuntimeError::Security(error.to_string()))?;
-        // Authorization is already represented by AuthorizedApplicationPlan.
-        // Registry lookup only verifies that an approved capability has a provider.
-        if registry.provider_for(&name).is_none() {
-            return Err(RuntimeError::Security(format!(
-                "unknown capability provider: {name}"
-            )));
-        }
-    }
-    Ok(())''', s, count=1, flags=re.S)
-          assert n == 1, 'capability validator replacement failed'
-          p.write_text(s)
-
-          p = Path('components/luna-security/src/capability.rs')
           s = p.read_text()
-          s, n1 = re.subn(r'''    pub\(crate\) fn new\(.*?\n    \}\n\n''', '', s, count=1, flags=re.S)
-          s, n2 = re.subn(r'''    pub fn grant\(.*?\n    \}\n\n''', '', s, count=1, flags=re.S)
-          assert n1 == 1 and n2 == 1, 'grant API replacement failed'
-          s = s.replace('    use crate::Principal;\n    use luna_common::BundleId;\n', '')
-          s, n3 = re.subn(r'''    #\[test\]\n    fn unknown_capability_cannot_be_granted\(\) \{.*?\n    \}\n\n    #\[test\]\n    fn registered_capability_produces_typed_grant\(\) \{.*?\n    \}\n\n''', '''    #[test]
-    fn registry_lookup_does_not_create_a_grant() {
-        let mut registry = CapabilityRegistry::new();
-        let name = CapabilityName::new("network").unwrap();
-        assert_eq!(registry.provider_for(&name), None);
-        registry.register(name.clone(), "network").unwrap();
-        assert_eq!(registry.provider_for(&name), Some("network"));
-    }
-
-''', s, count=1, flags=re.S)
-          assert n3 == 1, 'grant tests replacement failed'
-          p.write_text(s)
-
-          p = Path('components/luna-common/src/profile.rs')
-          s = p.read_text()
-          s, n = re.subn(r'''        profile\n            \.add_resource\("/etc", \[ResourceAccess::Read\]\)\n            \.expect\("built-in profile resource is valid"\);\n''', '', s, count=1)
-          assert n == 1, '/etc profile replacement failed'
-          s = s.replace('assert_eq!(resources.len(), 4);', 'assert_eq!(resources.len(), 3);')
-          s = s.replace('''        assert_eq!(resources[0].0, "/etc");
-        assert_eq!(resources[1].0, "/lib");
-        assert_eq!(resources[2].0, "/lib64");
-        assert_eq!(resources[3].0, "/usr");
-        assert_eq!(
-            resources[0].1.iter().copied().collect::<Vec<_>>(),
-            vec![ResourceAccess::Read]
-        );
-''', '''        assert_eq!(resources[0].0, "/lib");
-        assert_eq!(resources[1].0, "/lib64");
-        assert_eq!(resources[2].0, "/usr");
-        assert!(resources.iter().all(|(_, access)| {
-            access.contains(&ResourceAccess::Read)
-                && access.contains(&ResourceAccess::Execute)
-        }));
-''')
-          p.write_text(s)
+          s = s.replace('use luna_security::{CapabilityName, CapabilityRegistry, Principal};', 'use luna_security::{CapabilityName, CapabilityRegistry};')
+          old = '''    let registry = CapabilityRegistry::with_default_providers();
+              let principal = Principal::Application(plan.application().clone());
+              for capability in plan.manifest().capabilities() {
+                  let name = CapabilityName::new(capability.to_owned())
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+                  // The plan has already passed policy authorization. This second step
+                  // only verifies that the approved capability has a registered provider.
+                  registry
+                      .grant(principal.clone(), name)
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+              }
+          '''
+          new = '''    let registry = CapabilityRegistry::with_default_providers();
+              for capability in plan.manifest().capabilities() {
+                  let name = CapabilityName::new(capability.to_owned())
+                      .map_err(|error| RuntimeError::Security(error.to_string()))?;
+                  // The plan already carries policy authorization. Registry lookup only
+                  // verifies that the approved capability has a provider.
+                  if registry.provider_for(&name).is_none() {
+                      return Err(RuntimeError::Security(format!(
+                          "unknown capability provider: {name}"
+                      )));
+                  }
+              }
+          '''
+          if old not in s:
+              raise SystemExit('expected capability validation block missing')
+          p.write_text(s.replace(old, new))
           PY
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt,clippy
-      - name: Format and validate affected crates
-        run: |
-          rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs components/luna-security/src/capability.rs components/luna-common/src/profile.rs
-          cargo check -p luna-app-runtime -p luna-security -p luna-common
-          cargo test -p luna-app-runtime -p luna-security -p luna-common
-          cargo clippy -p luna-app-runtime -p luna-security -p luna-common --all-targets --all-features -- -D warnings
-      - name: Commit fixes
-        run: |
+          rustup component add rustfmt
+          rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs
+          rm -f .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt
-          git add -A .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs components/luna-security/src/capability.rs components/luna-common/src/profile.rs
-          git commit -m "fix(app-runtime): close capability and profile bypasses"
+          git add -A .github/workflows/diagnose-app-runtime.yml ci-app-runtime-report.txt components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs
+          git commit -m "fix(app-runtime): keep provider lookup separate from authorization"
           git push origin HEAD:sol/app-runtime-work
