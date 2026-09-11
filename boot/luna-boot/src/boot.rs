@@ -2,7 +2,10 @@
 
 use alloc::vec::Vec;
 use uefi::boot::{self, open_protocol_exclusive};
+use uefi::mem::memory_map::MemoryMapOwned;
 use uefi::proto::console::text::Input;
+use uefi::runtime::{self, ResetType};
+use uefi::Status;
 
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
@@ -10,7 +13,7 @@ use crate::error::{BootError, BootResult};
 use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::{BootMode, BootState, KernelHandoff, LunaHandoff, PreparedIdentity};
-use crate::kernel::KernelLoader;
+use crate::kernel::{KernelLoader, PreparedKernel};
 use crate::menu::{BootMenu, BootMenuAction, BootSelection};
 use crate::paging::prepare_identity_map;
 use crate::splash;
@@ -164,10 +167,26 @@ pub fn boot_flow() -> BootResult<()> {
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
     reserved.push((page_table, PAGE_TABLE_PAGES));
 
+    // From this point onward Boot Services are gone. The post-EBS path is
+    // deliberately non-returning so failures can never reach efi_main().
     let final_map = unsafe { boot::exit_boot_services(None) };
-    prepared
+    enter_kernel_after_exit_boot_services(final_map, prepared, page_table, luna_handoff, reserved)
+}
+
+fn enter_kernel_after_exit_boot_services(
+    final_map: MemoryMapOwned,
+    mut prepared: PreparedKernel,
+    page_table: u64,
+    luna_handoff: LunaHandoff,
+    reserved: Vec<(u64, usize)>,
+) -> ! {
+    if prepared
         .boot_params
-        .set_e820_from_map_reserved(&final_map, &reserved)?;
+        .set_e820_from_map_reserved(&final_map, &reserved)
+        .is_err()
+    {
+        runtime::reset(ResetType::COLD, Status::ABORTED, None);
+    }
 
     let handoff = KernelHandoff {
         kernel_load_address: prepared.kernel_address,
@@ -182,7 +201,7 @@ pub fn boot_flow() -> BootResult<()> {
     };
 
     if !handoff.is_ready() {
-        return Err(BootError::InvalidKernel);
+        runtime::reset(ResetType::COLD, Status::ABORTED, None);
     }
 
     unsafe {
