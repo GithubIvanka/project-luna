@@ -1,0 +1,49 @@
+name: Remove legacy app runtime namespace path
+
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/remove-legacy-app-runtime-path.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: sol/app-runtime-work
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Remove bypass and validate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('components/luna-app-runtime/src/lib.rs')
+          s = p.read_text()
+          s = s.replace('use luna_namespace::{LinuxMountNamespace, LogicalRoot, NamespaceError};', 'use luna_namespace::NamespaceError;')
+          s = s.replace('''use luna_security::{
+              AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
+          };''', '''use luna_security::{AuthorizationRequest, Decision, PolicyAuthority};''')
+          s, n1 = re.subn(r'''pub struct NamespacePreparation<'a> \{.*?\n\}\n\n#\[derive\(Debug\)\]\npub struct PreparedApplicationNamespace \{.*?\n\}\nimpl PreparedApplicationNamespace \{.*?\n\}\n\n''', '', s, count=1, flags=re.S)
+          s, n2 = re.subn(r'''    pub fn prepare_authorized_namespace_for_session\(.*?\n    \}\n    fn require_allow\(.*?\n    \}\n''', '', s, count=1, flags=re.S)
+          assert n1 == 1 and n2 == 1, (n1, n2)
+          p.write_text(s)
+          PY
+          rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs
+          cargo fmt --manifest-path components/luna-app-runtime/Cargo.toml -- --check
+          cargo check --manifest-path components/luna-app-runtime/Cargo.toml
+          cargo test --manifest-path components/luna-app-runtime/Cargo.toml
+          cargo clippy --manifest-path components/luna-app-runtime/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Commit validated removal
+        run: |
+          rm -f .github/workflows/remove-legacy-app-runtime-path.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .github/workflows/remove-legacy-app-runtime-path.yml components/luna-app-runtime/src/lib.rs
+          git commit -m "refactor(app-runtime): remove legacy whole-image launch path"
+          git push origin HEAD:sol/app-runtime-work
