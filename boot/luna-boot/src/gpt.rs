@@ -2,6 +2,7 @@
 //! carrying stable raw GPT GUID bytes in the boot handoff.
 
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::{BootError, BootResult};
