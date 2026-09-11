@@ -1,0 +1,43 @@
+name: Validate luna app runtime component
+
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/app-runtime-validation.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: sol/app-runtime-work
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Run required commands and publish report
+        shell: bash
+        run: |
+          set +e
+          : > app-runtime-validation.txt
+          run_check() {
+            name="$1"; shift
+            printf '\n===== %s =====\n' "$name" >> app-runtime-validation.txt
+            "$@" >> app-runtime-validation.txt 2>&1
+            status=$?
+            printf '\nSTATUS=%s\n' "$status" >> app-runtime-validation.txt
+          }
+          run_check "cargo fmt -- --check" cargo fmt --manifest-path components/luna-app-runtime/Cargo.toml -- --check
+          run_check "cargo check" cargo check --manifest-path components/luna-app-runtime/Cargo.toml
+          run_check "cargo test" cargo test --manifest-path components/luna-app-runtime/Cargo.toml
+          run_check "cargo clippy --all-targets --all-features -- -D warnings" cargo clippy --manifest-path components/luna-app-runtime/Cargo.toml --all-targets --all-features -- -D warnings
+          run_check "workspace cargo fmt --all -- --check" cargo fmt --all -- --check
+          rm -f .github/workflows/app-runtime-validation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A .github/workflows/app-runtime-validation.yml app-runtime-validation.txt
+          git commit -m "ci: record app runtime validation"
+          git push origin HEAD:sol/app-runtime-work
