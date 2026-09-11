@@ -111,8 +111,7 @@ mod tests {
         assert_eq!(resources[1].0, "/lib64");
         assert_eq!(resources[2].0, "/usr");
         assert!(resources.iter().all(|(_, access)| {
-            access.contains(&ResourceAccess::Read)
-                && access.contains(&ResourceAccess::Execute)
+            access.contains(&ResourceAccess::Read) && access.contains(&ResourceAccess::Execute)
         }));
         assert!(resources.iter().all(|(path, _)| *path != "/etc"));
     }

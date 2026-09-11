@@ -119,7 +119,7 @@ fn runtime_boundary_accepts_only_authorized_plan_for_active_session() {
 #[test]
 fn authorization_denial_never_reaches_process_launch_boundary() {
     let session = active_session(2);
-    let mut runtime = TestRuntime::default();
+    let runtime = TestRuntime::default();
 
     assert!(plan(&session).authorize(&DenyAll).is_err());
     assert_eq!(runtime.launches, 0);
