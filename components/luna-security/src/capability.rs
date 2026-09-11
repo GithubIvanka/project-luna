@@ -47,6 +47,8 @@ impl fmt::Display for CapabilityName {
     }
 }
 
+/// An authority-created capability grant. Its fields are private so provider
+/// registration alone cannot construct or expand it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityGrant {
     principal: Principal,
@@ -55,18 +57,6 @@ pub struct CapabilityGrant {
 }
 
 impl CapabilityGrant {
-    pub(crate) fn new(
-        principal: Principal,
-        capability: CapabilityName,
-        provider: impl Into<String>,
-    ) -> Self {
-        Self {
-            principal,
-            capability,
-            provider: provider.into(),
-        }
-    }
-
     pub fn principal(&self) -> &Principal {
         &self.principal
     }
