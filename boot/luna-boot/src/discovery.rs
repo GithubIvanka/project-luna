@@ -103,7 +103,6 @@ impl InitManifest {
 pub struct InitRecord {
     pub version: String,
     pub init_path: String,
-    pub manifest_path: String,
     pub manifest: InitManifest,
 }
 
@@ -135,7 +134,7 @@ impl BootCatalog {
             let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
             let manifest = match InitManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
             if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) { continue; }
-            inits.push(InitRecord { version: manifest.version.clone(), init_path, manifest_path, manifest });
+            inits.push(InitRecord { version: manifest.version.clone(), init_path, manifest });
         }
         inits.sort_by(|a, b| version_cmp(&b.version, &a.version));
 
@@ -151,7 +150,6 @@ impl BootCatalog {
 
             let Some(init) = select_init(&manifest, &inits) else { continue; };
             let Some(kernel) = select_kernel(&init.manifest, &kernels) else { continue; };
-            let init_manifest_path = init.manifest_path.clone();
             let mut target = BootTarget::new(
                 match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
                 manifest.name.clone(),
@@ -162,7 +160,6 @@ impl BootCatalog {
                 kernel.kernel_path,
                 kernel.version.clone(),
             );
-            let _ = init_manifest_path;
             target = target.with_cmdline("quiet loglevel=3");
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
