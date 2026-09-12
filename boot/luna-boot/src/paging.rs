@@ -68,7 +68,9 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
         let pml5 = base as *mut u64;
         let pml4 = (base + PAGE_SIZE as u64) as *mut u64;
         let pdpt = (base + 2 * PAGE_SIZE as u64) as *mut u64;
-        pml5.add(0).write((pml4 as u64) | 0x3);
+        unsafe {
+            pml5.add(0).write((pml4 as u64) | 0x3);
+        }
         (pml4, pdpt)
     } else {
         let pml4 = base as *mut u64;
@@ -76,17 +78,23 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
         (pml4, pdpt)
     };
 
-    pml4.add(0).write((pdpt as u64) | 0x3);
+    unsafe {
+        pml4.add(0).write((pdpt as u64) | 0x3);
+    }
 
     let pd_base = if use_five_level { 3 } else { 2 };
     for pd_index in 0..pd_count {
         let pd = base + (pd_base + pd_index) as u64 * PAGE_SIZE as u64;
-        pdpt.add(pd_index).write(pd | 0x3);
+        unsafe {
+            pdpt.add(pd_index).write(pd | 0x3);
+        }
         let pd_ptr = pd as *mut u64;
         for entry in 0..ENTRIES_PER_TABLE {
             let physical =
                 (pd_index as u64 * ENTRIES_PER_TABLE as u64 + entry as u64) * PAGE_2M;
-            pd_ptr.add(entry).write(physical | 0x83);
+            unsafe {
+                pd_ptr.add(entry).write(physical | 0x83);
+            }
         }
     }
 
