@@ -1,0 +1,93 @@
+name: Finalize P0 hardening validation
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-hardening-repair.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - name: Repair and validate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('components/luna-namespace/src/lib.rs'); s=p.read_text()
+          s,n=re.subn(r'\n    fn apply_mappings_at_root\(.*?(?=\n    pub fn apply_mapping)', '\n', s, count=1, flags=re.S)
+          assert n==1
+          p.write_text(s)
+
+          p=Path('components/luna-system-runtime/src/lib.rs'); s=p.read_text()
+          marker='''    #[test]
+              fn system_runtime_owns_session_and_process_lifecycle()'''
+          test='''    #[cfg(target_os = "linux")]
+              #[test]
+              fn supervised_exec_does_not_inherit_unapproved_fd() {
+                  use std::os::fd::RawFd;
+
+                  let fd: RawFd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+                  assert!(fd >= 3);
+                  unsafe {
+                      let flags = libc::fcntl(fd, libc::F_GETFD);
+                      assert!(flags >= 0);
+                      assert_eq!(libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC), 0);
+                  }
+
+                  let mut supervisor = ProcessSupervisor::new();
+                  let command = format!("test ! -e /proc/self/fd/{fd}");
+                  let id = supervisor
+                      .spawn_with_pre_exec("sh", ["-c", command.as_str()], || Ok(()))
+                      .unwrap();
+                  let status = loop {
+                      match supervisor.poll(id).unwrap() {
+                          ProcessState::Running => std::thread::sleep(std::time::Duration::from_millis(5)),
+                          ProcessState::Exited(status) => break status,
+                      }
+                  };
+                  unsafe { libc::close(fd); }
+                  assert!(status.success());
+              }
+
+          '''+marker
+          assert marker in s
+          p.write_text(s.replace(marker,test,1))
+
+          p=Path('components/luna-namespace/src/lib.rs'); s=p.read_text()
+          marker='''    #[test]
+              fn namespace_type_is_zero_sized()'''
+          test='''    #[test]
+              fn trusted_runtime_subtree_grants_read_and_execute_without_write() {
+                  let rule = MappingRule::subtree(
+                      LogicalPath::new("/lib64").unwrap(),
+                      PhysicalPath::new("/system/lib64"),
+                  )
+                  .with_access([ResourceAccess::Read, ResourceAccess::Execute]);
+                  let access = landlock_access(&rule).unwrap();
+                  assert!(access.contains(landlock::AccessFs::ReadDir));
+                  assert!(access.contains(landlock::AccessFs::ReadFile));
+                  assert!(access.contains(landlock::AccessFs::Execute));
+                  assert!(!access.contains(landlock::AccessFs::WriteFile));
+              }
+
+          '''+marker
+          assert marker in s
+          p.write_text(s.replace(marker,test,1))
+          PY
+          rustfmt --edition 2024 components/luna-namespace/src/lib.rs components/luna-system-runtime/src/lib.rs
+          cargo check -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo test -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo clippy -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --all-targets -- -D warnings
+      - name: Commit validated hardening
+        run: |
+          rm -f .github/workflows/p0-hardening-repair.yml p0-hardening-diagnostic.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(app-runtime): complete P0 launch hardening"
+          git push origin HEAD:sol/app-runtime-work
