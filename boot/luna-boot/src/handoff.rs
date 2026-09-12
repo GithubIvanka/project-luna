@@ -56,20 +56,19 @@ impl LunaHandoff {
         system: &Partition,
         data: &Partition,
         manifest_bytes: &[u8],
-        image_bytes: &[u8],
+        image_bytes: &[u8; 32],
         kernel: &PreparedIdentity,
         init_address: u64,
         init_size: usize,
         init_digest: [u8; 32],
     ) -> BootResult<Self> {
         let manifest_identity = *blake3::hash(manifest_bytes).as_bytes();
-        let image_digest = *blake3::hash(image_bytes).as_bytes();
 
         let mut bytes = Vec::with_capacity(1024);
         bytes.resize(HEADER_ALIGNED_SIZE, 0);
         push_partition_record(&mut bytes, RECORD_SYSTEM_PARTITION, system)?;
         push_partition_record(&mut bytes, RECORD_DATA_PARTITION, data)?;
-        push_system_image_record(&mut bytes, target, &manifest_identity, &image_digest)?;
+        push_system_image_record(&mut bytes, target, &manifest_identity, image_digest)?;
         push_kernel_record(&mut bytes, target, kernel)?;
         let mut init = Vec::with_capacity(56);
         init.extend_from_slice(&init_address.to_le_bytes());
