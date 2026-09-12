@@ -162,7 +162,7 @@ pub fn boot_flow() -> BootResult<()> {
         prepared.init_digest,
     )?;
 
-    let mut e820_ext = E820Extension::allocate()?;
+    let e820_ext = E820Extension::allocate()?;
     prepared.boot_params.set_setup_data(e820_ext.address)?;
     let transition_entry = transition_entry_address();
     let stack_pointer = current_stack_pointer();
