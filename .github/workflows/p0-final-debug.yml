@@ -1,0 +1,35 @@
+name: Capture final P0 validation failure
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-final-debug.yml]
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - run: |
+          awk '/python3 - <<'\''PY'\''/{flag=1;next} /^          PY$/{flag=0} flag{sub(/^          /,""); print}' .github/workflows/p0-final-validation.yml > /tmp/apply.py
+          set +e
+          python3 /tmp/apply.py > p0-final-diagnostic.txt 2>&1
+          echo python_status=$? >> p0-final-diagnostic.txt
+          rustfmt --edition 2024 components/luna-app-runtime/tests/contracts.rs components/luna-namespace/src/lib.rs >> p0-final-diagnostic.txt 2>&1
+          echo rustfmt_status=$? >> p0-final-diagnostic.txt
+          cargo check -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime >> p0-final-diagnostic.txt 2>&1
+          echo check_status=$? >> p0-final-diagnostic.txt
+          cargo test -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime >> p0-final-diagnostic.txt 2>&1
+          echo test_status=$? >> p0-final-diagnostic.txt
+          cargo clippy -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --all-targets -- -D warnings >> p0-final-diagnostic.txt 2>&1
+          echo clippy_status=$? >> p0-final-diagnostic.txt
+          set -e
+          rm -f .github/workflows/p0-final-validation.yml .github/workflows/p0-final-debug.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "ci: capture final P0 validation failure"
+          git push origin HEAD:sol/app-runtime-work
