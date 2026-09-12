@@ -28,7 +28,14 @@ pub const RECORD_BOOT_MODE: u16 = 6;
 pub const RECORD_BOOT_STATE: u16 = 7;
 
 #[derive(Clone, Copy)]
-pub enum BootMode { Normal = 0, Detailed = 1, Recovery = 2, Factory = 3, #[allow(dead_code)] External = 4 }
+pub enum BootMode {
+    Normal = 0,
+    Detailed = 1,
+    Recovery = 2,
+    Factory = 3,
+    #[allow(dead_code)]
+    External = 4,
+}
 
 #[derive(Clone, Copy, Default)]
 pub struct BootState {
@@ -108,23 +115,34 @@ impl LunaHandoff {
         let checksum = *blake3::hash(&bytes).as_bytes();
         bytes[52..84].copy_from_slice(&checksum);
 
-        let total_node_size = SETUP_DATA_NODE_SIZE.checked_add(bytes.len()).ok_or(BootError::InvalidKernel)?;
+        let total_node_size = SETUP_DATA_NODE_SIZE
+            .checked_add(bytes.len())
+            .ok_or(BootError::InvalidKernel)?;
         let pages = div_ceil(total_node_size, PAGE_SIZE);
         let allocation = boot::allocate_pages(
             AllocateType::MaxAddress(0xffff_ffff),
             MemoryType::LOADER_DATA,
             pages.max(1),
-        ).map_err(|_| BootError::MemoryAllocationFailed)?;
+        )
+        .map_err(|_| BootError::MemoryAllocationFailed)?;
         let address = allocation.as_ptr() as u64;
         unsafe {
             core::ptr::write_bytes(address as *mut u8, 0, pages * PAGE_SIZE);
             let node = address as *mut u8;
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), node.add(SETUP_DATA_NODE_SIZE), bytes.len());
+            core::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                node.add(SETUP_DATA_NODE_SIZE),
+                bytes.len(),
+            );
             (node.add(0) as *mut u64).write(0);
             (node.add(8) as *mut u32).write(SETUP_DATA_TYPE);
             (node.add(12) as *mut u32).write(bytes.len() as u32);
         }
-        Ok(Self { address, size: bytes.len(), allocation_pages: pages })
+        Ok(Self {
+            address,
+            size: bytes.len(),
+            allocation_pages: pages,
+        })
     }
 }
 
@@ -132,12 +150,16 @@ pub struct PreparedIdentity {
     pub kernel_digest: [u8; 32],
 }
 impl PreparedIdentity {
-    fn digest_prefix(&self) -> u64 { u64::from_le_bytes(self.kernel_digest[..8].try_into().unwrap()) }
+    fn digest_prefix(&self) -> u64 {
+        u64::from_le_bytes(self.kernel_digest[..8].try_into().unwrap())
+    }
 }
 
 fn push_partition_record(bytes: &mut Vec<u8>, ty: u16, partition: &Partition) -> BootResult<()> {
     let label = partition.label.as_bytes();
-    if label.len() > u16::MAX as usize { return Err(BootError::Unsupported("partition label is too long")); }
+    if label.len() > u16::MAX as usize {
+        return Err(BootError::Unsupported("partition label is too long"));
+    }
     let mut payload = Vec::with_capacity(36 + label.len());
     payload.extend_from_slice(&partition.disk_guid);
     payload.extend_from_slice(&partition.partition_guid);
@@ -147,13 +169,26 @@ fn push_partition_record(bytes: &mut Vec<u8>, ty: u16, partition: &Partition) ->
     push_record(bytes, ty, 0, &payload)
 }
 
-fn push_system_image_record(bytes: &mut Vec<u8>, target: &BootTarget, manifest: &[u8; 32], image: &[u8; 32]) -> BootResult<()> {
+fn push_system_image_record(
+    bytes: &mut Vec<u8>,
+    target: &BootTarget,
+    manifest: &[u8; 32],
+    image: &[u8; 32],
+) -> BootResult<()> {
     let family = target.image_family.as_bytes();
     let version = target.system_version.as_bytes();
-    let filename = target.system_image_path.strip_prefix("/images/").ok_or(BootError::InvalidConfig)?;
+    let filename = target
+        .system_image_path
+        .strip_prefix("/images/")
+        .ok_or(BootError::InvalidConfig)?;
     let filename = filename.as_bytes();
-    if family.len() > u16::MAX as usize || version.len() > u16::MAX as usize || filename.len() > u16::MAX as usize {
-        return Err(BootError::Unsupported("System Image identity string is too long"));
+    if family.len() > u16::MAX as usize
+        || version.len() > u16::MAX as usize
+        || filename.len() > u16::MAX as usize
+    {
+        return Err(BootError::Unsupported(
+            "System Image identity string is too long",
+        ));
     }
     let mut payload = Vec::with_capacity(72 + family.len() + version.len() + filename.len());
     payload.extend_from_slice(&(family.len() as u16).to_le_bytes());
@@ -168,11 +203,17 @@ fn push_system_image_record(bytes: &mut Vec<u8>, target: &BootTarget, manifest: 
     push_record(bytes, RECORD_SYSTEM_IMAGE, 0, &payload)
 }
 
-fn push_kernel_record(bytes: &mut Vec<u8>, target: &BootTarget, kernel: &PreparedIdentity) -> BootResult<()> {
+fn push_kernel_record(
+    bytes: &mut Vec<u8>,
+    target: &BootTarget,
+    kernel: &PreparedIdentity,
+) -> BootResult<()> {
     let release = target.kernel_id.as_bytes();
     let artifact = target.kernel_path.as_bytes();
     let format = b"bzImage";
-    if release.len() > u16::MAX as usize || artifact.len() > u16::MAX as usize { return Err(BootError::Unsupported("kernel identity string is too long")); }
+    if release.len() > u16::MAX as usize || artifact.len() > u16::MAX as usize {
+        return Err(BootError::Unsupported("kernel identity string is too long"));
+    }
     let mut payload = Vec::with_capacity(72 + release.len() + artifact.len() + format.len());
     payload.extend_from_slice(&(release.len() as u16).to_le_bytes());
     payload.extend_from_slice(&(artifact.len() as u16).to_le_bytes());
@@ -186,17 +227,25 @@ fn push_kernel_record(bytes: &mut Vec<u8>, target: &BootTarget, kernel: &Prepare
 }
 
 fn push_record(bytes: &mut Vec<u8>, ty: u16, flags: u16, payload: &[u8]) -> BootResult<()> {
-    if payload.len() > u32::MAX as usize { return Err(BootError::Unsupported("handoff record is too large")); }
+    if payload.len() > u32::MAX as usize {
+        return Err(BootError::Unsupported("handoff record is too large"));
+    }
     bytes.extend_from_slice(&ty.to_le_bytes());
     bytes.extend_from_slice(&flags.to_le_bytes());
     bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     bytes.extend_from_slice(payload);
-    while !bytes.len().is_multiple_of(RECORD_ALIGN) { bytes.push(0); }
+    while !bytes.len().is_multiple_of(RECORD_ALIGN) {
+        bytes.push(0);
+    }
     Ok(())
 }
 
-fn magic() -> u64 { u64::from_le_bytes(*b"LUNAHD01") }
-fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
+fn magic() -> u64 {
+    u64::from_le_bytes(*b"LUNAHD01")
+}
+fn div_ceil(value: usize, divisor: usize) -> usize {
+    value.div_ceil(divisor)
+}
 
 /// Return the physical address of the assembly transition stub that remains
 /// executing immediately after CR3 is switched.
@@ -213,7 +262,8 @@ pub fn current_stack_pointer() -> u64 {
     stack
 }
 
-global_asm!(r#"
+global_asm!(
+    r#"
     .section .text.luna_handoff,"ax"
     .global luna_linux_entry
 luna_linux_entry:
@@ -249,7 +299,8 @@ luna_boot_gdt:
 luna_boot_gdt_ptr:
     .word 0x1f
     .quad luna_boot_gdt
-"#);
+"#
+);
 
 unsafe extern "sysv64" {
     fn luna_linux_entry(kernel_entry: u64, boot_params: u64, page_table: u64) -> !;

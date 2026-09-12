@@ -5,10 +5,10 @@ use alloc::vec::Vec;
 use core::ops::Deref;
 use core::ptr::NonNull;
 
-use uefi::boot::{self, open_protocol, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol};
+use uefi::Handle;
+use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol, open_protocol};
 use uefi::proto::media::block::BlockIO;
 use uefi::proto::{Protocol, ProtocolPointer};
-use uefi::Handle;
 
 use crate::error::{BootError, BootResult};
 use crate::ext4::BlockDevice;
@@ -19,7 +19,10 @@ struct BorrowedProtocol<P: Protocol + ?Sized>(NonNull<P>);
 
 impl<P: Protocol + ?Sized> BorrowedProtocol<P> {
     fn from_scoped(protocol: ScopedProtocol<P>) -> Self {
-        let ptr = protocol.get().map(NonNull::from).expect("GET_PROTOCOL returned a null interface");
+        let ptr = protocol
+            .get()
+            .map(NonNull::from)
+            .expect("GET_PROTOCOL returned a null interface");
         core::mem::forget(protocol);
         Self(ptr)
     }
@@ -86,7 +89,9 @@ impl UefiBlockDevice {
         let media = io.media();
         let block_size = media.block_size() as u64;
         if block_size == 0 || !(IO_CHUNK as u64).is_multiple_of(block_size) {
-            return Err(BootError::Unsupported("UEFI block size is not supported by the loader I/O buffer"));
+            return Err(BootError::Unsupported(
+                "UEFI block size is not supported by the loader I/O buffer",
+            ));
         }
         if block_count == 0 || start_lba.checked_add(block_count - 1).is_none() {
             return Err(BootError::FilesystemError);
@@ -95,19 +100,33 @@ impl UefiBlockDevice {
         if last_lba > media.last_block() {
             return Err(BootError::FilesystemError);
         }
-        Ok(Self { io, start_lba, block_count, block_size })
+        Ok(Self {
+            io,
+            start_lba,
+            block_count,
+            block_size,
+        })
     }
 
     /// Create a strict view spanning the whole physical disk.
     pub fn whole_disk(handle: Handle) -> BootResult<Self> {
         let io = open_shared::<BlockIO>(handle)?;
         let last_block = io.media().last_block();
-        let block_count = last_block.checked_add(1).ok_or(BootError::FilesystemError)?;
+        let block_count = last_block
+            .checked_add(1)
+            .ok_or(BootError::FilesystemError)?;
         let block_size = io.media().block_size() as u64;
         if block_size == 0 || !(IO_CHUNK as u64).is_multiple_of(block_size) {
-            return Err(BootError::Unsupported("UEFI block size is not supported by the loader I/O buffer"));
+            return Err(BootError::Unsupported(
+                "UEFI block size is not supported by the loader I/O buffer",
+            ));
         }
-        Ok(Self { io, start_lba: 0, block_count, block_size })
+        Ok(Self {
+            io,
+            start_lba: 0,
+            block_count,
+            block_size,
+        })
     }
 
     fn read_chunk(&mut self, lba: u64, dst: &mut [u8]) -> BootResult<()> {
@@ -124,10 +143,14 @@ impl UefiBlockDevice {
 }
 
 impl BlockDevice for UefiBlockDevice {
-    fn block_size(&self) -> u64 { self.block_size }
+    fn block_size(&self) -> u64 {
+        self.block_size
+    }
 
     fn read_at(&mut self, offset: u64, dst: &mut [u8]) -> BootResult<()> {
-        if dst.is_empty() { return Ok(()); }
+        if dst.is_empty() {
+            return Ok(());
+        }
 
         let capacity = self
             .block_count
@@ -197,8 +220,8 @@ pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     let mut parent = Vec::with_capacity(cut + 4);
     parent.extend_from_slice(&bytes[..cut]);
     parent.extend_from_slice(&[0x7f, 0xff, 0x04, 0x00]);
-    let parent_path = <&DevicePath>::try_from(parent.as_slice())
-        .map_err(|_| BootError::FilesystemError)?;
+    let parent_path =
+        <&DevicePath>::try_from(parent.as_slice()).map_err(|_| BootError::FilesystemError)?;
     let mut remaining = parent_path;
     boot::locate_device_path::<BlockIO>(&mut remaining).map_err(|_| BootError::FilesystemError)
 }

@@ -2,10 +2,10 @@
 
 use uefi::boot;
 
-use crate::block::{parent_disk_handle, UefiBlockDevice};
+use crate::block::{UefiBlockDevice, parent_disk_handle};
 use crate::error::BootResult;
 use crate::ext4::{DirEntry, Ext4};
-use crate::gpt::{find_data_partition, find_system_partition, Partition};
+use crate::gpt::{Partition, find_data_partition, find_system_partition};
 
 pub struct SystemFilesystem {
     fs: Ext4<UefiBlockDevice>,
@@ -29,7 +29,11 @@ impl SystemFilesystem {
             .ok_or(crate::error::BootError::InvalidFilesystem)?;
         let device = UefiBlockDevice::new(disk, system_partition.first_lba, system_blocks)?;
         let fs = Ext4::open(device)?;
-        Ok(Self { fs, system_partition, data_partition })
+        Ok(Self {
+            fs,
+            system_partition,
+            data_partition,
+        })
     }
 
     pub fn read_file(&mut self, path: &str) -> BootResult<alloc::vec::Vec<u8>> {
@@ -48,6 +52,10 @@ impl SystemFilesystem {
         self.fs.file_exists(path)
     }
 
-    pub fn system_partition(&self) -> &Partition { &self.system_partition }
-    pub fn data_partition(&self) -> &Partition { &self.data_partition }
+    pub fn system_partition(&self) -> &Partition {
+        &self.system_partition
+    }
+    pub fn data_partition(&self) -> &Partition {
+        &self.data_partition
+    }
 }

@@ -17,11 +17,19 @@ const EXT_CMDLINE_PTR_OFFSET: usize = 0x0c8;
 const CAN_USE_HEAP: u8 = 1 << 7;
 
 #[derive(Clone)]
-pub struct BootParams { bytes: [u8; BOOT_PARAMS_SIZE] }
+pub struct BootParams {
+    bytes: [u8; BOOT_PARAMS_SIZE],
+}
 
 impl BootParams {
-    pub const fn zeroed() -> Self { Self { bytes: [0; BOOT_PARAMS_SIZE] } }
-    pub fn as_bytes(&self) -> &[u8] { &self.bytes }
+    pub const fn zeroed() -> Self {
+        Self {
+            bytes: [0; BOOT_PARAMS_SIZE],
+        }
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 
     pub fn copy_setup_header(&mut self, kernel: &[u8]) -> BootResult<()> {
         if kernel.len() < SETUP_HEADER_END {
@@ -32,9 +40,13 @@ impl BootParams {
         Ok(())
     }
 
-    pub fn set_loader_type(&mut self, value: u8) { self.bytes[0x210] = value; }
+    pub fn set_loader_type(&mut self, value: u8) {
+        self.bytes[0x210] = value;
+    }
 
-    pub fn set_loadflags(&mut self, value: u8) { self.bytes[LOADFLAGS_OFFSET] = value; }
+    pub fn set_loadflags(&mut self, value: u8) {
+        self.bytes[LOADFLAGS_OFFSET] = value;
+    }
 
     /// Advertise the conventional setup heap required by modern Linux boot
     /// protocol loaders. The kernel setup code uses this flag when it needs
@@ -47,7 +59,9 @@ impl BootParams {
 
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
         if address > LOW_MEMORY_CMDLINE_MAX {
-            return Err(BootError::Unsupported("Linux x86_64 command line must reside below 0xA0000"));
+            return Err(BootError::Unsupported(
+                "Linux x86_64 command line must reside below 0xA0000",
+            ));
         }
         self.bytes[EXT_CMDLINE_PTR_OFFSET..EXT_CMDLINE_PTR_OFFSET + 4].fill(0);
         self.bytes[CMDLINE_PTR_OFFSET..CMDLINE_PTR_OFFSET + 4]
@@ -57,7 +71,9 @@ impl BootParams {
 
     pub fn set_setup_data(&mut self, address: u64) -> BootResult<()> {
         if address > u32::MAX as u64 {
-            return Err(BootError::Unsupported("luna setup_data must be below 4 GiB for Linux boot protocol compatibility"));
+            return Err(BootError::Unsupported(
+                "luna setup_data must be below 4 GiB for Linux boot protocol compatibility",
+            ));
         }
         self.bytes[SETUP_DATA_OFFSET..SETUP_DATA_OFFSET + 8]
             .copy_from_slice(&address.to_le_bytes());
@@ -65,9 +81,13 @@ impl BootParams {
     }
 
     pub fn set_e820(&mut self, entries: &[E820Entry]) -> BootResult<()> {
-        if entries.len() > E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
+        if entries.len() > E820_MAX_ENTRIES {
+            return Err(BootError::Unsupported("too many E820 entries"));
+        }
         self.bytes[0x1e8] = entries.len() as u8;
-        for (i, entry) in entries.iter().enumerate() { self.write_e820(i, entry); }
+        for (i, entry) in entries.iter().enumerate() {
+            self.write_e820(i, entry);
+        }
         Ok(())
     }
 
@@ -78,13 +98,20 @@ impl BootParams {
         e820_ext: &mut E820Extension,
         setup_data_next: u64,
     ) -> BootResult<()> {
-        let mut entries = [E820Entry { addr: 0, size: 0, typ: 0, reserved: 0 }; E820_MAX_ENTRIES];
+        let mut entries = [E820Entry {
+            addr: 0,
+            size: 0,
+            typ: 0,
+            reserved: 0,
+        }; E820_MAX_ENTRIES];
         let mut count = 0usize;
         let mut extended_count = 0usize;
 
         for d in map.entries() {
             let size = d.page_count.saturating_mul(4096);
-            if size == 0 { continue; }
+            if size == 0 {
+                continue;
+            }
             let typ = match d.ty {
                 uefi::mem::memory_map::MemoryType::CONVENTIONAL
                 | uefi::mem::memory_map::MemoryType::BOOT_SERVICES_CODE
@@ -99,12 +126,18 @@ impl BootParams {
             let mut segments = [(start, end, false); 16];
             let mut segment_count = 1usize;
             for &(rstart, rpages) in reserved {
-                if rpages == 0 { continue; }
-                let rend = rstart.checked_add((rpages as u64).saturating_mul(4096)).ok_or(BootError::InvalidKernel)?;
+                if rpages == 0 {
+                    continue;
+                }
+                let rend = rstart
+                    .checked_add((rpages as u64).saturating_mul(4096))
+                    .ok_or(BootError::InvalidKernel)?;
                 let mut next = [(0u64, 0u64, false); 16];
                 let mut next_count = 0usize;
                 for &(s, e, was_reserved) in &segments[..segment_count] {
-                    if next_count + 2 > next.len() { return Err(BootError::Unsupported("too many E820 reservation splits")); }
+                    if next_count + 2 > next.len() {
+                        return Err(BootError::Unsupported("too many E820 reservation splits"));
+                    }
                     if rend <= s || rstart >= e {
                         next[next_count] = (s, e, was_reserved);
                         next_count += 1;
@@ -126,14 +159,23 @@ impl BootParams {
                     }
                 }
                 segment_count = next_count;
-                for (segment, next_segment) in segments.iter_mut().zip(next.iter()).take(segment_count) {
+                for (segment, next_segment) in
+                    segments.iter_mut().zip(next.iter()).take(segment_count)
+                {
                     *segment = *next_segment;
                 }
             }
 
             for &(s, e, is_reserved) in &segments[..segment_count] {
-                if e <= s { continue; }
-                let entry = E820Entry { addr: s, size: e - s, typ: if is_reserved { 2 } else { typ }, reserved: 0 };
+                if e <= s {
+                    continue;
+                }
+                let entry = E820Entry {
+                    addr: s,
+                    size: e - s,
+                    typ: if is_reserved { 2 } else { typ },
+                    reserved: 0,
+                };
                 if count < E820_MAX_ENTRIES {
                     entries[count] = entry;
                     count += 1;

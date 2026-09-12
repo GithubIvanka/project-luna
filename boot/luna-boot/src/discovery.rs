@@ -10,7 +10,11 @@ use crate::filesystem::SystemFilesystem;
 use crate::target::BootTarget;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ImageRole { Normal, Factory, Recovery }
+pub enum ImageRole {
+    Normal,
+    Factory,
+    Recovery,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageManifest {
@@ -34,25 +38,46 @@ impl ImageManifest {
         let mut compatible = Vec::new();
         for raw in text.lines() {
             let line = raw.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
-            if line.starts_with('[') && line.ends_with(']') { section = &line[1..line.len() - 1]; continue; }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                section = &line[1..line.len() - 1];
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
             match (section, key.trim()) {
                 ("image", "name") => name = parse_string(value),
                 ("image", "version") => version = parse_string(value),
                 ("image", "format") => format = parse_string(value),
-                ("image", "role") => role = match parse_string(value).as_deref() { Some("factory") => ImageRole::Factory, Some("recovery") => ImageRole::Recovery, _ => ImageRole::Normal },
+                ("image", "role") => {
+                    role = match parse_string(value).as_deref() {
+                        Some("factory") => ImageRole::Factory,
+                        Some("recovery") => ImageRole::Recovery,
+                        _ => ImageRole::Normal,
+                    }
+                }
                 ("architecture", "arch") => arch = parse_string(value),
                 ("init", "compatible") => compatible = parse_string_array(value),
                 _ => {}
             }
         }
         let result = Self {
-            name: name.ok_or(BootError::InvalidConfig)?, version: version.ok_or(BootError::InvalidConfig)?,
-            format: format.ok_or(BootError::InvalidConfig)?, arch: arch.ok_or(BootError::InvalidConfig)?,
-            role, compatible_inits: compatible,
+            name: name.ok_or(BootError::InvalidConfig)?,
+            version: version.ok_or(BootError::InvalidConfig)?,
+            format: format.ok_or(BootError::InvalidConfig)?,
+            arch: arch.ok_or(BootError::InvalidConfig)?,
+            role,
+            compatible_inits: compatible,
         };
-        if result.format != "squashfs" || result.arch != "x86_64" || result.compatible_inits.is_empty() { return Err(BootError::InvalidConfig); }
+        if result.format != "squashfs"
+            || result.arch != "x86_64"
+            || result.compatible_inits.is_empty()
+        {
+            return Err(BootError::InvalidConfig);
+        }
         Ok(result)
     }
 }
@@ -75,9 +100,16 @@ impl InitManifest {
         let mut compatible = Vec::new();
         for raw in text.lines() {
             let line = raw.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
-            if line.starts_with('[') && line.ends_with(']') { section = &line[1..line.len() - 1]; continue; }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                section = &line[1..line.len() - 1];
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
             match (section, key.trim()) {
                 ("init", "name") => name = parse_string(value),
                 ("init", "version") => version = parse_string(value),
@@ -92,7 +124,10 @@ impl InitManifest {
             arch: arch.ok_or(BootError::InvalidConfig)?,
             compatible_kernels: compatible,
         };
-        if result.name != "luna-init" || result.arch != "x86_64" || result.compatible_kernels.is_empty() {
+        if result.name != "luna-init"
+            || result.arch != "x86_64"
+            || result.compatible_kernels.is_empty()
+        {
             return Err(BootError::InvalidConfig);
         }
         Ok(result)
@@ -107,10 +142,18 @@ pub struct InitRecord {
 }
 
 #[derive(Clone, Debug)]
-pub struct KernelRecord { pub version: String, pub kernel_path: String }
+pub struct KernelRecord {
+    pub version: String,
+    pub kernel_path: String,
+}
 
 #[derive(Clone, Debug, Default)]
-pub struct BootCatalog { pub targets: Vec<BootTarget>, pub recovery: Option<BootTarget>, pub factory: Option<BootTarget>, pub default_target: usize }
+pub struct BootCatalog {
+    pub targets: Vec<BootTarget>,
+    pub recovery: Option<BootTarget>,
+    pub factory: Option<BootTarget>,
+    pub default_target: usize,
+}
 
 impl BootCatalog {
     pub fn discover(fs: &mut SystemFilesystem) -> BootResult<Self> {
@@ -121,37 +164,83 @@ impl BootCatalog {
         let mut kernels = Vec::new();
         for entry in kernel_dirs.iter().filter(|entry| entry.is_dir()) {
             let base = format!("/kernels/{}/", entry.name);
-            let kernel_path = find_file(fs, &[format!("{}bzImage", base), format!("{}vmlinuz", base)])?;
-            let Some(kernel_path) = kernel_path else { continue; };
-            kernels.push(KernelRecord { version: entry.name.clone(), kernel_path });
+            let kernel_path = find_file(
+                fs,
+                &[format!("{}bzImage", base), format!("{}vmlinuz", base)],
+            )?;
+            let Some(kernel_path) = kernel_path else {
+                continue;
+            };
+            kernels.push(KernelRecord {
+                version: entry.name.clone(),
+                kernel_path,
+            });
         }
 
         let mut inits = Vec::new();
-        for entry in cores.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".init")) {
-            let Some(stem) = entry.name.strip_suffix(".init") else { continue; };
+        for entry in cores
+            .iter()
+            .filter(|entry| entry.is_file() && entry.name.ends_with(".init"))
+        {
+            let Some(stem) = entry.name.strip_suffix(".init") else {
+                continue;
+            };
             let init_path = format!("/cores/{}", entry.name);
             let manifest_path = format!("/cores/{}.toml", stem);
-            let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
-            let manifest = match InitManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
-            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) { continue; }
-            inits.push(InitRecord { version: manifest.version.clone(), init_path, manifest });
+            let manifest_bytes = match fs.read_file(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let manifest = match InitManifest::parse(&manifest_bytes) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) {
+                continue;
+            }
+            inits.push(InitRecord {
+                version: manifest.version.clone(),
+                init_path,
+                manifest,
+            });
         }
         inits.sort_by(|a, b| version_cmp(&b.version, &a.version));
 
         let mut targets = Vec::new();
         let mut recovery = None;
         let mut factory = None;
-        for image in images.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs")) {
-            let Some(stem) = image.name.strip_suffix(".squashfs") else { continue; };
+        for image in images
+            .iter()
+            .filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs"))
+        {
+            let Some(stem) = image.name.strip_suffix(".squashfs") else {
+                continue;
+            };
             let manifest_path = format!("/images/{}.toml", stem);
-            let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
-            let manifest = match ImageManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
-            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) { continue; }
+            let manifest_bytes = match fs.read_file(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let manifest = match ImageManifest::parse(&manifest_bytes) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) {
+                continue;
+            }
 
-            let Some(init) = select_init(&manifest, &inits) else { continue; };
-            let Some(kernel) = select_kernel(&init.manifest, &kernels) else { continue; };
+            let Some(init) = select_init(&manifest, &inits) else {
+                continue;
+            };
+            let Some(kernel) = select_kernel(&init.manifest, &kernels) else {
+                continue;
+            };
             let mut target = BootTarget::new(
-                match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
+                match manifest.role {
+                    ImageRole::Normal => format!("Luna {}", manifest.version),
+                    ImageRole::Factory => String::from("Factory Environment"),
+                    ImageRole::Recovery => String::from("Recovery Environment"),
+                },
                 manifest.name.clone(),
                 manifest.version.clone(),
                 format!("/images/{}", image.name),
@@ -169,15 +258,27 @@ impl BootCatalog {
         }
 
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
-        if targets.is_empty() && factory.is_none() && recovery.is_none() { return Err(BootError::NoBootTargets); }
-        Ok(Self { targets, recovery, factory, default_target: 0 })
+        if targets.is_empty() && factory.is_none() && recovery.is_none() {
+            return Err(BootError::NoBootTargets);
+        }
+        Ok(Self {
+            targets,
+            recovery,
+            factory,
+            default_target: 0,
+        })
     }
 }
 
 fn select_init(manifest: &ImageManifest, inits: &[InitRecord]) -> Option<InitRecord> {
     inits
         .iter()
-        .filter(|init| manifest.compatible_inits.iter().any(|allowed| allowed == "*" || allowed == &init.version))
+        .filter(|init| {
+            manifest
+                .compatible_inits
+                .iter()
+                .any(|allowed| allowed == "*" || allowed == &init.version)
+        })
         .max_by(|a, b| version_cmp(&a.version, &b.version))
         .cloned()
 }
@@ -185,16 +286,59 @@ fn select_init(manifest: &ImageManifest, inits: &[InitRecord]) -> Option<InitRec
 fn select_kernel(manifest: &InitManifest, kernels: &[KernelRecord]) -> Option<KernelRecord> {
     kernels
         .iter()
-        .filter(|kernel| manifest.compatible_kernels.iter().any(|allowed| allowed == "*" || allowed == &kernel.version))
+        .filter(|kernel| {
+            manifest
+                .compatible_kernels
+                .iter()
+                .any(|allowed| allowed == "*" || allowed == &kernel.version)
+        })
         .max_by(|a, b| version_cmp(&a.version, &b.version))
         .cloned()
 }
 
 fn find_file(fs: &mut SystemFilesystem, paths: &[String]) -> BootResult<Option<String>> {
-    for path in paths { if fs.file_exists(path)? { return Ok(Some(path.clone())); } }
+    for path in paths {
+        if fs.file_exists(path)? {
+            return Ok(Some(path.clone()));
+        }
+    }
     Ok(None)
 }
 
-fn parse_string(value: &str) -> Option<String> { let value = value.trim(); if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') { Some(value[1..value.len()-1].to_string()) } else { None } }
-fn parse_string_array(value: &str) -> Vec<String> { let value = value.trim(); if !value.starts_with('[') || !value.ends_with(']') { return Vec::new(); } value[1..value.len()-1].split(',').filter_map(parse_string).collect() }
-fn version_cmp(a: &str, b: &str) -> Ordering { let mut left=a.split('.'); let mut right=b.split('.'); loop { match (left.next(), right.next()) { (None,None)=>return Ordering::Equal, (None,Some(_))=>return Ordering::Less, (Some(_),None)=>return Ordering::Greater, (Some(x),Some(y))=>match x.parse::<u64>().unwrap_or(0).cmp(&y.parse::<u64>().unwrap_or(0)) { Ordering::Equal=>{}, other=>return other } } } }
+fn parse_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        Some(value[1..value.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+fn parse_string_array(value: &str) -> Vec<String> {
+    let value = value.trim();
+    if !value.starts_with('[') || !value.ends_with(']') {
+        return Vec::new();
+    }
+    value[1..value.len() - 1]
+        .split(',')
+        .filter_map(parse_string)
+        .collect()
+}
+fn version_cmp(a: &str, b: &str) -> Ordering {
+    let mut left = a.split('.');
+    let mut right = b.split('.');
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => match x
+                .parse::<u64>()
+                .unwrap_or(0)
+                .cmp(&y.parse::<u64>().unwrap_or(0))
+            {
+                Ordering::Equal => {}
+                other => return other,
+            },
+        }
+    }
+}

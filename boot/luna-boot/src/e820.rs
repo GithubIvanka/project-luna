@@ -37,9 +37,7 @@ impl E820Extension {
         let total_bytes = SETUP_DATA_NODE_SIZE
             .checked_add(data_bytes)
             .ok_or(BootError::InvalidKernel)?;
-        let pages = total_bytes
-            .div_ceil(PAGE_SIZE)
-            .max(1);
+        let pages = total_bytes.div_ceil(PAGE_SIZE).max(1);
         let allocation = boot::allocate_pages(
             AllocateType::MaxAddress(0xffff_ffff),
             MemoryType::LOADER_DATA,
@@ -66,11 +64,7 @@ impl E820Extension {
             .ok_or(BootError::InvalidKernel)?;
         let node = self.address as *mut u8;
         unsafe {
-            core::ptr::copy_nonoverlapping(
-                entry.addr.to_le_bytes().as_ptr(),
-                node.add(offset),
-                8,
-            );
+            core::ptr::copy_nonoverlapping(entry.addr.to_le_bytes().as_ptr(), node.add(offset), 8);
             core::ptr::copy_nonoverlapping(
                 entry.size.to_le_bytes().as_ptr(),
                 node.add(offset + 8),

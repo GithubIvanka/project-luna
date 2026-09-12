@@ -34,14 +34,18 @@ pub struct KernelLoader<'a> {
 }
 
 impl<'a> KernelLoader<'a> {
-    pub fn new(filesystem: &'a mut SystemFilesystem) -> Self { Self { filesystem } }
+    pub fn new(filesystem: &'a mut SystemFilesystem) -> Self {
+        Self { filesystem }
+    }
 
     pub fn prepare(&mut self, target: &BootTarget) -> BootResult<PreparedKernel> {
         let kernel = self.filesystem.read_file(&target.kernel_path)?;
         let kernel_digest = *blake3::hash(&kernel).as_bytes();
         let setup = LinuxSetupHeader::parse(&kernel)?;
         if setup.xloadflags & 1 == 0 {
-            return Err(BootError::Unsupported("kernel does not advertise XLF_KERNEL_64"));
+            return Err(BootError::Unsupported(
+                "kernel does not advertise XLF_KERNEL_64",
+            ));
         }
 
         // For a modern bzImage the protected-mode portion begins at
@@ -55,10 +59,18 @@ impl<'a> KernelLoader<'a> {
             return Err(BootError::InvalidKernel);
         }
 
-        let kernel_address = allocate_kernel(setup.pref_address, kernel_size, setup.kernel_alignment as u64)?;
+        let kernel_address = allocate_kernel(
+            setup.pref_address,
+            kernel_size,
+            setup.kernel_alignment as u64,
+        )?;
         unsafe {
             ptr::write_bytes(kernel_address as *mut u8, 0, kernel_size);
-            ptr::copy_nonoverlapping(protected.as_ptr(), kernel_address as *mut u8, protected.len());
+            ptr::copy_nonoverlapping(
+                protected.as_ptr(),
+                kernel_address as *mut u8,
+                protected.len(),
+            );
         }
 
         let init = self.filesystem.read_file(&target.init_path)?;
@@ -79,12 +91,16 @@ impl<'a> KernelLoader<'a> {
         boot_params.enable_setup_heap();
 
         let bp_addr = allocate_pages(1, 0xffff_ffff)?;
-        unsafe { ptr::write_bytes(bp_addr as *mut u8, 0, PAGE_SIZE); }
+        unsafe {
+            ptr::write_bytes(bp_addr as *mut u8, 0, PAGE_SIZE);
+        }
 
         let cmdline = target.kernel_cmdline.as_bytes();
         let max_cmdline = setup.cmdline_size as usize;
         if cmdline.len() + 1 > max_cmdline {
-            return Err(BootError::Unsupported("kernel command line exceeds Linux cmdline_size"));
+            return Err(BootError::Unsupported(
+                "kernel command line exceeds Linux cmdline_size",
+            ));
         }
         let cmdline_addr = allocate_low_cmdline_page()?;
         unsafe {
@@ -143,7 +159,9 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
         return Err(BootError::InvalidKernel);
     }
     if bytes[4] != 2 || bytes[5] != 1 || bytes[6] != 1 {
-        return Err(BootError::Unsupported("luna-init must be ELF64 little-endian"));
+        return Err(BootError::Unsupported(
+            "luna-init must be ELF64 little-endian",
+        ));
     }
 
     let elf_type = read_u16(bytes, 16)?;
@@ -161,8 +179,12 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
     if phentsize != ELF64_PROGRAM_HEADER_SIZE as u64 || phnum == 0 {
         return Err(BootError::InvalidKernel);
     }
-    let ph_table_size = phentsize.checked_mul(phnum).ok_or(BootError::InvalidKernel)?;
-    let ph_end = phoff.checked_add(ph_table_size).ok_or(BootError::InvalidKernel)?;
+    let ph_table_size = phentsize
+        .checked_mul(phnum)
+        .ok_or(BootError::InvalidKernel)?;
+    let ph_end = phoff
+        .checked_add(ph_table_size)
+        .ok_or(BootError::InvalidKernel)?;
     if phoff > bytes.len() as u64 || ph_end > bytes.len() as u64 {
         return Err(BootError::InvalidKernel);
     }
@@ -174,7 +196,11 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
 
     for index in 0..phnum {
         let base = phoff
-            .checked_add(index.checked_mul(phentsize).ok_or(BootError::InvalidKernel)?)
+            .checked_add(
+                index
+                    .checked_mul(phentsize)
+                    .ok_or(BootError::InvalidKernel)?,
+            )
             .ok_or(BootError::InvalidKernel)? as usize;
         let typ = read_u32(bytes, base)?;
         let flags = read_u32(bytes, base + 4)?;
@@ -186,14 +212,18 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
         let align = read_u64(bytes, base + 48)?;
 
         if typ == PT_INTERP {
-            return Err(BootError::Unsupported("luna-init must not require a dynamic linker"));
+            return Err(BootError::Unsupported(
+                "luna-init must not require a dynamic linker",
+            ));
         }
         if typ != PT_LOAD {
             continue;
         }
         loadable_count += 1;
 
-        let file_end = p_offset.checked_add(filesz).ok_or(BootError::InvalidKernel)?;
+        let file_end = p_offset
+            .checked_add(filesz)
+            .ok_or(BootError::InvalidKernel)?;
         if file_end > bytes.len() as u64 || filesz > memsz {
             return Err(BootError::InvalidKernel);
         }
@@ -201,19 +231,25 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
         if paddr.checked_add(memsz).is_none() {
             return Err(BootError::InvalidKernel);
         }
-        if align != 0
-            && (!align.is_power_of_two() || (p_offset % align) != (vaddr % align))
-        {
-            return Err(BootError::Unsupported("luna-init segment alignment is invalid"));
+        if align != 0 && (!align.is_power_of_two() || (p_offset % align) != (vaddr % align)) {
+            return Err(BootError::Unsupported(
+                "luna-init segment alignment is invalid",
+            ));
         }
         if align > PAGE_ALIGN && (align & (PAGE_ALIGN - 1)) != 0 {
-            return Err(BootError::Unsupported("luna-init segment alignment is unsupported"));
+            return Err(BootError::Unsupported(
+                "luna-init segment alignment is unsupported",
+            ));
         }
         if (flags & PF_W != 0) && (flags & PF_X != 0) {
             return Err(BootError::Unsupported("luna-init violates W^X"));
         }
-        if vaddr < load_low { load_low = vaddr; }
-        if mem_end > load_high { load_high = mem_end; }
+        if vaddr < load_low {
+            load_low = vaddr;
+        }
+        if mem_end > load_high {
+            load_high = mem_end;
+        }
         if (flags & PF_X != 0) && entry >= vaddr && entry < mem_end {
             entry_executable = true;
         }
@@ -226,27 +262,37 @@ fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
         .checked_sub(load_low)
         .ok_or(BootError::InvalidKernel)?;
     if load_span == 0 || load_span > MAX_LUNA_INIT_MEMORY {
-        return Err(BootError::Unsupported("luna-init load span exceeds safety limit"));
+        return Err(BootError::Unsupported(
+            "luna-init load span exceeds safety limit",
+        ));
     }
     if load_low % PAGE_ALIGN != 0 {
-        return Err(BootError::Unsupported("luna-init load base is not page aligned"));
+        return Err(BootError::Unsupported(
+            "luna-init load base is not page aligned",
+        ));
     }
 
     Ok(())
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> BootResult<u16> {
-    let value = bytes.get(offset..offset + 2).ok_or(BootError::InvalidKernel)?;
+    let value = bytes
+        .get(offset..offset + 2)
+        .ok_or(BootError::InvalidKernel)?;
     Ok(u16::from_le_bytes([value[0], value[1]]))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> BootResult<u32> {
-    let value = bytes.get(offset..offset + 4).ok_or(BootError::InvalidKernel)?;
+    let value = bytes
+        .get(offset..offset + 4)
+        .ok_or(BootError::InvalidKernel)?;
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> BootResult<u64> {
-    let value = bytes.get(offset..offset + 8).ok_or(BootError::InvalidKernel)?;
+    let value = bytes
+        .get(offset..offset + 8)
+        .ok_or(BootError::InvalidKernel)?;
     Ok(u64::from_le_bytes([
         value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
     ]))
@@ -267,8 +313,12 @@ fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u6
             return Ok(ptr.as_ptr() as u64 + (aligned - ptr.as_ptr() as u64));
         }
     }
-    let ptr = boot::allocate_pages(AllocateType::MaxAddress(0xffff_ffff), MemoryType::LOADER_DATA, pages)
-        .map_err(|_| BootError::MemoryAllocationFailed)?;
+    let ptr = boot::allocate_pages(
+        AllocateType::MaxAddress(0xffff_ffff),
+        MemoryType::LOADER_DATA,
+        pages,
+    )
+    .map_err(|_| BootError::MemoryAllocationFailed)?;
     let raw = ptr.as_ptr() as u64;
     Ok((raw + alignment - 1) & !(alignment - 1))
 }
@@ -278,7 +328,8 @@ fn allocate_pages(pages: usize, max_address: u64) -> BootResult<u64> {
         AllocateType::MaxAddress(max_address),
         MemoryType::LOADER_DATA,
         pages.max(1),
-    ).map_err(|_| BootError::MemoryAllocationFailed)?;
+    )
+    .map_err(|_| BootError::MemoryAllocationFailed)?;
     Ok(ptr.as_ptr() as u64)
 }
 
@@ -287,7 +338,8 @@ fn allocate_low_cmdline_page() -> BootResult<u64> {
         AllocateType::MaxAddress(LOW_MEMORY_CMDLINE_MAX),
         MemoryType::LOADER_DATA,
         1,
-    ).map_err(|_| BootError::MemoryAllocationFailed)?;
+    )
+    .map_err(|_| BootError::MemoryAllocationFailed)?;
     let address = ptr.as_ptr() as u64;
     if address + PAGE_SIZE as u64 > 0xA0000 {
         return Err(BootError::MemoryAllocationFailed);
@@ -295,4 +347,6 @@ fn allocate_low_cmdline_page() -> BootResult<u64> {
     Ok(address)
 }
 
-fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
+fn div_ceil(value: usize, divisor: usize) -> usize {
+    value.div_ceil(divisor)
+}

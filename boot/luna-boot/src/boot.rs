@@ -1,21 +1,21 @@
 //! Main luna-boot orchestration.
 
 use alloc::vec::Vec;
+use uefi::Status;
 use uefi::boot::{self, open_protocol_exclusive};
 use uefi::mem::memory_map::MemoryMapOwned;
 use uefi::proto::console::text::Input;
 use uefi::runtime::{self, ResetType};
-use uefi::Status;
 
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
-use crate::error::{BootError, BootResult};
 use crate::e820::E820Extension;
+use crate::error::{BootError, BootResult};
 use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::{
-    current_stack_pointer, transition_entry_address, BootMode, BootState, KernelHandoff, LunaHandoff,
-    PreparedIdentity,
+    BootMode, BootState, KernelHandoff, LunaHandoff, PreparedIdentity, current_stack_pointer,
+    transition_entry_address,
 };
 use crate::kernel::{KernelLoader, PreparedKernel};
 use crate::menu::{BootMenu, BootMenuAction, BootSelection};
@@ -69,17 +69,16 @@ pub fn boot_flow() -> BootResult<()> {
             .recovery
             .clone()
             .ok_or(BootError::RecoveryUnavailable),
-        BootMenuAction::Factory => catalog
-            .factory
-            .clone()
-            .ok_or(BootError::Unsupported("factory environment is unavailable on this installation")),
-        BootMenuAction::Continue
-        | BootMenuAction::SystemImage
-        | BootMenuAction::VerboseBoot => catalog
-            .targets
-            .get(selection.target_index)
-            .cloned()
-            .ok_or(BootError::TargetNotFound),
+        BootMenuAction::Factory => catalog.factory.clone().ok_or(BootError::Unsupported(
+            "factory environment is unavailable on this installation",
+        )),
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot => {
+            catalog
+                .targets
+                .get(selection.target_index)
+                .cloned()
+                .ok_or(BootError::TargetNotFound)
+        }
         BootMenuAction::ExternalBoot => unreachable!(),
     }?;
 
@@ -96,9 +95,7 @@ pub fn boot_flow() -> BootResult<()> {
     candidates.push(selected.clone());
     if matches!(
         selection.action,
-        BootMenuAction::Continue
-            | BootMenuAction::SystemImage
-            | BootMenuAction::VerboseBoot
+        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot
     ) {
         candidates.extend(
             catalog
@@ -140,7 +137,9 @@ pub fn boot_flow() -> BootResult<()> {
             .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
             .collect::<Vec<_>>()
             .join(" ");
-        target.kernel_cmdline.push_str(" loglevel=7 ignore_loglevel");
+        target
+            .kernel_cmdline
+            .push_str(" loglevel=7 ignore_loglevel");
     }
 
     let manifest_bytes = filesystem.read_file(&target.manifest_path)?;
@@ -196,12 +195,7 @@ fn enter_kernel_after_exit_boot_services(
 ) -> ! {
     if prepared
         .boot_params
-        .set_e820_from_map_reserved(
-            &final_map,
-            &reserved,
-            &mut e820_ext,
-            luna_handoff.address,
-        )
+        .set_e820_from_map_reserved(&final_map, &reserved, &mut e820_ext, luna_handoff.address)
         .is_err()
     {
         runtime::reset(ResetType::COLD, Status::ABORTED, None);

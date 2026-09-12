@@ -62,7 +62,9 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
     .map_err(|_| BootError::MemoryAllocationFailed)?;
     let base = allocation.as_ptr() as u64;
 
-    unsafe { ptr::write_bytes(base as *mut u8, 0, table_pages * PAGE_SIZE); }
+    unsafe {
+        ptr::write_bytes(base as *mut u8, 0, table_pages * PAGE_SIZE);
+    }
 
     let (pml4, pdpt) = if use_five_level {
         let pml5 = base as *mut u64;
@@ -90,8 +92,7 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
         }
         let pd_ptr = pd as *mut u64;
         for entry in 0..ENTRIES_PER_TABLE {
-            let physical =
-                (pd_index as u64 * ENTRIES_PER_TABLE as u64 + entry as u64) * PAGE_2M;
+            let physical = (pd_index as u64 * ENTRIES_PER_TABLE as u64 + entry as u64) * PAGE_2M;
             unsafe {
                 pd_ptr.add(entry).write(physical | 0x83);
             }

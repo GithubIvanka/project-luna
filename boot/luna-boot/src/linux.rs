@@ -128,7 +128,11 @@ impl LinuxSetupHeader {
     }
 
     pub const fn setup_size_from(setup_sects: u8) -> usize {
-        let sectors = if setup_sects == 0 { 4 } else { setup_sects as usize };
+        let sectors = if setup_sects == 0 {
+            4
+        } else {
+            setup_sects as usize
+        };
         (sectors + 1) * 512
     }
 
