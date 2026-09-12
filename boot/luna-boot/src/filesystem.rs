@@ -1,5 +1,7 @@
 //! Storage discovery for Luna's ext4 SYSTEM partition.
 
+use uefi::boot;
+
 use crate::block::{parent_disk_handle, UefiBlockDevice};
 use crate::error::BootResult;
 use crate::ext4::{DirEntry, Ext4};
@@ -13,8 +15,8 @@ pub struct SystemFilesystem {
 
 impl SystemFilesystem {
     pub fn open() -> BootResult<Self> {
-        let disk = parent_disk_handle(uefi::boot::image_handle())?;
-        let mut probe = UefiBlockDevice::new(disk, 0, uefi::boot::get_image_file_system(disk).is_err() as u64)?;
+        let disk = parent_disk_handle(boot::image_handle())?;
+        let mut probe = UefiBlockDevice::whole_disk(disk)?;
         let system_partition = find_system_partition(&mut probe)?;
         let data_partition = find_data_partition(&mut probe)?;
         if system_partition.disk_guid != data_partition.disk_guid {
