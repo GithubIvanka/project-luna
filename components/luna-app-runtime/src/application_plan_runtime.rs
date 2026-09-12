@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use luna_common::RuntimeProfile;
 use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
 use luna_root_mapping::{LogicalPath, MappingKind};
-use luna_security::{CapabilityName, CapabilityRegistry, Principal};
+use luna_security::{CapabilityName, CapabilityRegistry};
 use luna_system_runtime::SystemRuntimeService;
 use luna_user_session::UserSession;
 
@@ -181,7 +181,7 @@ pub trait ApplicationPlanLauncher {
     /// against which the plan was validated.
     ///
     /// No policy evaluation occurs here. The caller must obtain the
-    /// `AuthorizedApplicationPlan` from `ApplicationPlan::authorize` first.
+    /// `AuthorizedApplicationPlan` from `luna-security` first.
     ///
     /// A plain `ApplicationPlan` cannot cross this boundary:
     ///
@@ -221,22 +221,22 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         runtime: &mut SystemRuntimeService,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
-        InMemoryApplicationRuntime::validate_session(plan.session(), session)?;
+        InMemoryApplicationRuntime::validate_session(plan.value().session(), session)?;
         context.validate()?;
         validate_mapping_access(&plan)?;
         validate_capabilities(&plan)?;
 
-        let program = plan.executable().path().to_str().ok_or_else(|| {
-            RuntimeError::InvalidExecutable(plan.executable().path().display().to_string())
+        let program = plan.value().executable().path().to_str().ok_or_else(|| {
+            RuntimeError::InvalidExecutable(plan.value().executable().path().display().to_string())
         })?;
 
         let id = self.model.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
             id,
-            plan.application().clone(),
-            plan.version(),
-            plan.session(),
-            plan.runtime(),
+            plan.value().application().clone(),
+            plan.value().version(),
+            plan.value().session(),
+            plan.value().runtime(),
         );
         instance.transition(InstanceState::Starting)?;
         self.model.insert(instance);
@@ -251,11 +251,11 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             }
         };
 
-        let mapping = plan.mapping().clone();
+        let mapping = plan.value().mapping().clone();
         let base_root = context.base_root().to_path_buf();
         let trusted_source_roots = context.trusted_source_roots().to_vec();
         let root_for_child = staging.path().to_path_buf();
-        let args = plan.executable().args().to_vec();
+        let args = plan.value().executable().args().to_vec();
         let namespace = context.namespace();
         let profile = RuntimeProfile::minimal();
         let process = runtime.spawn_process_with_pre_exec(program, args, move || {
@@ -273,7 +273,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 .enter_logical_root(&logical)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             namespace
-                .enforce_filesystem_access(&mapping)
+                .enforce_filesystem_access(&profile, &mapping)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             Ok(())
         });
@@ -318,9 +318,10 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
 
 #[cfg(unix)]
 fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
-    for resource in plan.manifest().resources() {
+    for resource in plan.value().manifest().resources() {
         let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
         let rule = plan
+            .value()
             .mapping()
             .resolve_rule(&logical)
             .map_err(RuntimeError::Mapping)?;
@@ -332,8 +333,8 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
         }
     }
 
-    for rule in plan.mapping().iter() {
-        let declared = plan.manifest().resources().iter().any(|resource| {
+    for rule in plan.value().mapping().iter() {
+        let declared = plan.value().manifest().resources().iter().any(|resource| {
             resource.logical_path() == rule.logical().as_str()
                 || (rule.kind() == MappingKind::Subtree
                     && resource.logical_path().starts_with(rule.logical().as_str())
@@ -352,15 +353,16 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
 #[cfg(unix)]
 fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), RuntimeError> {
     let registry = CapabilityRegistry::with_default_providers();
-    let principal = Principal::Application(plan.application().clone());
-    for capability in plan.manifest().capabilities() {
+    for capability in plan.value().manifest().capabilities() {
         let name = CapabilityName::new(capability.to_owned())
             .map_err(|error| RuntimeError::Security(error.to_string()))?;
-        // The plan has already passed policy authorization. This second step
-        // only verifies that the approved capability has a registered provider.
-        registry
-            .grant(principal.clone(), name)
-            .map_err(|error| RuntimeError::Security(error.to_string()))?;
+        // The plan already carries policy authorization. Registry lookup only
+        // verifies that the approved capability has a provider.
+        if registry.provider_for(&name).is_none() {
+            return Err(RuntimeError::Security(format!(
+                "unknown capability provider: {name}"
+            )));
+        }
     }
     Ok(())
 }

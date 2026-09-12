@@ -1,0 +1,30 @@
+name: App runtime privileged P0
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - components/luna-app-runtime/**
+      - components/luna-namespace/**
+      - components/luna-security/**
+      - components/luna-root-mapping/**
+      - components/luna-system-runtime/**
+      - .github/workflows/app-runtime-privileged.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This job validates only the canonical application-launch workstream.
+jobs:
+  canonical-launch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build privileged integration target
+        run: cargo test -p luna-app-runtime --test privileged_canonical_launch --no-run
+      - name: Run kernel-enforced canonical launch
+        run: sudo env PATH="$PATH" HOME="$HOME" CARGO_HOME="$HOME/.cargo" cargo test -p luna-app-runtime --test privileged_canonical_launch -- --ignored --exact canonical_authorized_launch_is_kernel_enforced
+      - name: Confirm FD inheritance regression
+        run: cargo test -p luna-system-runtime supervised_exec_does_not_inherit_unapproved_fd -- --exact

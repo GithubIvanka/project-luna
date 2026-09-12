@@ -133,9 +133,12 @@ impl ProcessSupervisor {
                 .stderr(Stdio::null());
         }
         #[cfg(unix)]
-        if let Some(setup) = setup {
+        if let Some(mut setup) = setup {
             unsafe {
-                std::os::unix::process::CommandExt::pre_exec(&mut command, setup);
+                std::os::unix::process::CommandExt::pre_exec(&mut command, move || {
+                    setup()?;
+                    close_non_stdio_on_exec()
+                });
             }
         }
         let child = command.spawn().map_err(ProcessError::Spawn)?;
@@ -191,6 +194,22 @@ impl Drop for ProcessSupervisor {
             let _ = self.terminate(id);
         }
     }
+}
+
+#[cfg(unix)]
+fn close_non_stdio_on_exec() -> std::io::Result<()> {
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_close_range,
+            3_u32,
+            u32::MAX,
+            libc::CLOSE_RANGE_CLOEXEC,
+        )
+    };
+    if result == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -471,6 +490,36 @@ mod tests {
         assert!(!status.success());
         assert!(s.is_empty());
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn supervised_exec_does_not_inherit_unapproved_fd() {
+        use std::os::fd::RawFd;
+
+        let fd: RawFd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+        assert!(fd >= 3);
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            assert!(flags >= 0);
+            assert_eq!(libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC), 0);
+        }
+
+        let mut supervisor = ProcessSupervisor::new();
+        let command = format!("test ! -e /proc/self/fd/{fd}");
+        let id = supervisor
+            .spawn_with_pre_exec("sh", ["-c", command.as_str()], || Ok(()))
+            .unwrap();
+        let status = loop {
+            match supervisor.poll(id).unwrap() {
+                ProcessState::Running => std::thread::sleep(std::time::Duration::from_millis(5)),
+                ProcessState::Exited(status) => break status,
+            }
+        };
+        unsafe {
+            libc::close(fd);
+        }
+        assert!(status.success());
+    }
+
     #[test]
     fn system_runtime_owns_session_and_process_lifecycle() {
         let mut rt = SystemRuntimeService::new();

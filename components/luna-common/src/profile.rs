@@ -28,7 +28,8 @@ impl RuntimeProfile {
     }
 
     /// Minimal trusted System Image view shared by native application runtimes.
-    /// Application DATA, devices and named capabilities are not included here.
+    /// Application DATA, configuration, devices and named capabilities are not
+    /// included here. Required `/etc` files must be explicit authorized mappings.
     pub fn minimal() -> Self {
         let mut profile = Self::new("minimal").expect("built-in profile name is valid");
         let readable_executable = [ResourceAccess::Read, ResourceAccess::Execute];
@@ -40,9 +41,6 @@ impl RuntimeProfile {
             .expect("built-in profile resource is valid");
         profile
             .add_resource("/lib64", readable_executable)
-            .expect("built-in profile resource is valid");
-        profile
-            .add_resource("/etc", [ResourceAccess::Read])
             .expect("built-in profile resource is valid");
         profile
     }
@@ -105,18 +103,17 @@ mod tests {
     use crate::ResourceAccess;
 
     #[test]
-    fn minimal_profile_is_deterministic() {
+    fn minimal_profile_is_deterministic_and_excludes_whole_etc() {
         let profile = RuntimeProfile::minimal();
         let resources = profile.resources().collect::<Vec<_>>();
-        assert_eq!(resources.len(), 4);
-        assert_eq!(resources[0].0, "/etc");
-        assert_eq!(resources[1].0, "/lib");
-        assert_eq!(resources[2].0, "/lib64");
-        assert_eq!(resources[3].0, "/usr");
-        assert_eq!(
-            resources[0].1.iter().copied().collect::<Vec<_>>(),
-            vec![ResourceAccess::Read]
-        );
+        assert_eq!(resources.len(), 3);
+        assert_eq!(resources[0].0, "/lib");
+        assert_eq!(resources[1].0, "/lib64");
+        assert_eq!(resources[2].0, "/usr");
+        assert!(resources.iter().all(|(_, access)| {
+            access.contains(&ResourceAccess::Read) && access.contains(&ResourceAccess::Execute)
+        }));
+        assert!(resources.iter().all(|(path, _)| *path != "/etc"));
     }
 
     #[test]
