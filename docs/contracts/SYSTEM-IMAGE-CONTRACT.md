@@ -1,6 +1,6 @@
 # Контракт System Image
 
-**Статус:** черновик для Phase 0; детали materialization/hydration уточняются отдельной реализацией.
+**Статус:** черновик для Phase 0; детали materialization/hydration уточняются отдельной реализацией.  
 **Scope:** System Image → `luna-init` → running RAM-backed system
 
 ## 1. Назначение
@@ -39,9 +39,34 @@ Manifest является источником метаданных именно
 - идентичность и версия;
 - архитектура;
 - формат `squashfs`;
-- совместимые ядра;
+- совместимые `luna-init` cores;
 - параметры, необходимые для передачи управления ядру;
 - сведения о целостности, если они определены политикой доверия.
+
+Совместимость System Image задаётся односторонне:
+
+```text
+System Image manifest
+        ↓
+compatible luna-init versions
+```
+
+Manifest System Image **не** определяет совместимые kernels напрямую. Совместимость kernel является ответственностью manifest выбранного `luna-init` core.
+
+Пример:
+
+```toml
+[image]
+name = "Luna"
+version = "4.0.0"
+format = "squashfs"
+
+[architecture]
+arch = "x86_64"
+
+[init]
+compatible = ["2.0.0", "2.1.0"]
+```
 
 Точная TOML-схема ещё не принята. До её утверждения поля нельзя объявлять обязательными только из-за удобства реализации.
 
@@ -49,9 +74,27 @@ Manifest является источником метаданных именно
 
 До активации необходимо проверить как минимум структурную корректность SquashFS и внутреннюю согласованность manifest. Проверка подлинности и доверия должна определяться отдельным security/update-контрактом.
 
-## 6. Связь с kernel
+## 6. Связь с `luna-init`
 
-System Image и kernel — независимые сущности. Manifest задаёт явную область совместимости. Выбор «самого нового ядра» без проверки совместимости запрещён.
+System Image и `luna-init` — независимые сущности. Image manifest задаёт явную область совместимости init core.
+
+```text
+System Image A ── compatible ── luna-init 2.0
+System Image A ── compatible ── luna-init 2.1
+System Image B ── compatible ── luna-init 2.1
+```
+
+Выбор init без проверки image compatibility запрещён.
+
+После выбора совместимого init его manifest определяет допустимые kernels. Поэтому итоговая boot-комбинация строится по двум последовательным отношениям:
+
+```text
+System Image
+    ↓ compatible
+luna-init
+    ↓ compatible
+Kernel
+```
 
 ## 7. Жизненный цикл
 
@@ -74,6 +117,8 @@ System Image и kernel — независимые сущности. Manifest з�
 ```
 
 Удаление active, factory или необходимого fallback-образа запрещено до прохождения materialization/lifetime checks.
+
+Удаление System Image не должно автоматически удалять `luna-init` core. Init core может обслуживать несколько образов.
 
 ## 8. Загрузка и материализация
 
@@ -111,6 +156,7 @@ SquashFS **не является долгосрочным backing store для `
 ## 10. Открытые вопросы
 
 - точная схема manifest;
+- точное описание version compatibility для `luna-init`;
 - точный набор boot-critical RAM base;
 - формат и владелец lazy-hydration cache/index;
 - механизм materialization без прямого раскрытия SYSTEM приложению;
