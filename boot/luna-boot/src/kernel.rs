@@ -13,6 +13,17 @@ use crate::filesystem::SystemFilesystem;
 use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;
 
+const ELF64_HEADER_SIZE: usize = 64;
+const ELF64_PROGRAM_HEADER_SIZE: usize = 56;
+const ET_EXEC: u16 = 2;
+const ET_DYN: u16 = 3;
+const EM_X86_64: u16 = 0x3e;
+const PT_LOAD: u32 = 1;
+const PT_INTERP: u32 = 3;
+const PF_X: u32 = 1;
+const PF_W: u32 = 2;
+const MAX_LUNA_INIT_MEMORY: u64 = 512 * 1024 * 1024;
+
 pub struct PreparedKernel {
     #[allow(dead_code)]
     pub setup: LinuxSetupHeader,
@@ -127,16 +138,102 @@ impl<'a> KernelLoader<'a> {
 }
 
 fn validate_luna_init(bytes: &[u8]) -> BootResult<()> {
-    if bytes.len() < 64 || &bytes[0..4] != b"\x7fELF" {
+    if bytes.len() < ELF64_HEADER_SIZE || &bytes[0..4] != b"\x7fELF" {
         return Err(BootError::InvalidKernel);
     }
     if bytes[4] != 2 || bytes[5] != 1 || bytes[6] != 1 {
         return Err(BootError::Unsupported("luna-init must be ELF64 little-endian"));
     }
-    if u16::from_le_bytes([bytes[18], bytes[19]]) != 0x3e {
+
+    let elf_type = read_u16(bytes, 16)?;
+    if !matches!(elf_type, ET_EXEC | ET_DYN) {
+        return Err(BootError::Unsupported("luna-init must be ET_EXEC or ET_DYN"));
+    }
+    if read_u16(bytes, 18)? != EM_X86_64 {
         return Err(BootError::Unsupported("luna-init must target x86_64"));
     }
+
+    let entry = read_u64(bytes, 24)?;
+    let phoff = read_u64(bytes, 32)?;
+    let phentsize = read_u16(bytes, 54)? as usize;
+    let phnum = read_u16(bytes, 56)? as usize;
+    if phnum == 0 || phentsize < ELF64_PROGRAM_HEADER_SIZE {
+        return Err(BootError::InvalidKernel);
+    }
+    let table_size = phentsize.checked_mul(phnum).ok_or(BootError::InvalidKernel)?;
+    let table_end = phoff.checked_add(table_size as u64).ok_or(BootError::InvalidKernel)?;
+    if table_end > bytes.len() as u64 {
+        return Err(BootError::InvalidKernel);
+    }
+
+    let mut loadable_count = 0usize;
+    let mut entry_executable = false;
+    let mut load_low = u64::MAX;
+    let mut load_high = 0u64;
+
+    for index in 0..phnum {
+        let offset = phoff
+            .checked_add((index * phentsize) as u64)
+            .ok_or(BootError::InvalidKernel)? as usize;
+        let ph = bytes.get(offset..offset + ELF64_PROGRAM_HEADER_SIZE).ok_or(BootError::InvalidKernel)?;
+        let typ = u32::from_le_bytes(ph[0..4].try_into().unwrap());
+        let flags = u32::from_le_bytes(ph[4..8].try_into().unwrap());
+        let p_offset = u64::from_le_bytes(ph[8..16].try_into().unwrap());
+        let vaddr = u64::from_le_bytes(ph[16..24].try_into().unwrap());
+        let paddr = u64::from_le_bytes(ph[24..32].try_into().unwrap());
+        let filesz = u64::from_le_bytes(ph[32..40].try_into().unwrap());
+        let memsz = u64::from_le_bytes(ph[40..48].try_into().unwrap());
+        let align = u64::from_le_bytes(ph[48..56].try_into().unwrap());
+
+        if typ == PT_INTERP {
+            return Err(BootError::Unsupported("luna-init must not require a dynamic linker"));
+        }
+        if typ != PT_LOAD {
+            continue;
+        }
+        loadable_count += 1;
+
+        let file_end = p_offset.checked_add(filesz).ok_or(BootError::InvalidKernel)?;
+        if file_end > bytes.len() as u64 || filesz > memsz {
+            return Err(BootError::InvalidKernel);
+        }
+        let mem_end = vaddr.checked_add(memsz).ok_or(BootError::InvalidKernel)?;
+        if paddr.checked_add(memsz).is_none() {
+            return Err(BootError::InvalidKernel);
+        }
+        if align != 0 {
+            if !align.is_power_of_two() || (p_offset % align) != (vaddr % align) {
+                return Err(BootError::Unsupported("luna-init segment alignment is invalid"));
+            }
+        }
+        if (flags & PF_W != 0) && (flags & PF_X != 0) {
+            return Err(BootError::Unsupported("luna-init violates W^X"));
+        }
+        if vaddr < load_low { load_low = vaddr; }
+        if mem_end > load_high { load_high = mem_end; }
+        if (flags & PF_X != 0) && entry >= vaddr && entry < mem_end {
+            entry_executable = true;
+        }
+    }
+
+    if loadable_count == 0 || !entry_executable || load_low == u64::MAX {
+        return Err(BootError::InvalidKernel);
+    }
+    if load_high.checked_sub(load_low).ok_or(BootError::InvalidKernel)? > MAX_LUNA_INIT_MEMORY {
+        return Err(BootError::Unsupported("luna-init loadable memory exceeds safety limit"));
+    }
+
     Ok(())
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> BootResult<u16> {
+    let value = bytes.get(offset..offset + 2).ok_or(BootError::InvalidKernel)?;
+    Ok(u16::from_le_bytes(value.try_into().unwrap()))
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> BootResult<u64> {
+    let value = bytes.get(offset..offset + 8).ok_or(BootError::InvalidKernel)?;
+    Ok(u64::from_le_bytes(value.try_into().unwrap()))
 }
 
 fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u64> {
