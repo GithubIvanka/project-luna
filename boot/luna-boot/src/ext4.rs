@@ -18,6 +18,7 @@ const EXT4_EXTENTS_FL: u32 = 0x0008_0000;
 const EXT4_FT_DIR: u8 = 2;
 const EXT4_FT_REG_FILE: u8 = 1;
 const EXT4_ROOT_INO: u32 = 2;
+const HASH_CHUNK_SIZE: usize = 64 * 1024;
 
 pub trait BlockDevice {
     fn block_size(&self) -> u64;
@@ -98,6 +99,26 @@ impl<D: BlockDevice> Ext4<D> {
         let mut out = vec![0u8; size];
         self.read_inode_data(&inode, &mut out)?;
         Ok(out)
+    }
+
+    /// Hash a regular file without materializing the complete file in memory.
+    pub fn hash_file(&mut self, path: &str) -> BootResult<[u8; 32]> {
+        let inode = self.resolve_path(path)?;
+        if inode.mode & 0xf000 != 0x8000 { return Err(BootError::FilesystemError); }
+
+        let mut hasher = blake3::Hasher::new();
+        let mut file_offset = 0u64;
+        let mut buffer = vec![0u8; HASH_CHUNK_SIZE];
+        while file_offset < inode.size {
+            let remaining = inode.size - file_offset;
+            let chunk_len = remaining.min(HASH_CHUNK_SIZE as u64) as usize;
+            self.read_inode_range(&inode, file_offset, &mut buffer[..chunk_len])?;
+            hasher.update(&buffer[..chunk_len]);
+            file_offset = file_offset
+                .checked_add(chunk_len as u64)
+                .ok_or(BootError::FilesystemError)?;
+        }
+        Ok(*hasher.finalize().as_bytes())
     }
 
     pub fn file_exists(&mut self, path: &str) -> BootResult<bool> {
@@ -194,12 +215,37 @@ impl<D: BlockDevice> Ext4<D> {
     }
 
     fn read_inode_data(&mut self, inode: &Inode, out: &mut [u8]) -> BootResult<()> {
-        if inode.flags & EXT4_EXTENTS_FL != 0 { self.read_extent_node(&inode.blocks, out, 0)?; }
-        else { self.read_legacy_blocks(&inode.blocks, out)?; }
+        self.read_inode_range(inode, 0, out)
+    }
+
+    fn read_inode_range(&mut self, inode: &Inode, offset: u64, out: &mut [u8]) -> BootResult<()> {
+        let end = offset.checked_add(out.len() as u64).ok_or(BootError::FilesystemError)?;
+        if end > inode.size { return Err(BootError::FilesystemError); }
+        if out.is_empty() { return Ok(()); }
+
+        let bs = self.geometry.block_size as u64;
+        let mut written = 0usize;
+        while written < out.len() {
+            let file_offset = offset + written as u64;
+            let block_index = file_offset / bs;
+            let in_block = (file_offset % bs) as usize;
+            let chunk = (out.len() - written).min(self.geometry.block_size as usize - in_block);
+            self.read_inode_block_range(inode, block_index, in_block, &mut out[written..written + chunk])?;
+            written += chunk;
+        }
         Ok(())
     }
 
-    fn read_extent_node(&mut self, node: &[u8], out: &mut [u8], file_block_base: u64) -> BootResult<()> {
+    fn read_inode_block_range(&mut self, inode: &Inode, block_index: u64, in_block: usize, out: &mut [u8]) -> BootResult<()> {
+        if inode.flags & EXT4_EXTENTS_FL != 0 {
+            self.read_extent_block_range(&inode.blocks, block_index, in_block, out)?;
+        } else {
+            self.read_legacy_block_range(&inode.blocks, block_index, in_block, out)?;
+        }
+        Ok(())
+    }
+
+    fn read_extent_block_range(&mut self, node: &[u8], wanted_block: u64, in_block: usize, out: &mut [u8]) -> BootResult<()> {
         if u16_at(node, 0) != 0xf30a { return Err(BootError::InvalidFilesystem); }
         let entries = u16_at(node, 2) as usize;
         let depth = u16_at(node, 6);
@@ -210,51 +256,60 @@ impl<D: BlockDevice> Ext4<D> {
                 let logical = u32_at(node, p) as u64;
                 let raw_len = u16_at(node, p + 4);
                 let len = (raw_len & 0x7fff) as u64;
+                let extent_end = logical.checked_add(len).ok_or(BootError::InvalidFilesystem)?;
+                if wanted_block < logical || wanted_block >= extent_end { continue; }
+                if raw_len & 0x8000 != 0 { out.fill(0); return Ok(()); }
                 let phys_lo = u32_at(node, p + 8) as u64;
                 let phys_hi = u16_at(node, p + 6) as u64;
-                let phys = phys_lo | (phys_hi << 32);
-                self.copy_extent(logical, len, phys, file_block_base, out)?;
+                let physical = phys_lo | (phys_hi << 32);
+                let delta = wanted_block - logical;
+                let block = physical.checked_add(delta).ok_or(BootError::FilesystemError)?;
+                let offset = block
+                    .checked_mul(bs(self))
+                    .and_then(|base| base.checked_add(in_block as u64))
+                    .ok_or(BootError::FilesystemError)?;
+                self.device.read_at(offset, out)?;
+                return Ok(());
             }
+            out.fill(0);
+            Ok(())
         } else {
+            let mut selected = None;
             for i in 0..entries {
                 let p = 12 + i * 12;
                 let logical = u32_at(node, p) as u64;
-                let child_lo = u32_at(node, p + 4) as u64;
-                let child_hi = u16_at(node, p + 8) as u64;
-                let child = child_lo | (child_hi << 32);
-                let mut child_data = vec![0u8; self.geometry.block_size as usize];
-                self.device.read_at(child * self.geometry.block_size as u64, &mut child_data)?;
-                self.read_extent_node(&child_data, out, logical)?;
+                if logical <= wanted_block {
+                    selected = Some(p);
+                } else {
+                    break;
+                }
             }
+            let p = selected.ok_or(BootError::FilesystemError)?;
+            let child_lo = u32_at(node, p + 4) as u64;
+            let child_hi = u16_at(node, p + 8) as u64;
+            let child = child_lo | (child_hi << 32);
+            let mut child_data = vec![0u8; self.geometry.block_size as usize];
+            self.device.read_at(
+                child.checked_mul(self.geometry.block_size as u64).ok_or(BootError::FilesystemError)?,
+                &mut child_data,
+            )?;
+            self.read_extent_block_range(&child_data, wanted_block, in_block, out)
         }
-        Ok(())
     }
 
-    fn copy_extent(&mut self, logical: u64, len: u64, physical: u64, _base: u64, out: &mut [u8]) -> BootResult<()> {
-        let bs = self.geometry.block_size as usize;
-        let start = logical as usize * bs;
-        if start >= out.len() { return Ok(()); }
-        let bytes = (len as usize * bs).min(out.len() - start);
-        self.device.read_at(physical * self.geometry.block_size as u64, &mut out[start..start + bytes])?;
-        Ok(())
-    }
-
-    fn read_legacy_blocks(&mut self, blocks: &[u8; 60], out: &mut [u8]) -> BootResult<()> {
-        let bs = self.geometry.block_size as usize;
-        let direct = 12usize;
-        for i in 0..direct {
-            let p = i * 4;
-            let block = u32_at(blocks, p) as u64;
-            if block == 0 { break; }
-            let start = i * bs;
-            if start >= out.len() { break; }
-            let len = bs.min(out.len() - start);
-            self.device.read_at(block * bs as u64, &mut out[start..start + len])?;
-        }
-        if out.len() > direct * bs { return Err(BootError::Unsupported("ext4 indirect block maps")); }
+    fn read_legacy_block_range(&mut self, blocks: &[u8; 60], block_index: u64, in_block: usize, out: &mut [u8]) -> BootResult<()> {
+        if block_index >= 12 { return Err(BootError::Unsupported("ext4 indirect block maps")); }
+        let block = u32_at(blocks, block_index as usize * 4) as u64;
+        if block == 0 { out.fill(0); return Ok(()); }
+        let offset = block
+            .checked_mul(self.geometry.block_size as u64)
+            .and_then(|base| base.checked_add(in_block as u64))
+            .ok_or(BootError::FilesystemError)?;
+        self.device.read_at(offset, out)?;
         Ok(())
     }
 }
 
+fn bs<D: BlockDevice>(fs: &Ext4<D>) -> u64 { fs.geometry.block_size as u64 }
 fn u16_at(data: &[u8], off: usize) -> u16 { u16::from_le_bytes([data[off], data[off + 1]]) }
 fn u32_at(data: &[u8], off: usize) -> u32 { u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) }
