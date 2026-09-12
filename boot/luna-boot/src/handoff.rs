@@ -1,7 +1,7 @@
 //! Linux entry transition and Luna Handoff ABI v1 serialization.
 
 use alloc::vec::Vec;
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 use uefi::boot::{self, AllocateType, MemoryType, PAGE_SIZE};
 
@@ -198,6 +198,21 @@ fn push_record(bytes: &mut Vec<u8>, ty: u16, flags: u16, payload: &[u8]) -> Boot
 
 fn magic() -> u64 { u64::from_le_bytes(*b"LUNAHD01") }
 fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
+
+/// Return the physical address of the assembly transition stub that remains
+/// executing immediately after CR3 is switched.
+pub fn transition_entry_address() -> u64 {
+    luna_linux_entry as usize as u64
+}
+
+/// Read the stack pointer that the final transition will continue using.
+pub fn current_stack_pointer() -> u64 {
+    let stack: u64;
+    unsafe {
+        asm!("mov {}, rsp", out(reg) stack, options(nomem, nostack, preserves_flags));
+    }
+    stack
+}
 
 global_asm!(r#"
     .section .text.luna_handoff,"ax"
