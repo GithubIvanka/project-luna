@@ -630,10 +630,10 @@ impl LinuxApplicationRuntime {
         let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
         let mut failures = Vec::new();
         for path in [&root, &support] {
-            if let Err(error) = fs::remove_dir_all(path) {
-                if error.kind() != std::io::ErrorKind::NotFound {
-                    failures.push(format!("{}: {error}", path.display()));
-                }
+            if let Err(error) = fs::remove_dir_all(path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                failures.push(format!("{}: {error}", path.display()));
             }
         }
         if failures.is_empty() {
@@ -737,14 +737,19 @@ mod lifecycle_tests {
         });
         assert_eq!(instance.state(), InstanceState::Stopped);
         assert_eq!(instance.exit(), Some(ProcessExit::Exited { code: 0 }));
-        assert_eq!(instance.cleanup().unwrap().message(), Some("permission denied"));
+        assert_eq!(
+            instance.cleanup().unwrap().message(),
+            Some("permission denied")
+        );
     }
 
     #[test]
     fn remove_dir_failure_is_returned_by_cleanup_root() {
         let mut runtime = LinuxApplicationRuntime::new();
         let process = ProcessId::new(99);
-        runtime.roots.insert(process, std::path::PathBuf::from("/proc/self"));
+        runtime
+            .roots
+            .insert(process, std::path::PathBuf::from("/proc/self"));
         let outcome = runtime.cleanup_root(process);
         assert!(matches!(outcome, CleanupOutcome::Failed { .. }));
     }

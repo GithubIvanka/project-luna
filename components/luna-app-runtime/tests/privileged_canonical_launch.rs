@@ -10,9 +10,7 @@ use luna_app_runtime::{
     ApplicationLaunchContext, ApplicationPlan, ApplicationPlanLauncher, CleanupOutcome,
     ExecutableSpec, InstanceState, LinuxApplicationRuntime, authorize_application_plan,
 };
-use luna_bundle::{
-    BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess,
-};
+use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess};
 use luna_common::{BundleId, RuntimeSpec, UserId, Version};
 use luna_namespace::LinuxMountNamespace;
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
@@ -75,8 +73,7 @@ impl Drop for Fixture {
 
 fn resource(manifest: &mut BundleManifest, path: &str, access: &[ResourceAccess]) {
     manifest.add_resource(
-        BundleResource::new(path, path.trim_start_matches('/'))
-            .with_access(access.iter().copied()),
+        BundleResource::new(path, path.trim_start_matches('/')).with_access(access.iter().copied()),
     );
 }
 
@@ -174,20 +171,16 @@ int main(int argc, char **argv) {
         Version::new(1, 0, 0),
         BundleKind::Application,
     ));
-    resource(&mut manifest, "/app/probe", &[ResourceAccess::Execute]);
-    resource(&mut manifest, "/app/no-exec", &[ResourceAccess::Read]);
     resource(
         &mut manifest,
-        "/app/allowed-file",
-        &[ResourceAccess::Read],
+        "/app/probe",
+        &[ResourceAccess::Read, ResourceAccess::Execute],
     );
+    resource(&mut manifest, "/app/no-exec", &[ResourceAccess::Read]);
+    resource(&mut manifest, "/app/allowed-file", &[ResourceAccess::Read]);
     resource(&mut manifest, "/app/tree", &[ResourceAccess::Read]);
     resource(&mut manifest, "/app/read-only", &[ResourceAccess::Read]);
-    resource(
-        &mut manifest,
-        "/app/write-only",
-        &[ResourceAccess::Write],
-    );
+    resource(&mut manifest, "/app/write-only", &[ResourceAccess::Write]);
     resource(&mut manifest, "/app/output", &[ResourceAccess::Write]);
 
     let mut mappings = MappingTable::new();
@@ -196,7 +189,7 @@ int main(int argc, char **argv) {
         "/app/probe",
         &probe,
         false,
-        &[ResourceAccess::Execute],
+        &[ResourceAccess::Read, ResourceAccess::Execute],
     );
     rule(
         &mut mappings,
@@ -252,12 +245,9 @@ int main(int argc, char **argv) {
     )
     .unwrap();
     let authorized = authorize_application_plan(plan, &AllowAll).unwrap();
-    let context = ApplicationLaunchContext::new(
-        LinuxMountNamespace,
-        &system,
-        fixture.root.join("staging"),
-    )
-    .with_trusted_source_root(&app);
+    let context =
+        ApplicationLaunchContext::new(LinuxMountNamespace, &system, fixture.root.join("staging"))
+            .with_trusted_source_root(&app);
     let mut system_runtime = SystemRuntimeService::new();
     system_runtime.start();
     let mut application_runtime = LinuxApplicationRuntime::new();
@@ -274,10 +264,7 @@ int main(int argc, char **argv) {
             ),
         }
     }
-    assert_eq!(
-        fs::read_to_string(app.join("output")).unwrap(),
-        "PASS\n"
-    );
+    assert_eq!(fs::read_to_string(app.join("output")).unwrap(), "PASS\n");
     let instance = application_runtime.instance(id).unwrap();
     assert!(matches!(
         instance.cleanup(),
