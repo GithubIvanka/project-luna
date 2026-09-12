@@ -10,6 +10,7 @@ use uefi::Status;
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
 use crate::error::{BootError, BootResult};
+use crate::e820::E820Extension;
 use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
 use crate::handoff::{
@@ -161,19 +162,28 @@ pub fn boot_flow() -> BootResult<()> {
         prepared.init_digest,
     )?;
 
-    prepared.boot_params.set_setup_data(luna_handoff.address)?;
+    let mut e820_ext = E820Extension::allocate()?;
+    prepared.boot_params.set_setup_data(e820_ext.address)?;
     let transition_entry = transition_entry_address();
     let stack_pointer = current_stack_pointer();
     let (page_table, page_table_pages) = prepare_identity_map(transition_entry, stack_pointer)?;
 
     let mut reserved = prepared.allocations.clone();
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
+    reserved.push((e820_ext.address, e820_ext.allocation_pages));
     reserved.push((page_table, page_table_pages));
 
     // From this point onward Boot Services are gone. The post-EBS path is
     // deliberately non-returning so failures can never reach efi_main().
     let final_map = unsafe { boot::exit_boot_services(None) };
-    enter_kernel_after_exit_boot_services(final_map, prepared, page_table, luna_handoff, reserved)
+    enter_kernel_after_exit_boot_services(
+        final_map,
+        prepared,
+        page_table,
+        luna_handoff,
+        e820_ext,
+        reserved,
+    )
 }
 
 fn enter_kernel_after_exit_boot_services(
@@ -181,11 +191,17 @@ fn enter_kernel_after_exit_boot_services(
     mut prepared: PreparedKernel,
     page_table: u64,
     luna_handoff: LunaHandoff,
+    mut e820_ext: E820Extension,
     reserved: Vec<(u64, usize)>,
 ) -> ! {
     if prepared
         .boot_params
-        .set_e820_from_map_reserved(&final_map, &reserved)
+        .set_e820_from_map_reserved(
+            &final_map,
+            &reserved,
+            &mut e820_ext,
+            luna_handoff.address,
+        )
         .is_err()
     {
         runtime::reset(ResetType::COLD, Status::ABORTED, None);
