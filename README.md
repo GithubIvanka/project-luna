@@ -35,8 +35,11 @@ UEFI
 luna-boot.efi
   ↓
 SYSTEM
+  ├── versioned luna-init cores
   ├── versioned System Images (direct SquashFS)
   └── versioned kernels
+  ↓
+compatible kernel + System Image + luna-init core
   ↓
 luna-init
   ↓
@@ -54,6 +57,8 @@ luna-system-runtime
 Физическая модель: **EFI / SYSTEM / DATA / SWAP**.
 
 System Image — непосредственно `luna-X.Y.Z.squashfs`. DATA содержит изменяемое системное, пользовательское, application и cache состояние.
+
+`luna-init` — независимый boot/runtime core. Его артефакт хранится отдельно от System Image как `SYSTEM/cores/luna-X.Y.Z.init` и имеет собственный lifecycle/retention.
 
 ## Запуск приложения
 
@@ -100,19 +105,17 @@ luna-boot.efi
  ↓
 GUI boot splash
  ↓
+compatible kernel + System Image + luna-init core
+ ↓
 Linux kernel
  ↓
 luna-init
  ↓
-System Image + DATA
+System Environment
  ↓
 luna-system-runtime
  ↓
 UserSession
- ↓
-GUI login
- ↓
-authentication
  ↓
 Wayland
  ↓
@@ -142,7 +145,7 @@ application.lbp
 RFC-0002 / LBP1
 ```
 
-`.lbp` — транспортное/archive представление Bundle. Это не System Image.
+`.lbp` — транспортное/archive представление Bundle. Это не System Image и не `luna-init` core.
 
 ## Разработка
 
@@ -160,4 +163,4 @@ tools/build-pc-image.sh
 
 ## Правило проекта
 
-`docs/ARCHITECTURE.md` — главный и текущий архитектурный Source of Truth. Реализация не должна молча менять принятые решения. При обнаружении конфликта сначала меняется архитектурный документ/решение, затем код.
+`docs/ARCHITECTURE.md` — главный и текущий архитектурный Source of Truth. Принятая архитектура должна отражать независимый lifecycle `luna-init` core, System Image и kernel. Реализация не должна молча менять принятые решения. При обнаружении конфликта сначала меняется архитектурный документ/решение, затем код.
