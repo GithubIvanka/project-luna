@@ -548,24 +548,25 @@ impl ApplicationRuntime for InMemoryApplicationRuntime {
         plan: application_plan::AuthorizedApplicationPlan,
         session: &UserSession,
     ) -> Result<ApplicationInstance, Self::Error> {
-        Self::validate_session(plan.session(), session)?;
-        Self::validate_mapping_only(plan.mapping(), plan.runtime())?;
-        validate_manifest(plan.manifest())
+        Self::validate_session(plan.value().session(), session)?;
+        Self::validate_mapping_only(plan.value().mapping(), plan.value().runtime())?;
+        validate_manifest(plan.value().manifest())
             .map_err(|e| RuntimeError::InvalidBundle(e.to_string()))?;
-        for resource in plan.manifest().resources() {
+        for resource in plan.value().manifest().resources() {
             let logical =
                 LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
-            plan.mapping()
+            plan.value()
+                .mapping()
                 .resolve(&logical)
                 .map_err(RuntimeError::Mapping)?;
         }
         let id = self.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
             id,
-            plan.application().clone(),
-            plan.version(),
-            plan.session(),
-            plan.runtime(),
+            plan.value().application().clone(),
+            plan.value().version(),
+            plan.value().session(),
+            plan.value().runtime(),
         );
         instance.transition(InstanceState::Starting)?;
         instance.transition(InstanceState::Running)?;

@@ -1,5 +1,6 @@
 use luna_app_runtime::{
-    ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime, ExecutableSpec,
+    ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime,
+    ExecutableSpec, authorize_application_plan,
 };
 use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess};
 use luna_common::{BundleId, RuntimeSpec, UserId, Version};
@@ -36,16 +37,16 @@ impl ApplicationRuntime for TestRuntime {
         plan: luna_app_runtime::AuthorizedApplicationPlan,
         session: &UserSession,
     ) -> Result<ApplicationInstance, Self::Error> {
-        if session.id() != plan.session() || session.state() != SessionState::Active {
+        if session.id() != plan.value().session() || session.state() != SessionState::Active {
             return Err("invalid launch session");
         }
         self.launches += 1;
         Ok(ApplicationInstance::new_with_runtime(
             ApplicationInstanceId::new(1),
-            plan.application().clone(),
-            plan.version(),
-            plan.session(),
-            plan.runtime(),
+            plan.value().application().clone(),
+            plan.value().version(),
+            plan.value().session(),
+            plan.value().runtime(),
         ))
     }
 
@@ -104,7 +105,7 @@ fn plan(session: &UserSession) -> ApplicationPlan {
 #[test]
 fn runtime_boundary_accepts_only_authorized_plan_for_active_session() {
     let session = active_session(1);
-    let authorized = plan(&session).authorize(&AllowAll).expect("authorization");
+    let authorized = authorize_application_plan(plan(&session), &AllowAll).expect("authorization");
     let mut runtime = TestRuntime::default();
 
     let instance = runtime
@@ -121,7 +122,7 @@ fn authorization_denial_never_reaches_process_launch_boundary() {
     let session = active_session(2);
     let runtime = TestRuntime::default();
 
-    assert!(plan(&session).authorize(&DenyAll).is_err());
+    assert!(authorize_application_plan(plan(&session), &DenyAll).is_err());
     assert_eq!(runtime.launches, 0);
 
     let request = AuthorizationRequest {
@@ -138,17 +139,15 @@ fn authorization_denial_never_reaches_process_launch_boundary() {
 #[test]
 fn inactive_or_foreign_session_is_rejected_at_runtime_boundary() {
     let authorized_session = active_session(3);
-    let authorized = plan(&authorized_session)
-        .authorize(&AllowAll)
-        .expect("authorization");
+    let authorized =
+        authorize_application_plan(plan(&authorized_session), &AllowAll).expect("authorization");
     let inactive = UserSession::new(SessionId::new(3), UserId::from("alice"));
     let mut runtime = TestRuntime::default();
     assert!(runtime.launch_authorized(authorized, &inactive).is_err());
     assert_eq!(runtime.launches, 0);
 
-    let authorized = plan(&authorized_session)
-        .authorize(&AllowAll)
-        .expect("authorization");
+    let authorized =
+        authorize_application_plan(plan(&authorized_session), &AllowAll).expect("authorization");
     let foreign = active_session(4);
     assert!(runtime.launch_authorized(authorized, &foreign).is_err());
     assert_eq!(runtime.launches, 0);
