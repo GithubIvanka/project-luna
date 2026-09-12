@@ -72,47 +72,6 @@ impl LinuxMountNamespace {
         Ok(Self)
     }
 
-    /// Apply mappings at the caller's current root using their declared access.
-    pub fn apply_mappings(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
-        for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
-            let read_only = !rule.access().contains(&ResourceAccess::Write);
-            self.apply_mapping(rule, read_only)?;
-        }
-        Ok(())
-    }
-
-    pub fn apply_mapping(&self, rule: &MappingRule, read_only: bool) -> Result<(), NamespaceError> {
-        let target = rule.logical().as_path();
-        let source = rule.physical().as_path();
-        match rule.kind() {
-            MappingKind::File => {
-                if !source.is_file() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "file mapping source is not a file",
-                    )
-                    .into());
-                }
-                if !target.exists() {
-                    if let Some(parent) = target.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::File::create(target)?;
-                }
-            }
-            MappingKind::Subtree => {
-                if !source.is_dir() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "subtree mapping source is not a directory",
-                    )
-                    .into());
-                }
-                fs::create_dir_all(target)?;
-            }
-        }
-        bind_mount(source, target, read_only)
-    }
 
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
     pub fn enforce_filesystem_access(

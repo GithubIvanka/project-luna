@@ -70,7 +70,6 @@ Running  → Stopped
 Running  → Crashed
 Running  → Failed
 Stopping → Stopped
-Stopping → Crashed
 Stopping → Failed
 ```
 
@@ -192,12 +191,10 @@ AuthorizedApplicationPlan
         ↓
 trusted setup layer
         ├── process creation
-        ├── cgroup placement
         ├── mount namespace
         ├── RAM-backed logical `/`
         ├── authorized resource mappings
         ├── runtime filesystems
-        ├── final credentials/capabilities setup
         ├── final security restrictions
         └── execve()
 ```
@@ -224,7 +221,7 @@ Trusted setup является фазой подготовки того же п�
 Application sees
     ↓
 logical `/`
-/etc /usr /lib /tmp /proc /sys /dev ...
+/usr /lib /lib64 /tmp /proc /sys /dev ...
 
 Application may access
     ↓
@@ -268,7 +265,7 @@ Logical root создаётся как tmpfs в private mount namespace; staging
 
 Для физических source paths используется FD-based source resolution: `openat2()` с containment/no-symlink restrictions, затем detached mount через `open_tree()` и attach через `move_mount`.
 
-Создание process staging и logical root происходит только после успешной authorization и session revalidation. Не committed staging root защищён cleanup guard и удаляется при setup/spawn/exec failure. После process exit runtime удаляет staging root и namespace support directory.
+Создание process staging и logical root происходит только после успешной authorization и session revalidation. Не committed staging root защищён cleanup guard и удаляется при setup/spawn/exec failure. После process exit runtime пытается удалить staging root и namespace support directory. Результат cleanup сохраняется отдельно от process exit/crash outcome, поэтому cleanup failure наблюдаем и не скрывает исходный результат процесса.
 
 ## Ownership model
 
@@ -299,7 +296,7 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - inactive и foreign session отклоняются на launch boundary;
 - runtime принимает только `AuthorizedApplicationPlan`;
 - authorization denial не достигает launch boundary;
-- process identity и exit/crash outcome сохраняются;
+- process identity, exit/crash outcome и отдельный cleanup outcome сохраняются;
 - normal exit переводит instance в `Stopped`;
 - abnormal exit переводит instance в `Crashed`;
 - uncommitted staging root удаляется;
@@ -308,7 +305,7 @@ Bundle install/remove, созданием UserSession, system-wide supervision, 
 - capability names неизвестные Registry не могут получить grant;
 - default application launch не требует PID namespace supervisor.
 
-Linux integration дополнительно проверяет mount namespace lifecycle, process lifecycle и process reaping.
+Privileged Linux integration запускает реальный динамический ELF через authorized launcher и проверяет отдельный mount namespace, fresh tmpfs `/`, trusted `/usr`/`/lib`/`/lib64`, authorized file/subtree mappings, kernel-enforced Landlock denial, FD policy и cleanup outcome.
 
 ## Открыто
 

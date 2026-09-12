@@ -53,7 +53,7 @@ Source and target attachment use FD-based resolution with `openat2(RESOLVE_BENEA
 
 The built-in minimal runtime profile exposes the trusted runtime subtrees `/usr`, `/lib`, and `/lib64` read/execute. It does not expose the whole system `/etc`; required configuration files must be explicit authorized mappings.
 
-An uncommitted staging root is removed on setup/spawn/attachment/transition failure. The runtime removes committed roots after process exit or requested termination. Cleanup errors are currently not surfaced and remain open work.
+An uncommitted staging root is removed on setup/spawn/attachment/transition failure. After process exit or requested termination, cleanup produces an observable `CleanupOutcome` stored independently from the process exit/crash outcome, so cleanup failure cannot erase the original result.
 
 ## ApplicationInstance
 
@@ -74,21 +74,20 @@ A naturally exiting successful process may move `Running → Stopped`; a non-zer
 
 Unit/contract tests cover valid and invalid lifecycle transitions, active/inactive/foreign session handling, authorization denial before launch, authorized-plan-only launcher typing, runtime/mapping mismatch, executable mapping, mapping access checks, launch-context trust roots, normal and abnormal exit recording, and uncommitted staging cleanup.
 
-Privileged integration tests for real namespace/mount/chroot/Landlock behavior are not part of ordinary CI yet.
+A dedicated privileged Linux CI suite launches a real dynamically linked ELF through the authorized launcher and verifies mount namespace isolation, fresh tmpfs root, trusted runtime access, mapping access, Landlock denials, FD inheritance policy, and cleanup outcome.
 
 ## Open work
 
 - executable → ELF interpreter → library/runtime-resource dependency closure;
 - system-runtime ownership/allocation of system-wide `ApplicationInstanceId` values;
 - cgroup v2 placement and resource limits, including possible `clone3`/`CLONE_INTO_CGROUP` integration;
-- final credential, capability, device, `/proc`, `/sys`, `/run`, and inherited-FD policy;
+- final credential, capability, device, `/proc`, `/sys`, and `/run` policy expansion;
 - a setup/exec error channel that distinguishes pre-exec setup failure from final `execve()` failure;
 - durable lifecycle recovery after runtime restart;
-- observable cleanup failures and leaked-mount recovery;
-- removal or strict test-only restriction of the legacy whole-System-Image OverlayFS helper path;
-- privileged integration tests for real mount namespace, root transition, mount rollback, and Landlock enforcement.
+- leaked-mount recovery beyond the observable cleanup outcome;
+- additional privileged coverage for forced mount rollback failures.
 
 
 ## P0 enforcement clarification
 
-Authorization sealing принадлежит `luna-security`. Единственный production path принимает sealed `AuthorizedApplicationPlan`, создаёт fresh tmpfs `/`, монтирует trusted runtime и authorized mappings, затем применяет объединённый Landlock ruleset. Все FD >= 3 закрываются на final `execve()` по default-deny policy.
+Authorization sealing принадлежит `luna-security`. Единственный production path принимает sealed `AuthorizedApplicationPlan`, создаёт fresh tmpfs `/`, монтирует trusted runtime и authorized mappings, затем применяет объединённый Landlock ruleset. `CLOSE_RANGE_CLOEXEC` помечает все FD >= 3 close-on-exec; они закрываются ядром только при успешном final `execve()`. Разрешённых non-stdio runtime FD сейчас нет.

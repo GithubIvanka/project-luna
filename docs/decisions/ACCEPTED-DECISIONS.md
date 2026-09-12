@@ -417,4 +417,4 @@ RAM-backed logical root / luna-init bootstrap — accepted architecture; impleme
 - Только `luna-security` создаёт sealed `AuthorizedApplicationPlan`.
 - Production root: fresh tmpfs + trusted runtime + authorized mappings; whole-image OverlayFS запрещён.
 - Landlock включает обе категории ресурсов.
-- FD inheritance default-deny: только stdio, остальные FD закрываются на `execve()`.
+- FD inheritance default-deny: stdio следует explicit `Command` policy; `CLOSE_RANGE_CLOEXEC` помечает FD >= 3, и ядро закрывает их при успешном `execve()`; разрешённых non-stdio runtime FD сейчас нет.

@@ -58,6 +58,25 @@ impl ProcessExit {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CleanupOutcome {
+    Succeeded,
+    Failed { message: String },
+}
+
+impl CleanupOutcome {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Succeeded)
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Succeeded => None,
+            Self::Failed { message } => Some(message),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ApplicationProcess {
     id: ProcessId,
@@ -136,6 +155,7 @@ pub struct ApplicationInstance {
     state: InstanceState,
     process: Option<ApplicationProcess>,
     failure: Option<InstanceFailure>,
+    cleanup: Option<CleanupOutcome>,
 }
 impl ApplicationInstance {
     pub fn new(
@@ -162,6 +182,7 @@ impl ApplicationInstance {
             state: InstanceState::Created,
             process: None,
             failure: None,
+            cleanup: None,
         }
     }
     pub const fn id(&self) -> ApplicationInstanceId {
@@ -199,6 +220,12 @@ impl ApplicationInstance {
     }
     pub fn failure(&self) -> Option<&InstanceFailure> {
         self.failure.as_ref()
+    }
+    pub fn cleanup(&self) -> Option<&CleanupOutcome> {
+        self.cleanup.as_ref()
+    }
+    pub(crate) fn record_cleanup(&mut self, outcome: CleanupOutcome) {
+        self.cleanup = Some(outcome);
     }
     pub const fn is_terminal(&self) -> bool {
         matches!(
@@ -532,9 +559,10 @@ impl LinuxApplicationRuntime {
             ProcessState::Running => Ok(InstanceState::Running),
             ProcessState::Exited(status) => {
                 self.processes.remove(&process);
-                self.cleanup_root(process);
+                let cleanup = self.cleanup_root(process);
                 let instance = self.model.instance_mut(id)?;
                 instance.record_process_exit(status)?;
+                instance.record_cleanup(cleanup);
                 Ok(instance.state())
             }
         }
@@ -565,8 +593,11 @@ impl LinuxApplicationRuntime {
             }
         };
         self.processes.remove(&process);
-        self.cleanup_root(process);
-        self.model.instance_mut(id)?.record_requested_stop(status)
+        let cleanup = self.cleanup_root(process);
+        let instance = self.model.instance_mut(id)?;
+        instance.record_requested_stop(status)?;
+        instance.record_cleanup(cleanup);
+        Ok(())
     }
     pub fn reconcile(
         &mut self,
@@ -579,9 +610,10 @@ impl LinuxApplicationRuntime {
                 ProcessState::Running => {}
                 ProcessState::Exited(status) => {
                     if let Some(id) = self.processes.remove(&process) {
-                        self.cleanup_root(process);
+                        let cleanup = self.cleanup_root(process);
                         let instance = self.model.instance_mut(id)?;
                         instance.record_process_exit(status)?;
+                        instance.record_cleanup(cleanup);
                         changes.push((id, instance.state()));
                     }
                 }
@@ -589,13 +621,27 @@ impl LinuxApplicationRuntime {
         }
         Ok(changes)
     }
-    pub(crate) fn cleanup_root(&mut self, process: ProcessId) {
-        if let Some(root) = self.roots.remove(&process) {
-            let parent = root.parent().unwrap_or(Path::new("/tmp"));
-            let name = root.file_name().and_then(|v| v.to_str()).unwrap_or("root");
-            let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
-            let _ = fs::remove_dir_all(root);
-            let _ = fs::remove_dir_all(support);
+    pub(crate) fn cleanup_root(&mut self, process: ProcessId) -> CleanupOutcome {
+        let Some(root) = self.roots.remove(&process) else {
+            return CleanupOutcome::Succeeded;
+        };
+        let parent = root.parent().unwrap_or(Path::new("/tmp"));
+        let name = root.file_name().and_then(|v| v.to_str()).unwrap_or("root");
+        let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
+        let mut failures = Vec::new();
+        for path in [&root, &support] {
+            if let Err(error) = fs::remove_dir_all(path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    failures.push(format!("{}: {error}", path.display()));
+                }
+            }
+        }
+        if failures.is_empty() {
+            CleanupOutcome::Succeeded
+        } else {
+            CleanupOutcome::Failed {
+                message: failures.join("; "),
+            }
         }
     }
 }
@@ -603,8 +649,8 @@ impl LinuxApplicationRuntime {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::{
-        ApplicationInstance, ApplicationInstanceId, FailureStage, InstanceState, ProcessExit,
-        RuntimeError,
+        ApplicationInstance, ApplicationInstanceId, CleanupOutcome, FailureStage, InstanceState,
+        LinuxApplicationRuntime, ProcessExit, RuntimeError,
     };
     use luna_common::{BundleId, Version};
     use luna_system_runtime::ProcessId;
@@ -676,6 +722,31 @@ mod lifecycle_tests {
         instance.record_process_exit(status).unwrap();
         assert_eq!(instance.state(), InstanceState::Stopped);
         assert_eq!(instance.exit(), Some(ProcessExit::Exited { code: 0 }));
+    }
+
+    #[test]
+    fn cleanup_failure_is_observable_without_losing_successful_exit() {
+        let mut instance = instance();
+        instance.transition(InstanceState::Starting).unwrap();
+        instance.attach_process(ProcessId::new(42)).unwrap();
+        instance.transition(InstanceState::Running).unwrap();
+        let status = Command::new("sh").args(["-c", "exit 0"]).status().unwrap();
+        instance.record_process_exit(status).unwrap();
+        instance.record_cleanup(CleanupOutcome::Failed {
+            message: "permission denied".into(),
+        });
+        assert_eq!(instance.state(), InstanceState::Stopped);
+        assert_eq!(instance.exit(), Some(ProcessExit::Exited { code: 0 }));
+        assert_eq!(instance.cleanup().unwrap().message(), Some("permission denied"));
+    }
+
+    #[test]
+    fn remove_dir_failure_is_returned_by_cleanup_root() {
+        let mut runtime = LinuxApplicationRuntime::new();
+        let process = ProcessId::new(99);
+        runtime.roots.insert(process, std::path::PathBuf::from("/proc/self"));
+        let outcome = runtime.cleanup_root(process);
+        assert!(matches!(outcome, CleanupOutcome::Failed { .. }));
     }
 
     #[test]
