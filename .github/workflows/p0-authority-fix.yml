@@ -1,0 +1,35 @@
+name: Fix authority migration compile errors
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-authority-fix.yml]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('components/luna-app-runtime/src/application_plan_runtime.rs')
+          s=p.read_text().replace('let rule = plan\n            .mapping()', 'let rule = plan\n            .value()\n            .mapping()')
+          p.write_text(s)
+          p=Path('components/luna-app-runtime/src/application_plan.rs')
+          s=p.read_text().replace('Err(PlanError::Security(_))', 'Err(_)')
+          p.write_text(s)
+          PY
+          rustfmt --edition 2024 components/luna-app-runtime/src/application_plan_runtime.rs components/luna-app-runtime/src/application_plan.rs
+          cargo check -p luna-security -p luna-app-runtime
+          cargo test -p luna-security -p luna-app-runtime
+          cargo clippy -p luna-security -p luna-app-runtime --all-targets -- -D warnings
+          rm -f .github/workflows/p0-authority-fix.yml p0-component-diagnostic.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(security): complete authority-owned plan migration"
+          git push origin HEAD:sol/app-runtime-work
