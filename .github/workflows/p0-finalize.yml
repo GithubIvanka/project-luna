@@ -1,0 +1,34 @@
+name: Finish P0 component validation
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-finalize.yml]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('components/luna-app-runtime/tests/application_plan_authorization.rs')
+          s=p.read_text(); old='assert!(matches!(result, Err(_)));'; assert old in s
+          p.write_text(s.replace(old, 'assert!(result.is_err());', 1))
+          PY
+          cargo fmt -- components/luna-app-runtime/tests/application_plan_authorization.rs
+          cargo check -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo test -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo clippy -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --all-targets -- -D warnings
+          cargo build -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --release
+      - run: |
+          rm -f .github/workflows/p0-finalize.yml p0-final-diagnostic.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "test(app-runtime): complete P0 component validation"
+          git push origin HEAD:sol/app-runtime-work
