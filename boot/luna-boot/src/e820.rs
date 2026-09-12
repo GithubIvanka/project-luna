@@ -57,10 +57,6 @@ impl E820Extension {
         })
     }
 
-    pub fn capacity_entries(&self) -> usize {
-        self.capacity_entries
-    }
-
     pub fn write_entry(&mut self, index: usize, entry: &E820Entry) -> BootResult<()> {
         if index >= self.capacity_entries {
             return Err(BootError::Unsupported("too many extended E820 entries"));
