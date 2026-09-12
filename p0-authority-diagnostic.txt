@@ -1,5 +1,0 @@
-security policy marker True
-application security import True
-authorize method regex True
-authorized struct True
-helper regex True
