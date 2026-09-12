@@ -93,51 +93,42 @@ impl BootParams {
 
             let start = d.phys_start;
             let end = start.checked_add(size).ok_or(BootError::InvalidKernel)?;
-            let mut segments = [(start, end); 16];
+            let mut segments = [(start, end, false); 16];
             let mut segment_count = 1usize;
             for &(rstart, rpages) in reserved {
                 if rpages == 0 { continue; }
                 let rend = rstart.checked_add((rpages as u64).saturating_mul(4096)).ok_or(BootError::InvalidKernel)?;
-                let mut next = [(0u64, 0u64); 16];
+                let mut next = [(0u64, 0u64, false); 16];
                 let mut next_count = 0usize;
-                for &(s, e) in &segments[..segment_count] {
+                for &(s, e, was_reserved) in &segments[..segment_count] {
                     if next_count + 2 > next.len() { return Err(BootError::Unsupported("too many E820 reservation splits")); }
                     if rend <= s || rstart >= e {
-                        next[next_count] = (s, e);
+                        next[next_count] = (s, e, was_reserved);
                         next_count += 1;
                     } else {
-                        if s < rstart { next[next_count] = (s, rstart.min(e)); next_count += 1; }
-                        let mid_start = s.max(rstart);
-                        let mid_end = e.min(rend);
-                        if mid_start < mid_end && typ != 2 {
-                            next[next_count] = (mid_start, mid_end | (1u64 << 63));
-                            next_count += 1;
-                        } else if mid_start < mid_end {
-                            next[next_count] = (mid_start, mid_end);
+                        if s < rstart {
+                            next[next_count] = (s, rstart.min(e), was_reserved);
                             next_count += 1;
                         }
-                        if rend < e { next[next_count] = (rend.max(s), e); next_count += 1; }
+                        let mid_start = s.max(rstart);
+                        let mid_end = e.min(rend);
+                        if mid_start < mid_end {
+                            next[next_count] = (mid_start, mid_end, true);
+                            next_count += 1;
+                        }
+                        if rend < e {
+                            next[next_count] = (rend.max(s), e, was_reserved);
+                            next_count += 1;
+                        }
                     }
                 }
                 segment_count = next_count;
                 for (segment, next_segment) in segments.iter_mut().zip(next.iter()).take(segment_count) {
-                    *segment = (next_segment.0, next_segment.1 & !(1u64 << 63));
-                }
-                for segment in segments.iter_mut().take(segment_count) {
-                    if segment.0 < segment.1
-                        && segment.0 >= rstart
-                        && segment.1 <= rend
-                        && typ != 2
-                    {
-                        segment.1 |= 1u64 << 63;
-                    }
+                    *segment = *next_segment;
                 }
             }
 
-            for &(s, tagged_e) in &segments[..segment_count] {
-                if s == tagged_e & !(1u64 << 63) { continue; }
-                let is_reserved = tagged_e & (1u64 << 63) != 0;
-                let e = tagged_e & !(1u64 << 63);
+            for &(s, e, is_reserved) in &segments[..segment_count] {
                 if e <= s { continue; }
                 if count == E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
                 entries[count] = E820Entry { addr: s, size: e - s, typ: if is_reserved { 2 } else { typ }, reserved: 0 };
@@ -152,5 +143,19 @@ impl BootParams {
         self.bytes[p..p + 8].copy_from_slice(&entry.addr.to_le_bytes());
         self.bytes[p + 8..p + 16].copy_from_slice(&entry.size.to_le_bytes());
         self.bytes[p + 16..p + 20].copy_from_slice(&entry.typ.to_le_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reservation_state_does_not_modify_address_bits() {
+        let start = u64::MAX - 0x1000;
+        let end = u64::MAX - 0x100;
+        let segment = (start, end, true);
+
+        assert_eq!(segment.0, start);
+        assert_eq!(segment.1, end);
+        assert!(segment.2);
     }
 }
