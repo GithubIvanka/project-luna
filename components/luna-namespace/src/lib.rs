@@ -81,34 +81,6 @@ impl LinuxMountNamespace {
         Ok(())
     }
 
-    fn apply_mappings_at_root(
-        &self,
-        root: &Path,
-        mappings: &MappingTable,
-    ) -> Result<(), NamespaceError> {
-        for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
-            let logical = root.join(rule.logical().as_str().trim_start_matches('/'));
-            let physical = rule.physical().clone();
-            let adjusted = match rule.kind() {
-                MappingKind::File => MappingRule::file(
-                    luna_root_mapping::LogicalPath::new(logical)
-                        .map_err(|_| NamespaceError::InvalidPath)?,
-                    physical,
-                )
-                .with_access(rule.access().iter().copied()),
-                MappingKind::Subtree => MappingRule::subtree(
-                    luna_root_mapping::LogicalPath::new(logical)
-                        .map_err(|_| NamespaceError::InvalidPath)?,
-                    physical,
-                )
-                .with_access(rule.access().iter().copied()),
-            };
-            let read_only = !rule.access().contains(&ResourceAccess::Write);
-            self.apply_mapping(&adjusted, read_only)?;
-        }
-        Ok(())
-    }
-
     pub fn apply_mapping(&self, rule: &MappingRule, read_only: bool) -> Result<(), NamespaceError> {
         let target = rule.logical().as_path();
         let source = rule.physical().as_path();
@@ -411,6 +383,20 @@ mod tests {
         let access = landlock_access(&rule).unwrap();
         assert!(access.contains(landlock::AccessFs::Execute));
         assert!(!access.contains(landlock::AccessFs::ReadFile));
+        assert!(!access.contains(landlock::AccessFs::WriteFile));
+    }
+
+    #[test]
+    fn trusted_runtime_subtree_grants_read_and_execute_without_write() {
+        let rule = MappingRule::subtree(
+            LogicalPath::new("/lib64").unwrap(),
+            PhysicalPath::new("/system/lib64"),
+        )
+        .with_access([ResourceAccess::Read, ResourceAccess::Execute]);
+        let access = landlock_access(&rule).unwrap();
+        assert!(access.contains(landlock::AccessFs::ReadDir));
+        assert!(access.contains(landlock::AccessFs::ReadFile));
+        assert!(access.contains(landlock::AccessFs::Execute));
         assert!(!access.contains(landlock::AccessFs::WriteFile));
     }
 
