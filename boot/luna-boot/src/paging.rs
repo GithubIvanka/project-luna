@@ -31,9 +31,8 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
     let stack_end = stack
         .checked_add(TRANSITION_CUSHION)
         .ok_or(BootError::MemoryAllocationFailed)?;
-    let required_end = BASE_PD_COUNT as u64 * PAGE_1G.max(PAGE_2M * ENTRIES_PER_PD as u64)
-        .max(transition_end)
-        .max(stack_end);
+    let base_end = BASE_PD_COUNT as u64 * PAGE_1G;
+    let required_end = base_end.max(transition_end).max(stack_end);
 
     if required_end > MAX_PML4_ZERO_REGION {
         return Err(BootError::Unsupported(
