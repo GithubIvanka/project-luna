@@ -143,7 +143,7 @@ pub fn boot_flow() -> BootResult<()> {
     }
 
     let manifest_bytes = filesystem.read_file(&target.manifest_path)?;
-    let image_bytes = filesystem.read_file(&target.system_image_path)?;
+    let image_digest = filesystem.hash_file(&target.system_image_path)?;
     let kernel_identity = PreparedIdentity {
         kernel_digest: prepared.kernel_digest,
     };
@@ -154,7 +154,7 @@ pub fn boot_flow() -> BootResult<()> {
         filesystem.system_partition(),
         filesystem.data_partition(),
         &manifest_bytes,
-        &image_bytes,
+        &image_digest,
         &kernel_identity,
         prepared.init_address,
         prepared.init_size,
