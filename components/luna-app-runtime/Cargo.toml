@@ -19,3 +19,6 @@ luna-namespace = { path = "../luna-namespace" }
 luna-security = { path = "../luna-security" }
 luna-system-runtime = { path = "../luna-system-runtime" }
 luna-user-session = { path = "../luna-user-session" }
+
+[dev-dependencies]
+libc = "0.2"
