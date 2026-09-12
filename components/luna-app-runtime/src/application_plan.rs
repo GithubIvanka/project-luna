@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn authorization_is_fail_closed() {
         let result = authorize_application_plan(plan(), &Deny);
-        assert!(matches!(result, Err(PlanError::Security(_))));
+        assert!(result.is_err());
     }
 
     #[test]

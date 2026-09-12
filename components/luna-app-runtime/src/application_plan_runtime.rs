@@ -321,6 +321,7 @@ fn validate_mapping_access(plan: &AuthorizedApplicationPlan) -> Result<(), Runti
     for resource in plan.value().manifest().resources() {
         let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
         let rule = plan
+            .value()
             .mapping()
             .resolve_rule(&logical)
             .map_err(RuntimeError::Mapping)?;
