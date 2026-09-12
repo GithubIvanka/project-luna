@@ -1,6 +1,6 @@
 //! Linux x86_64 zero-page helpers.
 
-use crate::e820::E820Entry;
+use crate::e820::{E820Entry, E820Extension};
 use crate::error::{BootError, BootResult};
 
 pub const BOOT_PARAMS_SIZE: usize = 4096;
@@ -75,9 +75,12 @@ impl BootParams {
         &mut self,
         map: &impl uefi::mem::memory_map::MemoryMap,
         reserved: &[(u64, usize)],
+        e820_ext: &mut E820Extension,
+        setup_data_next: u64,
     ) -> BootResult<()> {
         let mut entries = [E820Entry { addr: 0, size: 0, typ: 0, reserved: 0 }; E820_MAX_ENTRIES];
         let mut count = 0usize;
+        let mut extended_count = 0usize;
 
         for d in map.entries() {
             let size = d.page_count.saturating_mul(4096);
@@ -130,12 +133,20 @@ impl BootParams {
 
             for &(s, e, is_reserved) in &segments[..segment_count] {
                 if e <= s { continue; }
-                if count == E820_MAX_ENTRIES { return Err(BootError::Unsupported("too many E820 entries")); }
-                entries[count] = E820Entry { addr: s, size: e - s, typ: if is_reserved { 2 } else { typ }, reserved: 0 };
-                count += 1;
+                let entry = E820Entry { addr: s, size: e - s, typ: if is_reserved { 2 } else { typ }, reserved: 0 };
+                if count < E820_MAX_ENTRIES {
+                    entries[count] = entry;
+                    count += 1;
+                } else {
+                    e820_ext.write_entry(extended_count, &entry)?;
+                    extended_count += 1;
+                }
             }
         }
-        self.set_e820(&entries[..count])
+
+        self.set_e820(&entries[..count])?;
+        e820_ext.finalize(extended_count, setup_data_next)?;
+        Ok(())
     }
 
     fn write_e820(&mut self, index: usize, entry: &E820Entry) {
