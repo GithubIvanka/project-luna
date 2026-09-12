@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
 
+# This job validates only the canonical application-launch workstream.
 jobs:
   canonical-launch:
     runs-on: ubuntu-latest
