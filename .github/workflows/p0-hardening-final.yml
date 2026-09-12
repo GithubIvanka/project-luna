@@ -1,0 +1,139 @@
+name: Stage remaining app runtime P0 hardening
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-hardening-final.yml]
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - name: Apply P0 hardening
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Remove app-runtime's legacy raw MappingTable/whole-image path and policy proxy.
+          p=Path('components/luna-app-runtime/src/lib.rs'); s=p.read_text()
+          s=s.replace('use luna_namespace::{LinuxMountNamespace, LogicalRoot, NamespaceError};','use luna_namespace::NamespaceError;')
+          s=s.replace('use luna_security::{\n    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,\n};\n','')
+          s=s.replace('    fn authorize(\n        &self,\n        policy: &dyn PolicyAuthority,\n        request: &AuthorizationRequest,\n    ) -> Result<Decision, Self::Error>;\n','')
+          s,n=re.subn(r'pub struct NamespacePreparation.*?(?=#\[derive\(Default\)\]\npub struct InMemoryApplicationRuntime)', '', s, count=1, flags=re.S); assert n==1
+          s,n=re.subn(r'    pub fn prepare_authorized_namespace_for_session\(.*?\n    pub fn instance\(', '    pub fn instance(', s, count=1, flags=re.S); assert n==1
+          s,n=re.subn(r'    fn authorize\(\n        &self,.*?\n    \}\n', '', s, count=1, flags=re.S); assert n==1
+          s=s.replace('                | (InstanceState::Stopping, InstanceState::Crashed)\n','')
+          p.write_text(s)
+
+          # Remove whole-System-Image OverlayFS materialization from public namespace code.
+          p=Path('components/luna-namespace/src/lib.rs'); s=p.read_text()
+          s=s.replace('use luna_common::ResourceAccess;','use luna_common::{ResourceAccess, RuntimeProfile};')
+          s=re.sub(r'\nconst STANDARD_ROOT_DIRS:.*?\];\n', '\n', s, count=1, flags=re.S)
+          s,n=re.subn(r'    /// Prepare a conventional Linux-compatible logical root.*?(?=    /// Apply mappings at the caller)', '', s, count=1, flags=re.S); assert n==1
+          s=s.replace('pub fn enforce_filesystem_access(&self, mappings: &MappingTable)', 'pub fn enforce_filesystem_access(\n        &self,\n        profile: &RuntimeProfile,\n        mappings: &MappingTable,\n    )')
+          needle='''        for rule in mappings.iter() {
+                      if rule.access().is_empty() {
+                          continue;
+                      }
+          '''
+          profile_rules='''        // Trusted runtime resources are distinct from application mappings,
+                  // but both must be represented in the final Landlock ruleset.
+                  for (logical_path, declared_access) in profile.resources() {
+                      let rule = MappingRule::subtree(
+                          luna_root_mapping::LogicalPath::new(logical_path)
+                              .map_err(|_| NamespaceError::InvalidPath)?,
+                          luna_root_mapping::PhysicalPath::new(logical_path),
+                      )
+                      .with_access(declared_access.iter().copied());
+                      let access = landlock_access(&rule)?;
+                      let fd = PathFd::new(Path::new(logical_path))
+                          .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+                      ruleset = ruleset
+                          .add_rule(PathBeneath::new(fd, access))
+                          .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+                  }
+
+          '''+needle
+          assert needle in s; s=s.replace(needle, profile_rules, 1)
+          s,n=re.subn(r'\nfn prepare_mount_target\(.*?(?=\nfn bind_mount)', '\n', s, count=1, flags=re.S); assert n==1
+          s,n=re.subn(r'\nfn mount_overlay\(.*?(?=\nfn validate_relative_path)', '\n', s, count=1, flags=re.S); assert n==1
+          p.write_text(s)
+
+          p=Path('components/luna-app-runtime/src/application_plan_runtime.rs'); s=p.read_text()
+          s=s.replace('`AuthorizedApplicationPlan` from `ApplicationPlan::authorize` first.', '`AuthorizedApplicationPlan` from `luna-security` first.')
+          s=s.replace('.enforce_filesystem_access(&mapping)', '.enforce_filesystem_access(&profile, &mapping)')
+          p.write_text(s)
+
+          # Fail-closed FD inheritance: all descriptors >=3 become close-on-exec
+          # after trusted setup, immediately before Command performs execve.
+          p=Path('components/luna-system-runtime/src/lib.rs'); s=p.read_text()
+          old='''        #[cfg(unix)]
+                  if let Some(setup) = setup {
+                      unsafe {
+                          std::os::unix::process::CommandExt::pre_exec(&mut command, setup);
+                      }
+                  }
+          '''
+          new='''        #[cfg(unix)]
+                  if let Some(mut setup) = setup {
+                      unsafe {
+                          std::os::unix::process::CommandExt::pre_exec(&mut command, move || {
+                              setup()?;
+                              close_non_stdio_on_exec()
+                          });
+                      }
+                  }
+          '''
+          assert old in s; s=s.replace(old,new,1)
+          marker='''#[derive(Debug)]
+          pub enum RuntimeError'''
+          helper='''#[cfg(unix)]
+          fn close_non_stdio_on_exec() -> std::io::Result<()> {
+              let result = unsafe {
+                  libc::syscall(
+                      libc::SYS_close_range,
+                      3_u32,
+                      u32::MAX,
+                      libc::CLOSE_RANGE_CLOEXEC,
+                  )
+              };
+              if result == -1 {
+                  return Err(std::io::Error::last_os_error());
+              }
+              Ok(())
+          }
+
+          '''+marker
+          assert marker in s; s=s.replace(marker,helper,1)
+          p.write_text(s)
+
+          # Synchronize architecture text with the actual P0 model.
+          p=Path('docs/architecture/components/LUNA-APP-RUNTIME.md'); s=p.read_text()
+          s=s.replace('Текущий baseline-профиль `minimal` описывает `/etc`, `/lib`, `/lib64` и `/usr`.', 'Текущий baseline-профиль `minimal` описывает `/lib`, `/lib64` и `/usr`; полный `/etc` не входит в профиль.')
+          s=s.replace('`AuthorizedApplicationPlan` from `ApplicationPlan::authorize`', '`AuthorizedApplicationPlan` from `luna-security`')
+          s += '\n\n## P0 launch invariants\n\n`luna-security` единолично создаёт sealed `AuthorizedApplicationPlan`. Production launcher использует только fresh tmpfs root, trusted runtime profile и authorized application mappings. Перед `execve()` все неразрешённые FD с номерами 3 и выше помечаются close-on-exec. Landlock ruleset объединяет trusted runtime resources и authorized application mappings, не раскрывая весь System Image.\n'
+          p.write_text(s)
+          p=Path('docs/contracts/APPLICATION-LAUNCH-CONTRACT.md'); s=p.read_text()
+          s += '\n\n## P0 enforcement clarification\n\nAuthorization sealing принадлежит `luna-security`. Единственный production path принимает sealed `AuthorizedApplicationPlan`, создаёт fresh tmpfs `/`, монтирует trusted runtime и authorized mappings, затем применяет объединённый Landlock ruleset. Все FD >= 3 закрываются на final `execve()` по default-deny policy.\n'
+          p.write_text(s)
+          p=Path('docs/decisions/ACCEPTED-DECISIONS.md'); s=p.read_text()
+          s += '\n\n### App-runtime P0 boundary\n\n- Только `luna-security` создаёт sealed `AuthorizedApplicationPlan`.\n- Production root: fresh tmpfs + trusted runtime + authorized mappings; whole-image OverlayFS запрещён.\n- Landlock включает обе категории ресурсов.\n- FD inheritance default-deny: только stdio, остальные FD закрываются на `execve()`.\n'
+          p.write_text(s)
+          PY
+          rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs components/luna-namespace/src/lib.rs components/luna-system-runtime/src/lib.rs
+          cargo check -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo test -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime
+          cargo clippy -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --all-targets -- -D warnings
+      - name: Commit validated P0 changes
+        run: |
+          rm -f .github/workflows/p0-hardening-final.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(app-runtime): harden canonical launch boundary"
+          git push origin HEAD:sol/app-runtime-work
