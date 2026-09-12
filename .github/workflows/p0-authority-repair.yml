@@ -1,0 +1,39 @@
+name: Repair authority migration source
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-authority-repair.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('components/luna-app-runtime/src/application_plan_runtime.rs')
+          s=p.read_text()
+          old='''let rule = plan
+                      .mapping()
+                      .resolve_rule(&logical)'''
+          new='''let rule = plan
+                      .value()
+                      .mapping()
+                      .resolve_rule(&logical)'''
+          assert s.count(old)==1, s.count(old)
+          p.write_text(s.replace(old,new))
+          p=Path('components/luna-app-runtime/src/application_plan.rs')
+          s=p.read_text()
+          old='assert!(matches!(result, Err(PlanError::Security(_))));'
+          assert s.count(old)==1, s.count(old)
+          p.write_text(s.replace(old,'assert!(result.is_err());'))
+          PY
+          rm -f .github/workflows/p0-authority-repair.yml .github/workflows/p0-authority-fix.yml p0-component-diagnostic.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(security): repair authority-owned plan migration"
+          git push origin HEAD:sol/app-runtime-work
