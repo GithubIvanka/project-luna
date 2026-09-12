@@ -56,7 +56,7 @@ impl LunaHandoff {
         system: &Partition,
         data: &Partition,
         manifest_bytes: &[u8],
-        image_bytes: &[u8; 32],
+        image_digest: &[u8; 32],
         kernel: &PreparedIdentity,
         init_address: u64,
         init_size: usize,
