@@ -8,11 +8,8 @@ use std::process::ExitStatus;
 
 use luna_bundle::validate_manifest;
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
-use luna_namespace::{LinuxMountNamespace, LogicalRoot, NamespaceError};
+use luna_namespace::NamespaceError;
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
-use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-};
 use luna_system_runtime::{ProcessError, ProcessId, ProcessState, SystemRuntimeService};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -241,7 +238,6 @@ impl ApplicationInstance {
                 | (InstanceState::Running, InstanceState::Crashed)
                 | (InstanceState::Running, InstanceState::Failed)
                 | (InstanceState::Stopping, InstanceState::Stopped)
-                | (InstanceState::Stopping, InstanceState::Crashed)
                 | (InstanceState::Stopping, InstanceState::Failed)
         );
         if !valid {
@@ -383,34 +379,6 @@ pub trait ApplicationRuntime {
         plan: application_plan::AuthorizedApplicationPlan,
         session: &UserSession,
     ) -> Result<ApplicationInstance, Self::Error>;
-    fn authorize(
-        &self,
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<Decision, Self::Error>;
-}
-
-pub struct NamespacePreparation<'a> {
-    pub namespace: &'a LinuxMountNamespace,
-    pub root: &'a Path,
-    pub base_root: &'a Path,
-    pub mapping: &'a MappingTable,
-    pub policy: &'a dyn PolicyAuthority,
-    pub requests: &'a [AuthorizationRequest],
-    pub runtime: RuntimeSpec,
-}
-#[derive(Debug)]
-pub struct PreparedApplicationNamespace {
-    instance: ApplicationInstanceId,
-    root: LogicalRoot,
-}
-impl PreparedApplicationNamespace {
-    pub fn instance(&self) -> ApplicationInstanceId {
-        self.instance
-    }
-    pub fn root(&self) -> &LogicalRoot {
-        &self.root
-    }
 }
 
 #[derive(Default)]
@@ -460,55 +428,6 @@ impl InMemoryApplicationRuntime {
     }
     pub(crate) fn insert(&mut self, instance: ApplicationInstance) {
         self.instances.insert(instance.id(), instance);
-    }
-    pub fn prepare_authorized_namespace_for_session(
-        &self,
-        instance: ApplicationInstanceId,
-        preparation: NamespacePreparation<'_>,
-    ) -> Result<PreparedApplicationNamespace, RuntimeError> {
-        let stored = self
-            .instances
-            .get(&instance)
-            .ok_or(RuntimeError::InstanceNotFound)?;
-        if stored.runtime() != preparation.runtime {
-            return Err(RuntimeError::RuntimeMismatch {
-                mapping: preparation.mapping.runtime(),
-                requested: preparation.runtime.kind(),
-            });
-        }
-        Self::validate_mapping_only(preparation.mapping, preparation.runtime)?;
-        let runtime_request = AuthorizationRequest {
-            principal: Principal::Application(stored.application().clone()),
-            resource: Resource::Runtime(preparation.runtime.kind()),
-            permission: Permission::Use,
-        };
-        Self::require_allow(preparation.policy, &runtime_request)?;
-        for request in preparation.requests {
-            Self::require_allow(preparation.policy, request)?;
-        }
-        let root = preparation
-            .namespace
-            .materialize_logical_root(preparation.root, preparation.base_root, preparation.mapping)
-            .map_err(RuntimeError::Namespace)?;
-        Ok(PreparedApplicationNamespace { instance, root })
-    }
-    fn require_allow(
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<(), RuntimeError> {
-        match policy
-            .authorize(request)
-            .map_err(|e| RuntimeError::Security(e.to_string()))?
-        {
-            Decision::Allow => Ok(()),
-            Decision::Deny => Err(RuntimeError::Security(format!("denied: {request:?}"))),
-            Decision::Ask => Err(RuntimeError::Security(
-                "authorization requires user confirmation".into(),
-            )),
-            Decision::Constrained { constraints } => Err(RuntimeError::Security(format!(
-                "constraint enforcement not supplied: {constraints:?}"
-            ))),
-        }
     }
     pub fn instance(
         &self,
@@ -572,15 +491,6 @@ impl ApplicationRuntime for InMemoryApplicationRuntime {
         instance.transition(InstanceState::Running)?;
         self.insert(instance.clone());
         Ok(instance)
-    }
-    fn authorize(
-        &self,
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<Decision, Self::Error> {
-        policy
-            .authorize(request)
-            .map_err(|e| RuntimeError::Security(e.to_string()))
     }
 }
 

@@ -14,7 +14,7 @@ use landlock::{
     ABI, Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
     RulesetCreatedAttr, RulesetStatus,
 };
-use luna_common::ResourceAccess;
+use luna_common::{ResourceAccess, RuntimeProfile};
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
 mod profile;
@@ -60,11 +60,6 @@ impl From<io::Error> for NamespaceError {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LinuxMountNamespace;
 
-const STANDARD_ROOT_DIRS: &[&str] = &[
-    "bin", "boot", "dev", "etc", "home", "lib", "lib64", "media", "mnt", "opt", "proc", "root",
-    "run", "sbin", "srv", "sys", "tmp", "usr", "var",
-];
-
 impl LinuxMountNamespace {
     /// Create a private Linux mount namespace for the calling process.
     pub fn enter_private() -> Result<Self, NamespaceError> {
@@ -75,69 +70,6 @@ impl LinuxMountNamespace {
             return Err(io::Error::last_os_error().into());
         }
         Ok(Self)
-    }
-
-    /// Prepare a conventional Linux-compatible logical root below `root`.
-    ///
-    /// `base_root` is the immutable lower layer, normally backed by a mounted
-    /// SquashFS System Image. A writable upper/work pair is created next to the
-    /// staging root and an OverlayFS mount composes the lower System Image with
-    /// that writable runtime layer. The System Image itself is never modified.
-    ///
-    /// The production launcher must prefer `materialize_profiled_logical_root`
-    /// so the complete System Image is not exposed to an application.
-    pub fn materialize_logical_root(
-        &self,
-        root: &Path,
-        base_root: &Path,
-        mappings: &MappingTable,
-    ) -> Result<LogicalRoot, NamespaceError> {
-        if !base_root.is_dir() {
-            return Err(NamespaceError::MissingBaseRoot);
-        }
-
-        fs::create_dir_all(root)?;
-        if fs::read_dir(root)?.next().is_some() {
-            return Err(NamespaceError::RootNotEmpty);
-        }
-
-        let parent = root
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("/tmp"));
-        let support = parent.join(format!(
-            ".luna-namespace-{}-{}",
-            std::process::id(),
-            root.file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("root")
-        ));
-        fs::create_dir_all(&support)?;
-        let upper = support.join("upper");
-        let work = support.join("work");
-        fs::create_dir(&upper)?;
-        fs::create_dir(&work)?;
-
-        mount_overlay(root, base_root, &upper, &work)?;
-
-        for directory in STANDARD_ROOT_DIRS {
-            fs::create_dir_all(root.join(directory))?;
-        }
-        for rule in mappings.iter() {
-            if !rule.access().is_empty() {
-                prepare_mount_target(root, rule)?;
-            }
-        }
-
-        self.apply_mappings_at_root(root, mappings)?;
-        mount_proc(&root.join("proc"))?;
-        mount_sysfs(&root.join("sys"))?;
-        mount_tmpfs(&root.join("dev"), "mode=0755")?;
-
-        Ok(LogicalRoot {
-            path: root.to_path_buf(),
-            support,
-        })
     }
 
     /// Apply mappings at the caller's current root using their declared access.
@@ -211,7 +143,11 @@ impl LinuxMountNamespace {
     }
 
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
-    pub fn enforce_filesystem_access(&self, mappings: &MappingTable) -> Result<(), NamespaceError> {
+    pub fn enforce_filesystem_access(
+        &self,
+        profile: &RuntimeProfile,
+        mappings: &MappingTable,
+    ) -> Result<(), NamespaceError> {
         let handled = AccessFs::from_all(ABI::V3);
         let mut ruleset = Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
@@ -219,6 +155,23 @@ impl LinuxMountNamespace {
             .map_err(|error| NamespaceError::Landlock(error.to_string()))?
             .create()
             .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+
+        // Trusted runtime resources are distinct from application mappings,
+        // but both must be represented in the final Landlock ruleset.
+        for (logical_path, declared_access) in profile.resources() {
+            let rule = MappingRule::subtree(
+                luna_root_mapping::LogicalPath::new(logical_path)
+                    .map_err(|_| NamespaceError::InvalidPath)?,
+                luna_root_mapping::PhysicalPath::new(logical_path),
+            )
+            .with_access(declared_access.iter().copied());
+            let access = landlock_access(&rule)?;
+            let fd = PathFd::new(Path::new(logical_path))
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            ruleset = ruleset
+                .add_rule(PathBeneath::new(fd, access))
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+        }
 
         for rule in mappings.iter() {
             if rule.access().is_empty() {
@@ -330,91 +283,8 @@ fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, N
     })
 }
 
-fn prepare_mount_target(root: &Path, rule: &MappingRule) -> Result<(), NamespaceError> {
-    let target = root.join(rule.logical().as_str().trim_start_matches('/'));
-    match rule.kind() {
-        MappingKind::File => {
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            if !target.exists() {
-                fs::File::create(target)?;
-            }
-        }
-        MappingKind::Subtree => fs::create_dir_all(target)?,
-    }
-    Ok(())
-}
-
 fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
     secure_mount::secure_bind_mount(source, target, read_only)
-}
-
-fn mount_overlay(
-    target: &Path,
-    lower: &Path,
-    upper: &Path,
-    work: &Path,
-) -> Result<(), NamespaceError> {
-    let options = format!(
-        "lowerdir={},upperdir={},workdir={}",
-        lower.display(),
-        upper.display(),
-        work.display()
-    );
-    let status = mount_with_data(
-        Some(Path::new("overlay")),
-        target,
-        Some(Path::new("overlay")),
-        0,
-        Some(&options),
-    )?;
-    if status == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
-}
-
-fn mount_proc(target: &Path) -> Result<(), NamespaceError> {
-    let status = mount_with_data(
-        Some(Path::new("proc")),
-        target,
-        Some(Path::new("proc")),
-        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
-        None,
-    )?;
-    if status == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
-}
-
-fn mount_sysfs(target: &Path) -> Result<(), NamespaceError> {
-    let status = mount_with_data(
-        Some(Path::new("sysfs")),
-        target,
-        Some(Path::new("sysfs")),
-        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_RDONLY,
-        None,
-    )?;
-    if status == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
-}
-
-fn mount_tmpfs(target: &Path, options: &str) -> Result<(), NamespaceError> {
-    let status = mount_with_data(
-        Some(Path::new("tmpfs")),
-        target,
-        Some(Path::new("tmpfs")),
-        libc::MS_NOSUID | libc::MS_NODEV,
-        Some(options),
-    )?;
-    if status == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
 }
 
 fn validate_relative_path(path: &Path) -> Result<(), NamespaceError> {
@@ -477,7 +347,7 @@ fn mount_with_data(
 #[cfg(test)]
 mod tests {
     use super::{LinuxMountNamespace, NamespaceError, landlock_access};
-    use luna_common::ResourceAccess;
+    use luna_common::{ResourceAccess, RuntimeProfile};
     use luna_root_mapping::{LogicalPath, MappingRule, PhysicalPath};
 
     #[test]

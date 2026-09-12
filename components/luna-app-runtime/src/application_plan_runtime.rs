@@ -181,7 +181,7 @@ pub trait ApplicationPlanLauncher {
     /// against which the plan was validated.
     ///
     /// No policy evaluation occurs here. The caller must obtain the
-    /// `AuthorizedApplicationPlan` from `ApplicationPlan::authorize` first.
+    /// `AuthorizedApplicationPlan` from `luna-security` first.
     ///
     /// A plain `ApplicationPlan` cannot cross this boundary:
     ///
@@ -273,7 +273,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 .enter_logical_root(&logical)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             namespace
-                .enforce_filesystem_access(&mapping)
+                .enforce_filesystem_access(&profile, &mapping)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             Ok(())
         });

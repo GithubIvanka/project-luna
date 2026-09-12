@@ -210,7 +210,7 @@ Trusted setup является фазой подготовки того же п�
 
 `RuntimeProfile` — явный набор trusted logical resources, которые система предоставляет execution environment независимо от пользовательских DATA mapping.
 
-Текущий baseline-профиль `minimal` описывает `/etc`, `/lib`, `/lib64` и `/usr`.
+Текущий baseline-профиль `minimal` описывает `/lib`, `/lib64` и `/usr`; полный `/etc` не входит в профиль.
 
 `luna-namespace` материализует профиль в отдельный RAM-backed logical root. Production launch path не использует полный System Image как OverlayFS lower и не создаёт persistent upper/work слой для `/`.
 
@@ -313,3 +313,8 @@ Linux integration дополнительно проверяет mount namespace 
 ## Открыто
 
 Production-safe child creation protocol, который отдельно передаёт trusted-setup и final `execve()` diagnostics вместо зависимости от `Command::pre_exec`; durable lifecycle recovery после restart supervisor; target-side mount containment; trust-domain validation физических source paths; фактический capability IPC/provider invocation; resource limits/cgroups; restart policy; user confirmation IPC; lazy System Image hydration implementation; filtered `/dev`; `/proc` visibility model; `/sys` visibility model; полноценный kernel enforcement.
+
+
+## P0 launch invariants
+
+`luna-security` единолично создаёт sealed `AuthorizedApplicationPlan`. Production launcher использует только fresh tmpfs root, trusted runtime profile и authorized application mappings. Перед `execve()` все неразрешённые FD с номерами 3 и выше помечаются close-on-exec. Landlock ruleset объединяет trusted runtime resources и authorized application mappings, не раскрывая весь System Image.

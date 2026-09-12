@@ -87,3 +87,8 @@ Privileged integration tests for real namespace/mount/chroot/Landlock behavior a
 - observable cleanup failures and leaked-mount recovery;
 - removal or strict test-only restriction of the legacy whole-System-Image OverlayFS helper path;
 - privileged integration tests for real mount namespace, root transition, mount rollback, and Landlock enforcement.
+
+
+## P0 enforcement clarification
+
+Authorization sealing принадлежит `luna-security`. Единственный production path принимает sealed `AuthorizedApplicationPlan`, создаёт fresh tmpfs `/`, монтирует trusted runtime и authorized mappings, затем применяет объединённый Landlock ruleset. Все FD >= 3 закрываются на final `execve()` по default-deny policy.
