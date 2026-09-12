@@ -1,4 +1,4 @@
-name: Stage security-owned application authorization
+name: Diagnose authority migration
 on:
   push:
     branches: [sol/app-runtime-work]
@@ -6,164 +6,31 @@ on:
 permissions:
   contents: write
 jobs:
-  apply:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           ref: sol/app-runtime-work
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt,clippy
-      - name: Move authorization sealing into luna-security
+      - name: Record source pattern diagnostics
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' > p0-authority-diagnostic.txt 2>&1
           from pathlib import Path
           import re
-
-          p = Path('components/luna-security/src/lib.rs')
-          s = p.read_text()
-          marker = '''pub trait PolicyAuthority {
-              fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError>;
+          sec = Path('components/luna-security/src/lib.rs').read_text()
+          app = Path('components/luna-app-runtime/src/application_plan.rs').read_text()
+          checks = {
+            'security policy marker': 'pub trait PolicyAuthority {\n    fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError>;\n}\n' in sec,
+            'application security import': 'use luna_security::{\n    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,\n};' in app,
+            'authorize method regex': bool(re.search(r'    pub fn authorize\(\n        self,\n        policy: &dyn PolicyAuthority,\n    \) -> Result<AuthorizedApplicationPlan, PlanError> \{.*?\n    \}\n\n', app, re.S)),
+            'authorized struct': '#[derive(Clone, Debug)]\npub struct AuthorizedApplicationPlan' in app,
+            'helper regex': bool(re.search(r'fn require_allow\(.*?\n\}\n\nfn has_navigation_syntax', app, re.S)),
           }
-          '''
-          addition = marker + '''
-          /// Supplies the complete request set for one authority decision.
-          pub trait AuthorizationSource {
-              fn authorization_requests(&self) -> Vec<AuthorizationRequest>;
-          }
-
-          /// A value sealed by `luna-security` after every request was allowed.
-          #[derive(Clone, Debug)]
-          pub struct Authorized<T> {
-              value: T,
-          }
-
-          impl<T> Authorized<T> {
-              pub fn value(&self) -> &T {
-                  &self.value
-              }
-
-              pub fn into_value(self) -> T {
-                  self.value
-              }
-          }
-
-          /// Authorize and seal a value. No crate outside `luna-security` can
-          /// construct `Authorized<T>` because its field is private.
-          pub fn authorize<T: AuthorizationSource>(
-              policy: &dyn PolicyAuthority,
-              value: T,
-          ) -> Result<Authorized<T>, SecurityError> {
-              for request in value.authorization_requests() {
-                  match policy.authorize(&request)? {
-                      Decision::Allow => {}
-                      Decision::Deny => {
-                          return Err(SecurityError::new(format!("denied: {request:?}")));
-                      }
-                      Decision::Ask => {
-                          return Err(SecurityError::new(
-                              "authorization requires explicit user confirmation",
-                          ));
-                      }
-                      Decision::Constrained { constraints } => {
-                          return Err(SecurityError::new(format!(
-                              "constraint enforcement is not available: {constraints:?}"
-                          )));
-                      }
-                  }
-              }
-              Ok(Authorized { value })
-          }
-          '''
-          assert marker in s
-          p.write_text(s.replace(marker, addition, 1))
-
-          p = Path('components/luna-app-runtime/src/application_plan.rs')
-          s = p.read_text()
-          s = s.replace('''use luna_security::{
-              AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
-          };''', '''use luna_security::{AuthorizationRequest, AuthorizationSource, Permission, Principal, Resource};''')
-          old = re.search(r'''    pub fn authorize\(\n        self,\n        policy: &dyn PolicyAuthority,\n    \) -> Result<AuthorizedApplicationPlan, PlanError> \{.*?\n    \}\n\n''', s, re.S)
-          assert old
-          s = s[:old.start()] + s[old.end():]
-          start = s.index('#[derive(Clone, Debug)]\npub struct AuthorizedApplicationPlan')
-          end = s.index('#[derive(Clone, Debug, Eq, PartialEq)]\npub enum PlanError', start)
-          replacement = '''pub type AuthorizedApplicationPlan = luna_security::Authorized<ApplicationPlan>;
-
-          /// Delegate the complete decision and sealing operation to `luna-security`.
-          pub fn authorize_application_plan(
-              plan: ApplicationPlan,
-              policy: &dyn luna_security::PolicyAuthority,
-          ) -> Result<AuthorizedApplicationPlan, luna_security::SecurityError> {
-              luna_security::authorize(policy, plan)
-          }
-
-          impl AuthorizationSource for ApplicationPlan {
-              fn authorization_requests(&self) -> Vec<AuthorizationRequest> {
-                  let mut requests = Vec::new();
-                  requests.push(AuthorizationRequest {
-                      principal: Principal::Application(self.application.clone()),
-                      resource: Resource::Runtime(self.runtime.kind()),
-                      permission: Permission::Use,
-                  });
-                  requests.extend(self.declared_requests());
-                  requests.extend(self.requests.iter().cloned());
-                  requests
-              }
-          }
-
-          '''
-          s = s[:start] + replacement + s[end:]
-          s = s.replace('    Security(String),\n', '')
-          s = s.replace('            Self::Security(error) => write!(f, "authorization failed: {error}"),\n', '')
-          helper = re.search(r'''fn require_allow\(.*?\n\}\n\nfn has_navigation_syntax''', s, re.S)
-          assert helper
-          s = s[:helper.start()] + 'fn has_navigation_syntax' + s[helper.end():]
-          p.write_text(s)
-
-          # Authorized<T> exposes the immutable plan through value().
-          for name in [
-              'components/luna-app-runtime/src/lib.rs',
-              'components/luna-app-runtime/src/application_plan_runtime.rs',
-              'components/luna-app-runtime/tests/contracts.rs',
-          ]:
-              p = Path(name); s = p.read_text()
-              for method in ['session', 'mapping', 'runtime', 'manifest', 'application', 'version', 'executable', 'requests']:
-                  s = s.replace(f'plan.{method}()', f'plan.value().{method}()')
-              p.write_text(s)
-
-          # Keep tests at the public orchestration API while sealing occurs in security.
-          for name in [
-              'components/luna-app-runtime/src/application_plan.rs',
-              'components/luna-app-runtime/tests/application_plan_authorization.rs',
-              'components/luna-app-runtime/tests/contracts.rs',
-          ]:
-              p = Path(name); s = p.read_text()
-              s = re.sub(r'(\b[\w\.\(\)]+)\.authorize\(&([A-Za-z][A-Za-z0-9_]*)\)', r'authorize_application_plan(\1, &\2)', s)
-              s = re.sub(r'(\bplan\([^\n;]*\))\.authorize\(&([A-Za-z][A-Za-z0-9_]*)\)', r'authorize_application_plan(\1, &\2)', s)
-              if name.endswith('application_plan.rs'):
-                  s = s.replace('use super::{ApplicationPlan, ExecutableSpec, PlanError};', 'use super::{ApplicationPlan, ExecutableSpec, PlanError, authorize_application_plan};')
-              elif name.endswith('application_plan_authorization.rs'):
-                  s = s.replace('use luna_app_runtime::{ApplicationPlan, ExecutableSpec, PlanError};', 'use luna_app_runtime::{ApplicationPlan, ExecutableSpec, authorize_application_plan};')
-                  s = s.replace('Err(PlanError::Security(_))', 'Err(_)')
-              else:
-                  s = s.replace('ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime, ExecutableSpec,', 'ApplicationInstance, ApplicationInstanceId, ApplicationPlan, ApplicationRuntime, ExecutableSpec, authorize_application_plan,')
-              p.write_text(s)
-
-          p = Path('components/luna-app-runtime/src/lib_entry.rs')
-          s = p.read_text().replace('pub use application_plan::{ApplicationPlan, AuthorizedApplicationPlan, ExecutableSpec, PlanError};', 'pub use application_plan::{\n    ApplicationPlan, AuthorizedApplicationPlan, ExecutableSpec, PlanError,\n    authorize_application_plan,\n};')
-          p.write_text(s)
+          for key, value in checks.items(): print(key, value)
           PY
-          cargo fmt --all
-          cargo check --workspace
-          cargo test --workspace
-          cargo clippy --workspace --all-targets -- -D warnings
-      - name: Commit validated authority boundary
-        run: |
           rm -f .github/workflows/p0-authority.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "refactor(security): own application authorization sealing"
+          git add -A .github/workflows/p0-authority.yml p0-authority-diagnostic.txt
+          git commit -m "ci: record authority migration diagnostics"
           git push origin HEAD:sol/app-runtime-work
