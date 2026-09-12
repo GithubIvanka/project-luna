@@ -202,7 +202,7 @@ fn div_ceil(value: usize, divisor: usize) -> usize { value.div_ceil(divisor) }
 /// Return the physical address of the assembly transition stub that remains
 /// executing immediately after CR3 is switched.
 pub fn transition_entry_address() -> u64 {
-    luna_linux_entry as usize as u64
+    luna_linux_entry as *const () as usize as u64
 }
 
 /// Read the stack pointer that the final transition will continue using.
