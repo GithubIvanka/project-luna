@@ -36,6 +36,10 @@ impl SystemFilesystem {
         self.fs.read_file(path)
     }
 
+    pub fn hash_file(&mut self, path: &str) -> BootResult<[u8; 32]> {
+        self.fs.hash_file(path)
+    }
+
     pub fn read_dir(&mut self, path: &str) -> BootResult<alloc::vec::Vec<DirEntry>> {
         self.fs.read_dir(path)
     }
