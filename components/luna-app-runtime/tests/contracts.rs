@@ -49,14 +49,6 @@ impl ApplicationRuntime for TestRuntime {
             plan.value().runtime(),
         ))
     }
-
-    fn authorize(
-        &self,
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<Decision, Self::Error> {
-        policy.authorize(request).map_err(|_| "policy failure")
-    }
 }
 
 fn active_session(id: u128) -> UserSession {
@@ -124,16 +116,6 @@ fn authorization_denial_never_reaches_process_launch_boundary() {
 
     assert!(authorize_application_plan(plan(&session), &DenyAll).is_err());
     assert_eq!(runtime.launches, 0);
-
-    let request = AuthorizationRequest {
-        principal: luna_security::Principal::Application(BundleId::from("example.app")),
-        resource: luna_security::Resource::Runtime(luna_common::RuntimeKind::Luna),
-        permission: luna_security::Permission::Use,
-    };
-    assert_eq!(
-        runtime.authorize(&AllowAll, &request).unwrap(),
-        Decision::Allow
-    );
 }
 
 #[test]

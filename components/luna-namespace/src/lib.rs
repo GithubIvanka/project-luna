@@ -319,7 +319,7 @@ fn mount_with_data(
 #[cfg(test)]
 mod tests {
     use super::{LinuxMountNamespace, NamespaceError, landlock_access};
-    use luna_common::{ResourceAccess, RuntimeProfile};
+    use luna_common::ResourceAccess;
     use luna_root_mapping::{LogicalPath, MappingRule, PhysicalPath};
 
     #[test]
