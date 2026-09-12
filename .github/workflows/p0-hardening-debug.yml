@@ -1,0 +1,31 @@
+name: Capture P0 hardening diagnostics
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-hardening-debug.yml]
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - run: |
+          awk '/python3 - <<'\''PY'\''/{flag=1;next} /^          PY$/{flag=0} flag{sub(/^          /,""); print}' .github/workflows/p0-hardening-final.yml > /tmp/apply.py
+          set +e
+          python3 /tmp/apply.py > p0-hardening-diagnostic.txt 2>&1
+          echo python_status=$? >> p0-hardening-diagnostic.txt
+          rustfmt --edition 2024 components/luna-app-runtime/src/lib.rs components/luna-app-runtime/src/application_plan_runtime.rs components/luna-namespace/src/lib.rs components/luna-system-runtime/src/lib.rs >> p0-hardening-diagnostic.txt 2>&1
+          echo rustfmt_status=$? >> p0-hardening-diagnostic.txt
+          cargo check -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime >> p0-hardening-diagnostic.txt 2>&1
+          echo check_status=$? >> p0-hardening-diagnostic.txt
+          set -e
+          rm -f .github/workflows/p0-hardening-final.yml .github/workflows/p0-hardening-debug.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "ci: capture P0 hardening diagnostics"
+          git push origin HEAD:sol/app-runtime-work
