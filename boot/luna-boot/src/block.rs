@@ -15,14 +15,6 @@ use crate::ext4::BlockDevice;
 
 const IO_CHUNK: usize = 4096;
 
-/// A firmware protocol obtained with UEFI `GET_PROTOCOL` semantics.
-///
-/// UEFI explicitly does not require `CloseProtocol()` for `GET_PROTOCOL`.
-/// Some firmware implementations, including OVMF, therefore return
-/// `EFI_NOT_FOUND` if a caller tries to close such an access through the
-/// `ScopedProtocol` RAII path. The protocol is only needed until
-/// `ExitBootServices()`, so Luna deliberately keeps the pointer borrowed and
-/// does not issue a matching close.
 struct BorrowedProtocol<P: Protocol + ?Sized>(NonNull<P>);
 
 impl<P: Protocol + ?Sized> BorrowedProtocol<P> {
@@ -43,7 +35,6 @@ impl<P: Protocol + ?Sized> Deref for BorrowedProtocol<P> {
     }
 }
 
-/// Open a sized firmware protocol with `GET_PROTOCOL` semantics.
 fn open_shared<P: ProtocolPointer>(handle: Handle) -> BootResult<BorrowedProtocol<P>> {
     let protocol = unsafe {
         open_protocol::<P>(
@@ -60,12 +51,6 @@ fn open_shared<P: ProtocolPointer>(handle: Handle) -> BootResult<BorrowedProtoco
     Ok(BorrowedProtocol::from_scoped(protocol))
 }
 
-/// Open an unsized `DevicePath` protocol with `GET_PROTOCOL` semantics.
-///
-/// `DevicePath` is a dynamically-sized UEFI protocol type, so it cannot use
-/// `open_shared`, whose `ProtocolPointer` bound requires a sized type. Keep the
-/// returned `ScopedProtocol` intentionally leaked for the same reason described
-/// by `BorrowedProtocol`: GET_PROTOCOL access does not require CloseProtocol.
 fn open_device_path(handle: Handle) -> BootResult<&'static uefi::proto::device_path::DevicePath> {
     use uefi::proto::device_path::DevicePath;
 
@@ -95,9 +80,7 @@ pub struct UefiBlockDevice {
 }
 
 impl UefiBlockDevice {
-    /// Create a device view over `block_count` blocks starting at `start_lba`.
-    ///
-    /// The view is strict: `read_at()` may only access bytes within this range.
+    /// Create a strict view over `block_count` blocks starting at `start_lba`.
     pub fn new(handle: Handle, start_lba: u64, block_count: u64) -> BootResult<Self> {
         let io = open_shared::<BlockIO>(handle)?;
         let media = io.media();
@@ -113,6 +96,18 @@ impl UefiBlockDevice {
             return Err(BootError::FilesystemError);
         }
         Ok(Self { io, start_lba, block_count, block_size })
+    }
+
+    /// Create a strict view spanning the whole physical disk.
+    pub fn whole_disk(handle: Handle) -> BootResult<Self> {
+        let io = open_shared::<BlockIO>(handle)?;
+        let last_block = io.media().last_block();
+        let block_count = last_block.checked_add(1).ok_or(BootError::FilesystemError)?;
+        let block_size = io.media().block_size() as u64;
+        if block_size == 0 || !(IO_CHUNK as u64).is_multiple_of(block_size) {
+            return Err(BootError::Unsupported("UEFI block size is not supported by the loader I/O buffer"));
+        }
+        Ok(Self { io, start_lba: 0, block_count, block_size })
     }
 
     fn read_chunk(&mut self, lba: u64, dst: &mut [u8]) -> BootResult<()> {
@@ -170,16 +165,15 @@ impl BlockDevice for UefiBlockDevice {
             self.read_chunk(lba, &mut temp[copied..copied + n])?;
             copied += n;
             remaining -= n;
-            lba = lba.checked_add((n / self.block_size as usize) as u64).ok_or(BootError::FilesystemError)?;
+            lba = lba
+                .checked_add((n / self.block_size as usize) as u64)
+                .ok_or(BootError::FilesystemError)?;
         }
         dst.copy_from_slice(&temp[in_block..in_block + dst.len()]);
         Ok(())
     }
 }
 
-/// Return a non-partition Block I/O handle on the same physical device as the
-/// boot image. The firmware's device path for the ESP contains a media hard
-/// drive node; its prefix identifies the parent disk device.
 pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     use uefi::proto::device_path::DevicePath;
 
@@ -190,7 +184,6 @@ pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
 
     let mut cut = None;
     for node in path.node_iter() {
-        // MEDIA_DEVICE_PATH / HARD_DRIVE_DP.
         if node.device_type().0 == 0x04 && node.sub_type().0 == 0x01 {
             cut = Some(node.as_ffi_ptr() as usize - bytes.as_ptr() as usize);
             break;
