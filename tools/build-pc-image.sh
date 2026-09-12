@@ -9,6 +9,7 @@ DATA_ROOT="${WORK}/data-root"
 SYSTEM_PARTITION_ROOT="${WORK}/system-partition"
 
 LUNA_VERSION="${LUNA_VERSION:-0.1.0}"
+LUNA_INIT_VERSION="${LUNA_INIT_VERSION:-$LUNA_VERSION}"
 LUNA_PASSWORD_HASH="${LUNA_PASSWORD_HASH:-}"
 KERNEL="${LUNA_TEST_KERNEL:-}"
 DESKTOP_ROOT="${LUNA_DESKTOP_ROOT:-}"
@@ -139,11 +140,25 @@ REQUIRED_SECTORS=$((DATA_END + 34))
 REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
 [ "$IMAGE_SIZE_MIB" -ge "$REQUIRED_MIB" ] || { echo "image size ${IMAGE_SIZE_MIB} MiB is too small; need at least ${REQUIRED_MIB} MiB" >&2; exit 1; }
 
-mkdir -p "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
+mkdir -p "$SYSTEM_PARTITION_ROOT/cores" "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.squashfs"
-cp "$LUNA_INIT" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.init"
-chmod 0755 "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.init"
+cp "$LUNA_INIT" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
+chmod 0755 "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
 cp "$KERNEL" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION/bzImage"
+
+INIT_MANIFEST_TMP="$WORK/luna-${LUNA_INIT_VERSION}.init.toml"
+cat > "$INIT_MANIFEST_TMP" <<EOF
+[init]
+name = "luna-init"
+version = "$LUNA_INIT_VERSION"
+
+[architecture]
+arch = "x86_64"
+
+[kernels]
+compatible = ["$KERNEL_VERSION"]
+EOF
+cp "$INIT_MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.toml"
 
 MANIFEST_TMP="$WORK/luna-${LUNA_VERSION}.toml"
 cat > "$MANIFEST_TMP" <<EOF
@@ -155,8 +170,8 @@ format = "squashfs"
 [architecture]
 arch = "x86_64"
 
-[kernels]
-compatible = ["$KERNEL_VERSION"]
+[init]
+compatible = ["$LUNA_INIT_VERSION"]
 EOF
 cp "$MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.toml"
 
@@ -184,7 +199,8 @@ version=$LUNA_VERSION
 architecture=x86_64
 system_image=luna-${LUNA_VERSION}.squashfs
 system_manifest=luna-${LUNA_VERSION}.toml
-luna_init=luna-${LUNA_VERSION}.init
+luna_init=luna-${LUNA_INIT_VERSION}.init
+luna_init_manifest=luna-${LUNA_INIT_VERSION}.toml
 system_libc=musl
 bootloader=luna-boot.efi
 uefi_fallback=EFI/BOOT/BOOTX64.EFI
@@ -203,6 +219,6 @@ login_credential=development-only
 early_userspace=direct-memory-resident-luna-init
 initramfs=none
 EOF
-sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$OUT/luna-${LUNA_VERSION}.init" "$OUT/luna-system.img" "$OUT/luna-data.img" > "$OUT/SHA256SUMS"
+sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init" "$OUT/luna-system.img" "$OUT/luna-data.img" > "$OUT/SHA256SUMS"
 
 echo "Built Project Luna graphical PC image: $OUT/luna-pc.img"
