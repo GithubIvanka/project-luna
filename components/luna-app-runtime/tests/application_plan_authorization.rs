@@ -123,7 +123,7 @@ fn explicit_denial_stops_authorization_pipeline() {
 
     let result = authorize_application_plan(plan(vec![first.clone(), second]), &policy);
 
-    assert!(matches!(result, Err(_)));
+    assert!(result.is_err());
     let seen = policy.seen.borrow();
     assert_eq!(seen.len(), 4);
     assert_eq!(
