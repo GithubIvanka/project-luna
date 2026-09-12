@@ -84,13 +84,13 @@ pub fn prepare_identity_map(entry_address: u64, stack: u64) -> BootResult<(u64, 
         pdpt.add(pd_index).write(pd | 0x3);
         let pd_ptr = pd as *mut u64;
         for entry in 0..ENTRIES_PER_TABLE {
-            let physical = (pd_index as u64 * ENTRIES_PER_TABLE as u64 + entry as u64) * PAGE_2M;
+            let physical =
+                (pd_index as u64 * ENTRIES_PER_TABLE as u64 + entry as u64) * PAGE_2M;
             pd_ptr.add(entry).write(physical | 0x83);
         }
     }
 
-    let root = if use_five_level { base } else { base };
-    Ok((root, table_pages))
+    Ok((base, table_pages))
 }
 
 #[inline]
