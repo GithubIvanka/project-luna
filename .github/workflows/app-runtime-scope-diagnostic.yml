@@ -1,0 +1,28 @@
+name: Diagnose scoped app runtime gate
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/app-runtime-scope-diagnostic.yml]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: sol/app-runtime-work}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {components: rustfmt,clippy}
+      - run: |
+          set +e
+          cargo clippy -p luna-security -p luna-namespace -p luna-system-runtime -p luna-app-runtime --all-targets --all-features -- -D warnings > app-runtime-scope-diagnostic.txt 2>&1
+          echo clippy_status=$? >> app-runtime-scope-diagnostic.txt
+          sudo env PATH="$PATH" HOME="$HOME" CARGO_HOME="$HOME/.cargo" cargo test -p luna-app-runtime --test privileged_canonical_launch -- --ignored --exact canonical_authorized_launch_is_kernel_enforced >> app-runtime-scope-diagnostic.txt 2>&1
+          echo privileged_status=$? >> app-runtime-scope-diagnostic.txt
+          set -e
+          rm .github/workflows/app-runtime-scope-diagnostic.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "ci: record scoped app runtime diagnostics"
+          git push origin HEAD:sol/app-runtime-work
