@@ -90,18 +90,29 @@ fn open_device_path(handle: Handle) -> BootResult<&'static uefi::proto::device_p
 pub struct UefiBlockDevice {
     io: BorrowedProtocol<BlockIO>,
     start_lba: u64,
+    block_count: u64,
     block_size: u64,
 }
 
 impl UefiBlockDevice {
-    pub fn new(handle: Handle, start_lba: u64) -> BootResult<Self> {
+    /// Create a device view over `block_count` blocks starting at `start_lba`.
+    ///
+    /// The view is strict: `read_at()` may only access bytes within this range.
+    pub fn new(handle: Handle, start_lba: u64, block_count: u64) -> BootResult<Self> {
         let io = open_shared::<BlockIO>(handle)?;
         let media = io.media();
         let block_size = media.block_size() as u64;
         if block_size == 0 || !(IO_CHUNK as u64).is_multiple_of(block_size) {
             return Err(BootError::Unsupported("UEFI block size is not supported by the loader I/O buffer"));
         }
-        Ok(Self { io, start_lba, block_size })
+        if block_count == 0 || start_lba.checked_add(block_count - 1).is_none() {
+            return Err(BootError::FilesystemError);
+        }
+        let last_lba = start_lba + block_count - 1;
+        if last_lba > media.last_block() {
+            return Err(BootError::FilesystemError);
+        }
+        Ok(Self { io, start_lba, block_count, block_size })
     }
 
     fn read_chunk(&mut self, lba: u64, dst: &mut [u8]) -> BootResult<()> {
@@ -122,13 +133,33 @@ impl BlockDevice for UefiBlockDevice {
 
     fn read_at(&mut self, offset: u64, dst: &mut [u8]) -> BootResult<()> {
         if dst.is_empty() { return Ok(()); }
-        let absolute = self.start_lba * self.block_size + offset;
+
+        let capacity = self
+            .block_count
+            .checked_mul(self.block_size)
+            .ok_or(BootError::FilesystemError)?;
+        let end = offset
+            .checked_add(dst.len() as u64)
+            .ok_or(BootError::FilesystemError)?;
+        if end > capacity {
+            return Err(BootError::FilesystemError);
+        }
+
+        let absolute = self
+            .start_lba
+            .checked_mul(self.block_size)
+            .and_then(|base| base.checked_add(offset))
+            .ok_or(BootError::FilesystemError)?;
         let first_lba = absolute / self.block_size;
         let in_block = (absolute % self.block_size) as usize;
 
-        let total = in_block + dst.len();
+        let total = in_block
+            .checked_add(dst.len())
+            .ok_or(BootError::FilesystemError)?;
         let blocks = total.div_ceil(self.block_size as usize);
-        let bytes = blocks * self.block_size as usize;
+        let bytes = blocks
+            .checked_mul(self.block_size as usize)
+            .ok_or(BootError::FilesystemError)?;
 
         let mut temp = vec![0; bytes];
         let mut copied = 0usize;
@@ -139,7 +170,7 @@ impl BlockDevice for UefiBlockDevice {
             self.read_chunk(lba, &mut temp[copied..copied + n])?;
             copied += n;
             remaining -= n;
-            lba += (n / self.block_size as usize) as u64;
+            lba = lba.checked_add((n / self.block_size as usize) as u64).ok_or(BootError::FilesystemError)?;
         }
         dst.copy_from_slice(&temp[in_block..in_block + dst.len()]);
         Ok(())
