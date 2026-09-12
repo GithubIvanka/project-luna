@@ -1,4 +1,4 @@
-//! Discovery of System Images, manifests and compatible kernels from SYSTEM.
+//! Discovery of System Images, luna-init cores and compatible kernels from SYSTEM.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -19,7 +19,7 @@ pub struct ImageManifest {
     pub format: String,
     pub arch: String,
     pub role: ImageRole,
-    pub compatible_kernels: Vec<String>,
+    pub compatible_inits: Vec<String>,
 }
 
 impl ImageManifest {
@@ -43,18 +43,68 @@ impl ImageManifest {
                 ("image", "format") => format = parse_string(value),
                 ("image", "role") => role = match parse_string(value).as_deref() { Some("factory") => ImageRole::Factory, Some("recovery") => ImageRole::Recovery, _ => ImageRole::Normal },
                 ("architecture", "arch") => arch = parse_string(value),
-                ("kernels", "compatible") => compatible = parse_string_array(value),
+                ("init", "compatible") => compatible = parse_string_array(value),
                 _ => {}
             }
         }
         let result = Self {
             name: name.ok_or(BootError::InvalidConfig)?, version: version.ok_or(BootError::InvalidConfig)?,
             format: format.ok_or(BootError::InvalidConfig)?, arch: arch.ok_or(BootError::InvalidConfig)?,
-            role, compatible_kernels: compatible,
+            role, compatible_inits: compatible,
         };
-        if result.format != "squashfs" || result.arch != "x86_64" || result.compatible_kernels.is_empty() { return Err(BootError::InvalidConfig); }
+        if result.format != "squashfs" || result.arch != "x86_64" || result.compatible_inits.is_empty() { return Err(BootError::InvalidConfig); }
         Ok(result)
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InitManifest {
+    pub name: String,
+    pub version: String,
+    pub arch: String,
+    pub compatible_kernels: Vec<String>,
+}
+
+impl InitManifest {
+    pub fn parse(bytes: &[u8]) -> BootResult<Self> {
+        let text = core::str::from_utf8(bytes).map_err(|_| BootError::InvalidConfig)?;
+        let mut section = "";
+        let mut name = None;
+        let mut version = None;
+        let mut arch = None;
+        let mut compatible = Vec::new();
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.starts_with('[') && line.ends_with(']') { section = &line[1..line.len() - 1]; continue; }
+            let Some((key, value)) = line.split_once('=') else { continue; };
+            match (section, key.trim()) {
+                ("init", "name") => name = parse_string(value),
+                ("init", "version") => version = parse_string(value),
+                ("architecture", "arch") => arch = parse_string(value),
+                ("kernels", "compatible") => compatible = parse_string_array(value),
+                _ => {}
+            }
+        }
+        let result = Self {
+            name: name.ok_or(BootError::InvalidConfig)?,
+            version: version.ok_or(BootError::InvalidConfig)?,
+            arch: arch.ok_or(BootError::InvalidConfig)?,
+            compatible_kernels: compatible,
+        };
+        if result.name != "luna-init" || result.arch != "x86_64" || result.compatible_kernels.is_empty() {
+            return Err(BootError::InvalidConfig);
+        }
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct InitRecord {
+    pub version: String,
+    pub init_path: String,
+    pub manifest_path: String,
+    pub manifest: InitManifest,
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +116,9 @@ pub struct BootCatalog { pub targets: Vec<BootTarget>, pub recovery: Option<Boot
 impl BootCatalog {
     pub fn discover(fs: &mut SystemFilesystem) -> BootResult<Self> {
         let images = fs.read_dir("/images")?;
+        let cores = fs.read_dir("/cores")?;
         let kernel_dirs = fs.read_dir("/kernels")?;
+
         let mut kernels = Vec::new();
         for entry in kernel_dirs.iter().filter(|entry| entry.is_dir()) {
             let base = format!("/kernels/{}/", entry.name);
@@ -74,36 +126,71 @@ impl BootCatalog {
             let Some(kernel_path) = kernel_path else { continue; };
             kernels.push(KernelRecord { version: entry.name.clone(), kernel_path });
         }
-        let mut targets = Vec::new(); let mut recovery = None; let mut factory = None;
+
+        let mut inits = Vec::new();
+        for entry in cores.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".init")) {
+            let Some(stem) = entry.name.strip_suffix(".init") else { continue; };
+            let init_path = format!("/cores/{}", entry.name);
+            let manifest_path = format!("/cores/{}.toml", stem);
+            let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
+            let manifest = match InitManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
+            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) { continue; }
+            inits.push(InitRecord { version: manifest.version.clone(), init_path, manifest_path, manifest });
+        }
+        inits.sort_by(|a, b| version_cmp(&b.version, &a.version));
+
+        let mut targets = Vec::new();
+        let mut recovery = None;
+        let mut factory = None;
         for image in images.iter().filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs")) {
             let Some(stem) = image.name.strip_suffix(".squashfs") else { continue; };
-            let init_path = format!("/images/{}.init", stem);
             let manifest_path = format!("/images/{}.toml", stem);
-            if !fs.file_exists(&init_path)? { continue; }
             let manifest_bytes = match fs.read_file(&manifest_path) { Ok(bytes) => bytes, Err(_) => continue };
             let manifest = match ImageManifest::parse(&manifest_bytes) { Ok(value) => value, Err(_) => continue };
-            let Some(kernel) = select_kernel(&manifest, &kernels) else { continue; };
+            if manifest.version != stem.strip_prefix("luna-").unwrap_or(stem) { continue; }
+
+            let Some(init) = select_init(&manifest, &inits) else { continue; };
+            let Some(kernel) = select_kernel(&init.manifest, &kernels) else { continue; };
+            let init_manifest_path = init.manifest_path.clone();
             let mut target = BootTarget::new(
                 match manifest.role { ImageRole::Normal => format!("Luna {}", manifest.version), ImageRole::Factory => String::from("Factory Environment"), ImageRole::Recovery => String::from("Recovery Environment") },
                 manifest.name.clone(),
                 manifest.version.clone(),
                 format!("/images/{}", image.name),
                 manifest_path,
-                init_path,
+                init.init_path.clone(),
                 kernel.kernel_path,
                 kernel.version.clone(),
             );
+            let _ = init_manifest_path;
             target = target.with_cmdline("quiet loglevel=3");
-            match manifest.role { ImageRole::Normal => targets.push(target), ImageRole::Factory => factory = Some(target.factory()), ImageRole::Recovery => recovery = Some(target.recovery()) }
+            match manifest.role {
+                ImageRole::Normal => targets.push(target),
+                ImageRole::Factory => factory = Some(target.factory()),
+                ImageRole::Recovery => recovery = Some(target.recovery()),
+            }
         }
+
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
         if targets.is_empty() && factory.is_none() && recovery.is_none() { return Err(BootError::NoBootTargets); }
         Ok(Self { targets, recovery, factory, default_target: 0 })
     }
 }
 
-fn select_kernel(manifest: &ImageManifest, kernels: &[KernelRecord]) -> Option<KernelRecord> {
-    kernels.iter().filter(|kernel| manifest.compatible_kernels.iter().any(|allowed| allowed == "*" || allowed == &kernel.version)).max_by(|a,b| version_cmp(&a.version, &b.version)).cloned()
+fn select_init(manifest: &ImageManifest, inits: &[InitRecord]) -> Option<InitRecord> {
+    inits
+        .iter()
+        .filter(|init| manifest.compatible_inits.iter().any(|allowed| allowed == "*" || allowed == &init.version))
+        .max_by(|a, b| version_cmp(&a.version, &b.version))
+        .cloned()
+}
+
+fn select_kernel(manifest: &InitManifest, kernels: &[KernelRecord]) -> Option<KernelRecord> {
+    kernels
+        .iter()
+        .filter(|kernel| manifest.compatible_kernels.iter().any(|allowed| allowed == "*" || allowed == &kernel.version))
+        .max_by(|a, b| version_cmp(&a.version, &b.version))
+        .cloned()
 }
 
 fn find_file(fs: &mut SystemFilesystem, paths: &[String]) -> BootResult<Option<String>> {
