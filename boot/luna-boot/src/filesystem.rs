@@ -14,13 +14,18 @@ pub struct SystemFilesystem {
 impl SystemFilesystem {
     pub fn open() -> BootResult<Self> {
         let disk = parent_disk_handle(uefi::boot::image_handle())?;
-        let mut probe = UefiBlockDevice::new(disk, 0)?;
+        let mut probe = UefiBlockDevice::new(disk, 0, uefi::boot::get_image_file_system(disk).is_err() as u64)?;
         let system_partition = find_system_partition(&mut probe)?;
         let data_partition = find_data_partition(&mut probe)?;
         if system_partition.disk_guid != data_partition.disk_guid {
             return Err(crate::error::BootError::InvalidFilesystem);
         }
-        let device = UefiBlockDevice::new(disk, system_partition.first_lba)?;
+        let system_blocks = system_partition
+            .last_lba
+            .checked_sub(system_partition.first_lba)
+            .and_then(|count| count.checked_add(1))
+            .ok_or(crate::error::BootError::InvalidFilesystem)?;
+        let device = UefiBlockDevice::new(disk, system_partition.first_lba, system_blocks)?;
         let fs = Ext4::open(device)?;
         Ok(Self { fs, system_partition, data_partition })
     }
