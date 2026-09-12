@@ -12,13 +12,14 @@ use crate::discovery::BootCatalog;
 use crate::error::{BootError, BootResult};
 use crate::external::boot_first_external;
 use crate::filesystem::SystemFilesystem;
-use crate::handoff::{BootMode, BootState, KernelHandoff, LunaHandoff, PreparedIdentity};
+use crate::handoff::{
+    current_stack_pointer, transition_entry_address, BootMode, BootState, KernelHandoff, LunaHandoff,
+    PreparedIdentity,
+};
 use crate::kernel::{KernelLoader, PreparedKernel};
 use crate::menu::{BootMenu, BootMenuAction, BootSelection};
 use crate::paging::prepare_identity_map;
 use crate::splash;
-
-const PAGE_TABLE_PAGES: usize = 66;
 
 pub fn boot_flow() -> BootResult<()> {
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
@@ -161,11 +162,13 @@ pub fn boot_flow() -> BootResult<()> {
     )?;
 
     prepared.boot_params.set_setup_data(luna_handoff.address)?;
-    let page_table = prepare_identity_map()?;
+    let transition_entry = transition_entry_address();
+    let stack_pointer = current_stack_pointer();
+    let (page_table, page_table_pages) = prepare_identity_map(transition_entry, stack_pointer)?;
 
     let mut reserved = prepared.allocations.clone();
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
-    reserved.push((page_table, PAGE_TABLE_PAGES));
+    reserved.push((page_table, page_table_pages));
 
     // From this point onward Boot Services are gone. The post-EBS path is
     // deliberately non-returning so failures can never reach efi_main().
