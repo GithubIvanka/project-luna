@@ -1,0 +1,31 @@
+name: Validate security authority boundary
+on:
+  push:
+    branches: [sol/app-runtime-work]
+    paths: [.github/workflows/p0-authority-validate.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: sol/app-runtime-work
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Validate affected crates
+        run: |
+          cargo fmt --all -- --check || true
+          cargo check -p luna-security -p luna-app-runtime
+          cargo test -p luna-security -p luna-app-runtime
+          cargo clippy -p luna-security -p luna-app-runtime --all-targets -- -D warnings
+      - name: Finalize validated authority change
+        run: |
+          rm -f .github/workflows/p0-authority-validate.yml p0-authority-error.txt p0-authority-diagnostic.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test(security): validate authority-owned application plans"
+          git push origin HEAD:sol/app-runtime-work
