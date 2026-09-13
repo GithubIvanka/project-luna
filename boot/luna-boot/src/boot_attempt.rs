@@ -4,7 +4,6 @@
 //! a kernel panic, power loss, or reset: did the previous boot reach success?
 //! Detailed progress remains in memory and is not persisted at every stage.
 
-use alloc::boxed::Box;
 use blake3::Hasher;
 use uefi::cstr16;
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
@@ -69,8 +68,13 @@ impl BootAttemptMarker {
         let checksum = *blake3::hash(&payload).as_bytes();
         payload[24..56].copy_from_slice(&checksum);
 
-        runtime::set_variable(VARIABLE_NAME, &VariableVendor::GLOBAL_VARIABLE, ATTRIBUTES, &payload)
-            .map_err(BootError::from)?;
+        runtime::set_variable(
+            VARIABLE_NAME,
+            &VariableVendor::GLOBAL_VARIABLE,
+            ATTRIBUTES,
+            &payload,
+        )
+        .map_err(BootError::from)?;
         Ok(Self { attempt_id })
     }
 
@@ -159,6 +163,6 @@ mod tests {
         assert_eq!(attempt.stage(), BootStage::BootloaderLoaded);
         assert!(attempt.advance(BootStage::BootloaderCompleted));
         assert!(attempt.advance(BootStage::KernelHandoff));
-        assert!(!attempt.advance(BootStage::KernelStarted.min(BootStage::KernelHandoff)));
+        assert!(!attempt.advance(BootStage::BootloaderCompleted));
     }
 }
