@@ -9,8 +9,6 @@ use uefi::cstr16;
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::Status;
 
-use luna_common::{BootAttemptProgress, BootStage};
-
 use crate::error::{BootError, BootResult};
 
 const VARIABLE_NAME: &uefi::CStr16 = cstr16!("LunaBootAttempt");
@@ -22,6 +20,61 @@ const PAYLOAD_SIZE: usize = 56;
 const ATTRIBUTES: VariableAttributes = VariableAttributes::NON_VOLATILE
     .union(VariableAttributes::BOOTSERVICE_ACCESS)
     .union(VariableAttributes::RUNTIME_ACCESS);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(u8)]
+pub enum BootStage {
+    BootloaderLoaded = 1,
+    BootloaderCompleted = 2,
+    KernelHandoff = 3,
+    KernelStarted = 4,
+    InitStarted = 5,
+    InitReady = 6,
+    SystemRuntimeStarted = 7,
+    Success = 8,
+}
+
+impl BootStage {
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BootAttemptProgress {
+    attempt_id: u64,
+    stage: BootStage,
+}
+
+impl BootAttemptProgress {
+    pub const fn new(attempt_id: u64) -> Self {
+        Self {
+            attempt_id,
+            stage: BootStage::BootloaderLoaded,
+        }
+    }
+
+    pub const fn attempt_id(self) -> u64 {
+        self.attempt_id
+    }
+
+    pub const fn stage(self) -> BootStage {
+        self.stage
+    }
+
+    pub fn advance(&mut self, stage: BootStage) -> bool {
+        if stage >= self.stage {
+            self.stage = stage;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub const fn succeeded(self) -> bool {
+        self.stage.is_terminal()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BootAttemptMarker {
