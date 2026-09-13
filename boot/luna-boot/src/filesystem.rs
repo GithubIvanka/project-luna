@@ -1,7 +1,7 @@
 //! Storage discovery for Luna's ext4 LUNA-SYS partition.
 
 use alloc::string::{String, ToString};
-use uefi::Handle;
+use alloc::vec::Vec;
 use uefi::boot;
 use uefi::proto::media::block::BlockIO;
 
@@ -150,24 +150,26 @@ fn discover_data_partition(
         }
     }
 
-    if let Some(config) = config {
-        match (config.preferred_disk_guid, config.preferred_partition_guid) {
-            (Some(disk_guid), Some(partition_guid)) => {
-                let matches: Vec<_> = candidates
-                    .iter()
-                    .filter(|partition| {
-                        partition.disk_guid == disk_guid
-                            && partition.partition_guid == partition_guid
-                    })
-                    .cloned()
-                    .collect();
-                return match matches.as_slice() {
-                    [partition] => Ok((Some(partition.clone()), DataStatus::Found)),
-                    [] => {}
-                    _ => return Ok((None, DataStatus::Ambiguous)),
-                };
+    if let Some(config) = config
+        && let (Some(disk_guid), Some(partition_guid)) =
+            (config.preferred_disk_guid, config.preferred_partition_guid)
+    {
+        let matches: Vec<_> = candidates
+            .iter()
+            .filter(|partition| {
+                partition.disk_guid == disk_guid && partition.partition_guid == partition_guid
+            })
+            .cloned()
+            .collect();
+
+        match matches.as_slice() {
+            [partition] => {
+                return Ok((Some(partition.clone()), DataStatus::Found));
             }
-            _ => {}
+            [] => {}
+            _ => {
+                return Ok((None, DataStatus::Ambiguous));
+            }
         }
     }
 

@@ -225,10 +225,10 @@ impl BootStateConfig {
             return Err(BootError::InvalidConfig);
         }
 
-        result.current = targets[0].finish()?;
-        result.fallback = targets[1].finish()?;
-        result.recovery = targets[2].finish()?;
-        result.factory = targets[3].finish()?;
+        result.current = targets[0].clone().finish()?;
+        result.fallback = targets[1].clone().finish()?;
+        result.recovery = targets[2].clone().finish()?;
+        result.factory = targets[3].clone().finish()?;
         Ok(result)
     }
 }
@@ -282,10 +282,7 @@ impl BootCatalog {
         let cores = fs.read_dir("/cores")?;
         let kernel_dirs = fs.read_dir("/kernels")?;
         let boot_state = match fs.read_file("/config/boot-state.toml") {
-            Ok(bytes) => match BootStateConfig::parse(&bytes) {
-                Ok(state) => state,
-                Err(_) => BootStateConfig::default(),
-            },
+            Ok(bytes) => BootStateConfig::parse(&bytes).unwrap_or_default(),
             Err(_) => BootStateConfig::default(),
         };
 

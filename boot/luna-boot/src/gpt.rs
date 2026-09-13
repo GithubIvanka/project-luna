@@ -141,7 +141,7 @@ fn find_named_partitions<D: BlockDevice>(
 
             let first = u64_at(e, 32);
             let last = u64_at(e, 40);
-            if first > last || last >= device.block_count() {
+            if first > last {
                 continue;
             }
 
