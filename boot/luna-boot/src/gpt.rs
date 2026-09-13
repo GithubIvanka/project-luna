@@ -35,7 +35,10 @@ pub fn find_data_partitions<D: BlockDevice>(device: &mut D) -> BootResult<Vec<Pa
     find_named_partitions(device, "LUNA-DATA")
 }
 
-fn find_named_partitions<D: BlockDevice>(device: &mut D, wanted: &str) -> BootResult<Vec<Partition>> {
+fn find_named_partitions<D: BlockDevice>(
+    device: &mut D,
+    wanted: &str,
+) -> BootResult<Vec<Partition>> {
     const GPT_MIN_HEADER_SIZE: usize = 92;
     const GPT_HEADER_SIZE_OFFSET: usize = 0x0c;
     const GPT_HEADER_CRC_OFFSET: usize = 0x10;

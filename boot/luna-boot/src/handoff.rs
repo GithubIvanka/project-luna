@@ -163,8 +163,15 @@ fn push_partition_record(
     partition: Option<&Partition>,
 ) -> BootResult<()> {
     let (flags, disk_guid, partition_guid, label) = match partition {
-        Some(partition) => (0, partition.disk_guid, partition.partition_guid, partition.label.as_bytes()),
-        None if ty == RECORD_DATA_PARTITION => (PARTITION_FLAG_ABSENT, [0u8; 16], [0u8; 16], &[][..]),
+        Some(partition) => (
+            0,
+            partition.disk_guid,
+            partition.partition_guid,
+            partition.label.as_bytes(),
+        ),
+        None if ty == RECORD_DATA_PARTITION => {
+            (PARTITION_FLAG_ABSENT, [0u8; 16], [0u8; 16], &[][..])
+        }
         None => return Err(BootError::InvalidFilesystem),
     };
 

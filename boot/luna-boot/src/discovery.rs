@@ -244,9 +244,11 @@ impl TargetFields {
     fn finish(self) -> BootResult<Option<BootTargetRef>> {
         match (self.image, self.init, self.kernel) {
             (None, None, None) => Ok(None),
-            (Some(image), Some(init), Some(kernel)) => {
-                Ok(Some(BootTargetRef { image, init, kernel }))
-            }
+            (Some(image), Some(init), Some(kernel)) => Ok(Some(BootTargetRef {
+                image,
+                init,
+                kernel,
+            })),
             _ => Err(BootError::InvalidConfig),
         }
     }
@@ -411,7 +413,11 @@ impl BootCatalog {
         let default_target = boot_state
             .current
             .as_ref()
-            .and_then(|reference| targets.iter().position(|target| target_matches(target, Some(reference))))
+            .and_then(|reference| {
+                targets
+                    .iter()
+                    .position(|target| target_matches(target, Some(reference)))
+            })
             .unwrap_or(0);
 
         if targets.is_empty() && factory.is_none() && recovery.is_none() {

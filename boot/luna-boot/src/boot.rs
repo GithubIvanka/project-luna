@@ -71,9 +71,7 @@ pub fn boot_flow() -> BootResult<()> {
             BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot
         )
     {
-        log::warn!(
-            "Luna: LUNA-DATA is unavailable; entering Recovery Environment"
-        );
+        log::warn!("Luna: LUNA-DATA is unavailable; entering Recovery Environment");
         selection = BootSelection {
             action: BootMenuAction::Recovery,
             target_index: catalog.default_target,
@@ -123,8 +121,10 @@ pub fn boot_flow() -> BootResult<()> {
                 .skip(selection.target_index + 1)
                 .cloned(),
         );
-    } else if matches!(selection.action, BootMenuAction::SystemImage | BootMenuAction::VerboseBoot)
-    {
+    } else if matches!(
+        selection.action,
+        BootMenuAction::SystemImage | BootMenuAction::VerboseBoot
+    ) {
         candidates.extend(
             catalog
                 .targets

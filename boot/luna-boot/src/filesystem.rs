@@ -130,7 +130,9 @@ impl SystemFilesystem {
     }
 }
 
-fn discover_data_partition(config: Option<&DataConfig>) -> BootResult<(Option<Partition>, DataStatus)> {
+fn discover_data_partition(
+    config: Option<&DataConfig>,
+) -> BootResult<(Option<Partition>, DataStatus)> {
     let handles = boot::find_handles::<BlockIO>().map_err(BootError::from)?;
     let mut candidates = Vec::new();
 
@@ -149,10 +151,7 @@ fn discover_data_partition(config: Option<&DataConfig>) -> BootResult<(Option<Pa
     }
 
     if let Some(config) = config {
-        match (
-            config.preferred_disk_guid,
-            config.preferred_partition_guid,
-        ) {
+        match (config.preferred_disk_guid, config.preferred_partition_guid) {
             (Some(disk_guid), Some(partition_guid)) => {
                 let matches: Vec<_> = candidates
                     .iter()
