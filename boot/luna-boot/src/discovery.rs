@@ -279,6 +279,7 @@ pub struct BootCatalog {
 impl BootCatalog {
     pub fn discover(fs: &mut SystemFilesystem) -> BootResult<Self> {
         let images = fs.read_dir("/images")?;
+        let recovery_dir = fs.read_dir("/recovery").unwrap_or_default();
         let cores = fs.read_dir("/cores")?;
         let kernel_dirs = fs.read_dir("/kernels")?;
         let boot_state = match fs.read_file("/config/boot-state.toml") {
@@ -332,8 +333,8 @@ impl BootCatalog {
         inits.sort_by(|a, b| version_cmp(&b.version, &a.version));
 
         let mut targets = Vec::new();
-        let mut recovery_candidates = Vec::new();
         let mut factory_candidates = Vec::new();
+
         for image in images
             .iter()
             .filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs"))
@@ -378,8 +379,53 @@ impl BootCatalog {
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
                 ImageRole::Factory => factory_candidates.push(target.factory()),
-                ImageRole::Recovery => recovery_candidates.push(target.recovery()),
+                ImageRole::Recovery => {}
             }
+        }
+
+        let mut recovery_candidates = Vec::new();
+        for image in recovery_dir
+            .iter()
+            .filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs"))
+        {
+            let Some(stem) = image.name.strip_suffix(".squashfs") else {
+                continue;
+            };
+            let Some(version) = stem.strip_prefix("recovery-") else {
+                continue;
+            };
+            let manifest_path = format!("/recovery/{}.toml", stem);
+            let manifest_bytes = match fs.read_file(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let manifest = match ImageManifest::parse(&manifest_bytes) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if manifest.version != version || manifest.format != "squashfs" || manifest.arch != "x86_64" {
+                continue;
+            }
+
+            let Some(init) = select_init(&manifest, &inits) else {
+                continue;
+            };
+            let Some(kernel) = select_kernel(&init.manifest, &kernels) else {
+                continue;
+            };
+            let target = BootTarget::new(
+                String::from("Recovery Environment"),
+                manifest.name.clone(),
+                manifest.version.clone(),
+                format!("/recovery/{}", image.name),
+                manifest_path,
+                init.init_path.clone(),
+                kernel.kernel_path,
+                kernel.version.clone(),
+            )
+            .with_cmdline("quiet loglevel=3")
+            .recovery();
+            recovery_candidates.push(target);
         }
 
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
