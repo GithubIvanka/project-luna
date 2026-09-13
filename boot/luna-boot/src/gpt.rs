@@ -24,14 +24,18 @@ pub struct Partition {
 }
 
 pub fn find_system_partition<D: BlockDevice>(device: &mut D) -> BootResult<Partition> {
-    find_named_partition(device, "system")
+    let partitions = find_named_partitions(device, "LUNA-SYS")?;
+    if partitions.len() != 1 {
+        return Err(BootError::InvalidFilesystem);
+    }
+    Ok(partitions.into_iter().next().unwrap())
 }
 
-pub fn find_data_partition<D: BlockDevice>(device: &mut D) -> BootResult<Partition> {
-    find_named_partition(device, "data")
+pub fn find_data_partitions<D: BlockDevice>(device: &mut D) -> BootResult<Vec<Partition>> {
+    find_named_partitions(device, "LUNA-DATA")
 }
 
-fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootResult<Partition> {
+fn find_named_partitions<D: BlockDevice>(device: &mut D, wanted: &str) -> BootResult<Vec<Partition>> {
     const GPT_MIN_HEADER_SIZE: usize = 92;
     const GPT_HEADER_SIZE_OFFSET: usize = 0x0c;
     const GPT_HEADER_CRC_OFFSET: usize = 0x10;
@@ -63,10 +67,8 @@ fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootRes
     }
 
     let stored_header_crc = u32_at(&header, GPT_HEADER_CRC_OFFSET);
-
     let mut header_for_crc = header[..header_size].to_vec();
     header_for_crc[GPT_HEADER_CRC_OFFSET..GPT_HEADER_CRC_OFFSET + 4].fill(0);
-
     if crc32_ieee(&header_for_crc) != stored_header_crc {
         return Err(BootError::InvalidFilesystem);
     }
@@ -88,15 +90,12 @@ fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootRes
 
     let entry_count_usize = entry_count as usize;
     let entry_size_usize = entry_size as usize;
-
     let entries_bytes = entry_count_usize
         .checked_mul(entry_size_usize)
         .ok_or(BootError::FilesystemError)?;
-
     let entries_offset = entries_lba
         .checked_mul(bs)
         .ok_or(BootError::FilesystemError)?;
-
     entries_offset
         .checked_add(entries_bytes as u64)
         .ok_or(BootError::FilesystemError)?;
@@ -106,61 +105,53 @@ fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootRes
 
     let mut entries_crc = Crc32::new();
     let mut index = 0u32;
-    let mut found = None;
+    let mut found = Vec::new();
 
     while index < entry_count {
         let count = (entry_count - index).min(entries_per_read as u32);
-
         let read_size = (count as usize)
             .checked_mul(entry_size_usize)
             .ok_or(BootError::FilesystemError)?;
-
         let relative_offset = (index as u64)
             .checked_mul(entry_size as u64)
             .ok_or(BootError::FilesystemError)?;
-
         let offset = entries_offset
             .checked_add(relative_offset)
             .ok_or(BootError::FilesystemError)?;
 
         let mut raw = vec![0; read_size];
         device.read_at(offset, &mut raw)?;
-
         entries_crc.update(&raw);
 
-        if found.is_none() {
-            for n in 0..count as usize {
-                let start = n
-                    .checked_mul(entry_size_usize)
-                    .ok_or(BootError::FilesystemError)?;
-                let end = start
-                    .checked_add(entry_size_usize)
-                    .ok_or(BootError::FilesystemError)?;
-                let e = &raw[start..end];
+        for n in 0..count as usize {
+            let start = n
+                .checked_mul(entry_size_usize)
+                .ok_or(BootError::FilesystemError)?;
+            let end = start
+                .checked_add(entry_size_usize)
+                .ok_or(BootError::FilesystemError)?;
+            let e = &raw[start..end];
 
-                if e[..16].iter().all(|b| *b == 0) {
-                    continue;
-                }
+            if e[..16].iter().all(|b| *b == 0) {
+                continue;
+            }
 
-                let first = u64_at(e, 32);
-                let last = u64_at(e, 40);
+            let first = u64_at(e, 32);
+            let last = u64_at(e, 40);
+            if first > last || last >= device.block_count() {
+                continue;
+            }
 
-                if first > last {
-                    continue;
-                }
-
-                if partition_name_is(e, wanted) {
-                    let mut partition_guid = [0u8; 16];
-                    partition_guid.copy_from_slice(&e[16..32]);
-
-                    found = Some(Partition {
-                        first_lba: first,
-                        last_lba: last,
-                        partition_guid,
-                        disk_guid,
-                        label: partition_name(e),
-                    });
-                }
+            if partition_name_is(e, wanted) {
+                let mut partition_guid = [0u8; 16];
+                partition_guid.copy_from_slice(&e[16..32]);
+                found.push(Partition {
+                    first_lba: first,
+                    last_lba: last,
+                    partition_guid,
+                    disk_guid,
+                    label: partition_name(e),
+                });
             }
         }
 
@@ -171,7 +162,7 @@ fn find_named_partition<D: BlockDevice>(device: &mut D, wanted: &str) -> BootRes
         return Err(BootError::InvalidFilesystem);
     }
 
-    found.ok_or(BootError::TargetNotFound)
+    Ok(found)
 }
 
 fn partition_name_is(entry: &[u8], wanted: &str) -> bool {
@@ -210,7 +201,6 @@ impl Crc32 {
     fn update(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             self.value ^= byte as u32;
-
             for _ in 0..8 {
                 if self.value & 1 != 0 {
                     self.value = (self.value >> 1) ^ 0xedb8_8320;
@@ -235,6 +225,7 @@ fn crc32_ieee(bytes: &[u8]) -> u32 {
 fn u32_at(b: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(b[off..off + 4].try_into().unwrap())
 }
+
 fn u64_at(b: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(b[off..off + 8].try_into().unwrap())
 }
