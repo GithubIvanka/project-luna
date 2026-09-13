@@ -21,7 +21,7 @@ luna-system-runtime
 
 ## Ответственность `luna-boot`
 
-`luna-boot.efi` отвечает за UEFI boundary, обнаружение SYSTEM, discovery System Images и kernels, чтение manifest, выбор совместимой пары, Boot Menu, fallback, подготовку Linux boot context, загрузку kernel и `luna-init`, построение `LunaBootHandoffV1`, `ExitBootServices` и передачу управления kernel.
+`luna-boot.efi` отвечает за UEFI boundary, обнаружение `LUNA-SYS` на диске самого bootloader, discovery System Images и kernels, чтение manifest, выбор совместимой пары, чтение persistent boot-state, preferred `LUNA-DATA` discovery, Boot Menu, fallback, подготовку Linux boot context, загрузку kernel и `luna-init`, построение `LunaBootHandoffV1`, `ExitBootServices` и передачу управления kernel.
 
 После `ExitBootServices` загрузчик не использует UEFI Boot Services, UEFI filesystem protocols или UEFI console APIs.
 
@@ -43,19 +43,49 @@ Luna-specific boot data передаётся через Linux x86 `setup_data` �
 - `BOOT_MODE`;
 - `BOOT_STATE`.
 
+`DATA_PARTITION` остаётся обязательным record даже в Recovery: при отсутствии `LUNA-DATA` он помечается флагом `ABSENT`, а GUID и label fields обнуляются.
+
 Handoff содержит identity и digest выбранных артефактов и идентичность физических SYSTEM/DATA partition. Linux device names не являются ABI.
 
 ## `luna-init`
 
-Для выбранного System Image `luna-boot` загружает отдельный ELF artifact:
+Для выбранного System Image `luna-boot` загружает отдельный `.init` artifact:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.init
+LUNA-SYS/cores/luna-X.Y.Z.init
 ```
 
-Artifact является memory-resident и boot-reserved. В `LUNA_INIT_IMAGE` передаются физический адрес, размер и BLAKE3-256 digest exact ELF byte range.
+Artifact является memory-resident и boot-reserved. В `LUNA_INIT_IMAGE` передаются физический адрес, размер и BLAKE3-256 digest exact byte range.
 
 Kernel обязан валидировать этот объект и запустить его непосредственно как initial userspace process. `luna-init` становится PID 1.
+
+## LUNA-SYS / LUNA-DATA
+
+`LUNA-SYS` ищется исключительно на физическом диске, с которого был загружен `luna-boot.efi`.
+
+`LUNA-DATA` является независимым persistent ресурсом и может находиться на другом физическом диске. Preferred identity хранится в:
+
+```text
+LUNA-SYS/config/luna-data.toml
+```
+
+Если preferred DATA не найден, bootloader не выбирает случайный диск при наличии нескольких кандидатов. Обычная загрузка переходит в Recovery, где DATA Discovery utility позволяет выбрать нужный `LUNA-DATA` и обновить preferred binding через системный механизм записи.
+
+## Boot state
+
+Persistent boot state находится в:
+
+```text
+LUNA-SYS/config/boot-state.toml
+```
+
+Он идентифицирует атомарные boot targets как комбинации:
+
+```text
+System Image + luna-init + Kernel
+```
+
+и хранит `current`, `fallback`, `recovery` и `factory`, а также persistent context последней boot attempt.
 
 ## Memory ownership
 
@@ -100,7 +130,7 @@ Linux kernel
     ↓
 LunaBootHandoffV1
     ↓
-memory-resident luna-init ELF
+memory-resident luna-init
     ↓
 luna-init PID 1
 ```
@@ -120,5 +150,7 @@ FD 3 начинается с offset 0 и содержит сериализова
 ## Failure
 
 Повреждённый или неполный handoff, отсутствующий обязательный record, невалидный `LUNA_INIT_IMAGE`, невозможная memory range или failure direct-init startup — это boot failure.
+
+Отсутствующий `LUNA-DATA` сам по себе не является повреждением handoff: в Recovery `DATA_PARTITION` имеет флаг `ABSENT`.
 
 `luna-init` не должен молча переходить на legacy path discovery или выбирать другой image/device, если structured ABI invalid.
