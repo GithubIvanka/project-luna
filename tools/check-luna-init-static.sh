@@ -14,23 +14,27 @@ if ! command -v readelf >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! readelf -h "$artifact" | grep -Eq 'Class:[[:space:]]+ELF64'; then
+header="$(readelf -h "$artifact")"
+program_headers="$(readelf -l "$artifact")"
+sections="$(readelf -S "$artifact")"
+
+if ! grep -q 'ELF64' <<<"$header"; then
     printf 'luna-init is not ELF64: %s\n' "$artifact" >&2
     exit 1
 fi
 
-if ! readelf -h "$artifact" | grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64'; then
+if ! grep -q 'X86-64' <<<"$header"; then
     printf 'luna-init is not x86_64: %s\n' "$artifact" >&2
     exit 1
 fi
 
-if readelf -l "$artifact" | grep -q 'Requesting program interpreter'; then
-    printf 'luna-init is dynamically linked: interpreter requested\n' >&2
+if grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' <<<"$program_headers"; then
+    printf 'luna-init is dynamically linked: PT_INTERP present\n' >&2
     exit 1
 fi
 
-if ! readelf -d "$artifact" 2>/dev/null | grep -q 'There is no dynamic section'; then
-    printf 'luna-init still contains a dynamic section\n' >&2
+if grep -Eq '(^|[[:space:]])\.dynamic([[:space:]]|$)' <<<"$sections"; then
+    printf 'luna-init still contains a .dynamic section\n' >&2
     exit 1
 fi
 
