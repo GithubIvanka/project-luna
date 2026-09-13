@@ -1,7 +1,7 @@
 # Luna Boot Handoff ABI v1
 
 **Status:** Accepted  
-**Date:** 2026-09-08  
+**Date:** 2026-09-13  
 **Scope:** `luna-boot.efi` → Linux kernel → `luna-init`
 
 ## 1. Purpose
@@ -28,14 +28,14 @@ There is no separate initramfs userspace layer in the Luna boot architecture, no
 
 - The Linux x86 boot protocol remains the transport foundation.
 - Luna-specific data is carried through `setup_data` records attached to `boot_params`.
-- The handoff is a memory-resident boot object, never a file on SYSTEM, DATA or EFI.
+- The handoff is a memory-resident boot object, never a file on `LUNA-SYS`, `LUNA-DATA` or EFI.
 - The ABI is fixed-header plus typed extensible records.
 - Unknown record types may be skipped safely by consumers that understand the ABI version.
 - `luna-boot` provides Luna boot-selection facts; it does not duplicate kernel-owned hardware discovery.
 - The handoff is not a replacement for the Linux kernel command line. Kernel-specific parameters remain kernel parameters; Luna state is structured data.
 - A separate memory-resident `luna-init` ELF is part of the boot handoff and is executed directly by the Luna kernel integration.
 
-Linux x86 boot protocol 2.09+ provides the `setup_data` linked-list mechanism for extending boot parameters beyond the fixed 4096-byte `boot_params` area.
+Linux x86 `setup_data` is the transport extension used to attach Luna-specific handoff data to `boot_params`.
 
 ## 3. Transport
 
@@ -48,13 +48,11 @@ boot_params
     │
     └── setup_data
           │
-          └── LUNA_HANDOFF_V1 record
+          └── LUNA_HANDOFF_V1
                 └── typed Luna records
 ```
 
-For ABI v1, the Linux `setup_data` node uses type `0x4c554e41` (`LUNA`) and its payload is exactly one `LunaBootHandoffV1` object. The node's `len` is the byte length of that handoff object; `next` is zero unless a future implementation explicitly preserves an existing Linux `setup_data` chain.
-
-The handoff allocation and every referenced boot object must be treated as reserved boot data until the Luna kernel integration has consumed or explicitly retained it. The bootloader must not leave these ranges in memory that the kernel may immediately reclaim as ordinary free RAM.
+The handoff allocation and every referenced boot object must be treated as reserved boot data until the Luna kernel integration has consumed or explicitly retained it.
 
 ## 4. ABI header
 
@@ -74,29 +72,15 @@ u64 payload_size
 u8  checksum[32]
 ```
 
-The v1 header occupies 84 bytes. The record payload area begins at offset 88; bytes 84..87 are mandatory zero padding so that the first record begins on the 8-byte ABI alignment boundary.
+The v1 header occupies 84 bytes. The record payload area begins at offset 88; bytes 84..87 are mandatory zero padding.
 
 The v1 magic is the 8-byte ASCII sequence `LUNAHD01` encoded as a little-endian `u64`.
 
-The actual on-wire Rust/C representation must use explicitly sized little-endian integer fields and static layout assertions. Native-language struct layout is not itself part of the ABI.
+The actual on-wire Rust/C representation uses explicitly sized little-endian fields. Native-language struct layout is not itself the ABI.
 
 ### Header semantics
 
-`magic` identifies the Luna handoff record.
-
-`abi_major` identifies breaking ABI revisions. A consumer must reject unsupported major versions.
-
-`abi_minor` permits compatible extensions. A consumer may accept a newer minor version when all required records are understood and unknown records are safely skippable.
-
-`header_size` is the number of bytes occupied by the fixed header and is `84` for ABI v1.
-
-`total_size` is the complete handoff size, including header, alignment padding and records.
-
-`flags` contains only global handoff properties. Record-specific semantics belong in record flags.
-
-`boot_attempt_id` identifies this concrete boot attempt across `luna-boot`, kernel and `luna-init`.
-
-`payload_offset` and `payload_size` identify the typed record area relative to the beginning of the handoff and are `88` and `total_size - 88` for ABI v1.
+`boot_attempt_id` identifies the concrete boot attempt across `luna-boot`, the Luna kernel integration and `luna-init`.
 
 `checksum` is the BLAKE3-256 digest of the complete handoff bytes with the entire 32-byte checksum field zeroed during calculation.
 
@@ -111,13 +95,11 @@ u32 size
 u8  payload[size]
 ```
 
-Records are aligned according to the ABI alignment rule, currently 8 bytes. Padding is not semantic data and must be zeroed.
+Records are aligned to 8 bytes. Padding is not semantic data and must be zeroed.
 
-Unknown record types must be ignored after validating their bounds.
+Unknown record types may be skipped after their bounds are validated.
 
-Malformed lengths, integer overflow, records extending beyond `total_size`, or impossible alignment must cause the handoff to be rejected.
-
-ABI v1 centrally allocates record types:
+Current ABI v1 record assignments are:
 
 ```text
 1 = SYSTEM_PARTITION
@@ -129,13 +111,13 @@ ABI v1 centrally allocates record types:
 7 = BOOT_STATE
 ```
 
+A dedicated Recovery DATA identity record is reserved for the next implementation step so that Recovery DATA can be handed to `luna-init` without consulting physical DATA state. Until that record is implemented, Recovery DATA selection remains an implementation work item and is not implied by `DATA_PARTITION`.
+
 ## 6. Required v1 records
 
 ### `SYSTEM_PARTITION`
 
-Identifies the immutable SYSTEM partition without binding Luna to Linux device names.
-
-The `disk_guid` and `partition_guid` fields contain the exact 16-byte GPT on-disk GUID encodings. `label` is the UTF-8 GPT partition name used only as a discovery/configuration label.
+Identifies the `LUNA-SYS` partition using its exact GPT disk and partition GUIDs.
 
 Payload:
 
@@ -147,11 +129,13 @@ u16 reserved
 u8  label[label_len]
 ```
 
-Linux device paths such as `/dev/sda2`, `/dev/nvme0n1p2` or similar are not part of the ABI.
+Linux device names are not part of the ABI.
 
 ### `DATA_PARTITION`
 
-Identifies the persistent DATA partition using the same model:
+Identifies physical persistent DATA when it is used by the selected target.
+
+Payload:
 
 ```text
 u8  disk_guid[16]
@@ -161,13 +145,13 @@ u16 reserved
 u8  label[label_len]
 ```
 
-The filesystem label is a discovery/configuration identifier; the GUID pair is the stable identity used for boot-context verification. Duplicate labels must not silently resolve to an arbitrary partition.
+When physical DATA is unavailable during a Recovery transition, the record remains present with the `ABSENT` flag and zero GUIDs/empty label. The absence of physical DATA does not invalidate the handoff.
+
+For Recovery itself, the virtual DATA provider is the Recovery DATA Image, not this physical partition record.
 
 ### `SYSTEM_IMAGE`
 
 Identifies the selected System Image.
-
-Logical payload:
 
 ```text
 u16 family_len
@@ -179,15 +163,11 @@ u8  image_digest[32]
 u8  strings[]
 ```
 
-The strings contain the family identifier, semantic version and canonical image filename in the order described by the length fields.
-
-The filename is relative to the canonical SYSTEM image area; an absolute physical block-device path is forbidden.
+For ordinary targets the filename is relative to `LUNA-SYS/images/`. For Recovery targets it is relative to `LUNA-SYS/recovery/`.
 
 ### `KERNEL_IDENTITY`
 
-Identifies the kernel that is currently executing and the selected kernel artifact.
-
-Logical payload:
+Identifies the selected kernel artifact and its digest.
 
 ```text
 u16 release_len
@@ -198,19 +178,17 @@ u8  kernel_digest[32]
 u8  strings[]
 ```
 
-The kernel image itself is already executing; this record is identity and provenance metadata for the running kernel/boot attempt.
-
 ### `LUNA_INIT_IMAGE`
 
-Identifies the exact `luna-init` ELF loaded by `luna-boot` into reserved physical memory.
+Identifies the exact `luna-init` artifact loaded by `luna-boot` into reserved physical memory.
 
-For image version `X.Y.Z`, the bootloader resolves the canonical artifact:
+Canonical ordinary artifact path:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.init
+LUNA-SYS/cores/luna-X.Y.Z.init
 ```
 
-The `.init` suffix denotes the artifact role; the payload format is strictly ELF64 for x86-64.
+The `.init` suffix is the artifact role. The payload format is ELF64 for x86-64.
 
 Payload:
 
@@ -222,15 +200,9 @@ u32 flags
 u32 reserved
 ```
 
-The digest is the BLAKE3-256 digest of exactly the supplied ELF byte range.
-
-The referenced range must be entirely contained within boot-reserved memory and must not overlap the handoff metadata, kernel image, command line or another incompatible boot object.
-
-The digest covers exactly the supplied ELF byte range. `luna-boot` validates the ELF before handoff; the Luna kernel repeats structural/security-critical validation before execution.
+The digest covers exactly the supplied byte range.
 
 ### `BOOT_MODE`
-
-Enumerates the boot path selected by `luna-boot`:
 
 ```text
 0 NORMAL
@@ -240,13 +212,13 @@ Enumerates the boot path selected by `luna-boot`:
 4 EXTERNAL
 ```
 
-The payload is exactly one `u8` containing the enum value.
+The payload is exactly one `u8`.
+
+For Recovery mode, the kernel/`luna-init` path uses the Recovery System Image together with the Recovery DATA provider selected by the Recovery target.
 
 ### `BOOT_STATE`
 
-Contains only boot-selection/failure context required by the current attempt. It does not become a general state database and does not replace `luna-state`.
-
-ABI v1 payload:
+Contains boot-selection/failure context for the current attempt. It does not replace the general `luna-state` database.
 
 ```text
 u8  version              = 1
@@ -258,61 +230,92 @@ u32 failure_code
 u32 reserved
 ```
 
-The current loader emits a neutral state (`fallback_depth=0`, `previous_attempt_failed=0`, `previous_attempt_id=0`, `failure_code=0`) until the persistent boot-state/fallback manager is wired in. The payload remains versioned so later compatible state fields can be added without changing the record type.
+The current implementation still needs the complete persistent attempt lifecycle. Once implemented, the record describes the previous interrupted attempt and the fallback state selected for the current boot.
 
-## 7. Integrity
+## 7. Recovery DATA model
 
-The selected System Image record contains its BLAKE3-256 content digest. The adjacent manifest identity is also the BLAKE3-256 digest of the exact manifest bytes supplied by the bootloader.
+Recovery does not use the physical DATA partition as its own runtime DATA provider.
 
-The `LUNA_INIT_IMAGE` record contains the expected BLAKE3-256 `luna-init` ELF digest.
+The Recovery target contains a reference to a versioned Recovery DATA Image. During Recovery startup, `luna-init` materializes that DATA Image into RAM and presents it through the normal Luna DATA abstraction.
 
-The `KERNEL_IDENTITY` record contains the BLAKE3-256 digest of the exact kernel artifact bytes loaded from SYSTEM.
+Conceptually:
 
-The handoff checksum protects the structure of the handoff itself. It does not by itself establish authenticity of the image, manifest, kernel or `luna-init` artifact.
+```text
+Recovery System Image
+        +
+Recovery luna-init
+        +
+Recovery kernel
+        +
+Recovery DATA Image → RAM
+        ↓
+ordinary Luna DATA abstraction
+```
 
-Image, kernel and `luna-init` authenticity/trust remain separate policy/update concerns.
+The Recovery environment can then inspect and manipulate physical `LUNA-DATA` as a separate recovery object.
 
-## 8. Hardware information boundary
+The Recovery DATA Image is independent from `luna-data.toml` and must remain usable when physical DATA is missing, damaged or ambiguous.
 
-Luna Handoff v1 does **not** duplicate generic hardware information already represented by the Linux x86 boot protocol or discovered by the kernel.
+## 8. Boot lifecycle
 
-The bootloader continues to populate standard boot structures such as Linux `boot_params` memory/firmware fields it owns. The Luna handoff carries only Luna-specific state and the direct initial-userspace memory object.
+Luna distinguishes three failure domains:
 
-This avoids turning the handoff into a second ACPI/E820/device-discovery protocol. Linux's x86 boot protocol defines `boot_params` fields and the extensible `setup_data` mechanism used here.
+```text
+Image failure
+    ↓
+soft fallback
+    ↓
+previous compatible image/target
+    ↓
+no reboot
 
-## 9. Memory ownership
+Init failure
+    ↓
+soft fallback
+    ↓
+previous compatible init/target
+    ↓
+no reboot
 
-The handoff and `luna-init` memory object are boot-reserved memory. `luna-boot` must allocate, populate and publish them before `ExitBootServices`.
+Kernel panic
+    ↓
+reboot
+    ↓
+next luna-boot
+    ↓
+previous compatible kernel
+```
 
-The Luna kernel must preserve the referenced `luna-init` bytes until the ELF has been successfully loaded and no remaining kernel state references the original range. The exact release point is a kernel implementation detail.
+Soft fallback never combines arbitrary artifacts. Each candidate is resolved as a complete compatible target.
 
-After `ExitBootServices`, the bootloader performs no further UEFI allocation or filesystem activity.
+Kernel panic is handled across reboot boundaries by persistent boot state.
 
-## 10. Command-line relationship
+## 9. Integrity
 
-The Luna handoff is the primary Luna-specific boot-state ABI.
+The `SYSTEM_IMAGE` record contains manifest and image digests. `LUNA_INIT_IMAGE` contains the init digest. `KERNEL_IDENTITY` contains the kernel digest.
 
-The kernel command line remains available for:
+The handoff checksum protects handoff structure, not artifact authenticity. Artifact trust remains a separate security/update concern.
 
-- standard Linux kernel parameters;
-- hardware/debug parameters;
-- kernel configuration that Linux itself defines;
-- temporary development diagnostics.
+## 10. Memory ownership
 
-Luna must not require `luna.system_device`, `luna.data_device` or `luna.system_image` command-line parsing as the normal boot contract once ABI v1 is implemented.
+The handoff and `luna-init` memory object are boot-reserved. Their ranges must not be reclaimed as ordinary RAM before the Luna kernel integration has consumed or retained them.
 
-This also avoids coupling Luna boot identity to whitespace-delimited strings and path syntax.
+After `ExitBootServices`, the bootloader performs no UEFI allocation or filesystem activity.
 
-## 11. Initial userspace contract
+## 11. Hardware information boundary
 
-The Luna kernel integration must make the following information available to `luna-init` before it executes:
+Luna Handoff v1 does not duplicate generic hardware information already represented by the Linux x86 boot protocol or discovered by the kernel.
+
+## 12. Initial userspace contract
+
+Before `luna-init` executes, the Luna kernel integration must provide a validated Luna boot context containing at least:
 
 ```text
 LunaBootHandoffV1
     ↓
 validated LunaBootContext
-    ├── SYSTEM partition identity
-    ├── DATA partition identity
+    ├── SYSTEM identity
+    ├── physical DATA identity when applicable
     ├── selected image identity + digest
     ├── running kernel identity + digest
     ├── luna-init identity + digest
@@ -321,63 +324,10 @@ validated LunaBootContext
     └── boot state context
 ```
 
-`luna-init` is launched directly from the memory-resident `LUNA_INIT_IMAGE` object by the Luna kernel integration. No initramfs archive is required to transport either the executable or the Luna boot context.
+`luna-init` is launched directly from its memory-resident boot object.
 
-## 12. Kernel driver policy
+## 13. Evolution
 
-Luna does not use initramfs to discover or load the drivers required to reach the SYSTEM partition, read the required filesystem, access the selected System Image and execute `luna-init`.
+ABI v2 or another major revision is required for incompatible structural changes. Compatible additions should use new record types or optional fields governed by `abi_minor` rules.
 
-The Luna kernel configuration must therefore build all boot-critical storage, bus, filesystem, crypto and hardware support required by the supported boot profiles directly into the kernel (`CONFIG_*=y`).
-
-Optional post-boot drivers remain eligible for loadable modules.
-
-Built-in firmware may also be used when a device requires firmware during boot and a filesystem-based lookup would otherwise reintroduce an early-userspace dependency. Linux supports built-in firmware with `CONFIG_EXTRA_FIRMWARE` and `CONFIG_EXTRA_FIRMWARE_DIR`.
-
-## 13. Kernel modules
-
-Each versioned kernel artifact owns its compatible module set.
-
-Canonical layout:
-
-```text
-SYSTEM/kernels/
-└── <kernel-id>/
-    ├── bzImage
-    ├── kernel.toml
-    └── modules/
-        └── lib/modules/<kernel-release>/...
-```
-
-The module set is tied to the kernel identity and must not be treated as a global shared pool.
-
-The module tree may be materialized into the logical runtime filesystem after `luna-init` has constructed the system environment.
-
-Where modules are allowed to load, Luna may enforce signed-module policy.
-
-## 14. Failure
-
-A missing, malformed, incompatible or unverified required handoff record is a boot failure. `luna-init` must not guess a replacement image or device identity from unrelated paths when a required ABI record is invalid.
-
-A missing, malformed or unexecutable `LUNA_INIT_IMAGE` is fatal to the current boot attempt.
-
-Boot fallback remains owned by the boot state/fallback mechanism. The handoff describes the attempt selected by `luna-boot`.
-
-## 15. Evolution
-
-ABI v2 or another major revision is required for incompatible structural changes.
-
-Compatible additions should be expressed as new record types or optional fields covered by `abi_minor` rules.
-
-Record type values are centrally allocated by the Luna boot contract. Reusing a retired type with different semantics is forbidden.
-
-## 16. Non-goals
-
-Luna Boot Handoff v1 is not:
-
-- a filesystem image;
-- an initramfs replacement filesystem;
-- a second hardware-description standard;
-- a general IPC protocol;
-- a configuration database;
-- a kernel-module loader protocol;
-- an application/runtime contract.
+Record values are never reused with different semantics.
