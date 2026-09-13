@@ -357,7 +357,11 @@ mod tests {
     use super::*;
     use luna_state::MemoryStateStore;
 
-    fn target(image: (u64, u64, u64), init: (u64, u64, u64), kernel: (u64, u64, u64)) -> SystemTarget {
+    fn target(
+        image: (u32, u32, u32),
+        init: (u32, u32, u32),
+        kernel: (u32, u32, u32),
+    ) -> SystemTarget {
         SystemTarget::new(
             SystemImageRef::new(Version::new(image.0, image.1, image.2)),
             InitRef::new(Version::new(init.0, init.1, init.2)),
