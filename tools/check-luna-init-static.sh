@@ -16,7 +16,7 @@ fi
 
 header="$(readelf -h "$artifact")"
 program_headers="$(readelf -l "$artifact")"
-sections="$(readelf -S "$artifact")"
+dynamic="$(readelf -d "$artifact" 2>/dev/null || true)"
 
 if ! grep -q 'ELF64' <<<"$header"; then
     printf 'luna-init is not ELF64: %s\n' "$artifact" >&2
@@ -33,8 +33,14 @@ if grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' <<<"$program_headers"; then
     exit 1
 fi
 
-if grep -Eq '(^|[[:space:]])\.dynamic([[:space:]]|$)' <<<"$sections"; then
-    printf 'luna-init still contains a .dynamic section\n' >&2
+if grep -q '(NEEDED)' <<<"$dynamic"; then
+    printf 'luna-init has dynamic shared-library dependencies\n' >&2
+    grep '(NEEDED)' <<<"$dynamic" >&2 || true
+    exit 1
+fi
+
+if grep -Eq '\(RPATH\)|\(RUNPATH\)' <<<"$dynamic"; then
+    printf 'luna-init contains runtime library search paths\n' >&2
     exit 1
 fi
 
