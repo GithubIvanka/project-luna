@@ -27,7 +27,17 @@ ApplicationInstance
 
 `ApplicationPlan` contains application identity/version, `UserSession` identity, `RuntimeSpec` (including `RuntimeKind`), executable and arguments, declared resources, mapping context, and authorization requests.
 
-Mapping validation precedes authorization. `luna-root-mapping` owns deterministic logical-to-physical mapping semantics; a `MappingPlan` is not a grant. The current implementation receives a prepared mapping table. Automatic executable → ELF interpreter → shared-library/runtime-resource dependency closure is not implemented yet.
+Mapping validation precedes authorization. `luna-root-mapping` owns deterministic logical-to-physical mapping semantics; a `MappingPlan` is not a grant. The current implementation receives a prepared mapping table. ELF inspection can now produce an immutable recursive `ElfDependencyClosure` from the executable, interpreter, and `DT_NEEDED` graph. Resolution is restricted to caller-supplied trusted sources; automatic integration of that closure into mapping/resource authorization remains the next stage.
+
+## ELF dependency closure
+
+`luna-app-runtime` parses ELF metadata without invoking a host dynamic loader. The analyzer extracts the ELF class, byte order, machine, `PT_INTERP`, `DT_NEEDED`, `DT_RPATH`, and `DT_RUNPATH` data.
+
+`ElfDependencyClosure` recursively visits the interpreter and all required shared objects through an explicit `ElfDependencyResolver`. Cycles collapse into the closure set rather than causing unbounded recursion. A machine mismatch fails closed.
+
+The concrete `FilesystemElfResolver` accepts only `TrustedElfSource` mappings and explicitly configured default logical search paths. It does not consult `LD_LIBRARY_PATH`, the host `ld.so.cache`, or host default directories. `$ORIGIN` is expanded lexically and normalized before source lookup. `RUNPATH` is preferred when present; otherwise `RPATH` is used, followed by configured trusted default paths.
+
+The resolver's filesystem checks are planning-time safeguards, not the final kernel security boundary. Final source attachment continues to use the existing FD-based mount path (`openat2`, `open_tree`, `mount_setattr`, and `move_mount`) and the launcher's fresh logical root/Landlock enforcement.
 
 ## Authorization
 
@@ -74,11 +84,14 @@ A naturally exiting successful process may move `Running → Stopped`; a non-zer
 
 Unit/contract tests cover valid and invalid lifecycle transitions, active/inactive/foreign session handling, authorization denial before launch, authorized-plan-only launcher typing, runtime/mapping mismatch, executable mapping, mapping access checks, launch-context trust roots, normal and abnormal exit recording, and uncommitted staging cleanup.
 
+ELF closure unit tests cover interpreter/`DT_NEEDED` extraction, static binaries, recursive dependency graphs, cycles, architecture mismatch, and `$ORIGIN` normalization.
+
 A dedicated privileged Linux CI suite launches a real dynamically linked ELF through the authorized launcher and verifies mount namespace isolation, fresh tmpfs root, trusted runtime access, mapping access, Landlock denials, FD inheritance policy, and cleanup outcome.
 
 ## Open work
 
-- executable → ELF interpreter → library/runtime-resource dependency closure;
+- feed `ElfDependencyClosure` into application mapping/resource planning and `luna-security` authorization;
+- define the final precedence and source provenance contract for runtime, bundle-private, and explicit dependency paths;
 - system-runtime ownership/allocation of system-wide `ApplicationInstanceId` values;
 - cgroup v2 placement and resource limits, including possible `clone3`/`CLONE_INTO_CGROUP` integration;
 - final credential, capability, device, `/proc`, `/sys`, and `/run` policy expansion;
@@ -86,7 +99,6 @@ A dedicated privileged Linux CI suite launches a real dynamically linked ELF thr
 - durable lifecycle recovery after runtime restart;
 - leaked-mount recovery beyond the observable cleanup outcome;
 - additional privileged coverage for forced mount rollback failures.
-
 
 ## P0 enforcement clarification
 
