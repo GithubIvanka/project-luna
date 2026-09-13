@@ -1,8 +1,8 @@
 //! System-state model and query boundary for Project Luna.
 //!
-//! The system manager owns the logical model of selected System Images and
-//! kernels. It does not execute updates; mutation is performed through
-//! `luna-update-manager`.
+//! The system manager owns the logical model of selected System Images,
+//! `luna-init` versions, kernels and the Recovery DATA Image. It does not
+//! execute updates; mutation is performed through `luna-update-manager`.
 
 use luna_common::Version;
 use luna_state::{RedbStateStore, Revision, StateKey, StateStore, StateTransaction, StateValue};
@@ -13,6 +13,19 @@ pub struct SystemImageRef {
     version: Version,
 }
 impl SystemImageRef {
+    pub const fn new(version: Version) -> Self {
+        Self { version }
+    }
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct InitRef {
+    version: Version,
+}
+impl InitRef {
     pub const fn new(version: Version) -> Self {
         Self { version }
     }
@@ -34,38 +47,87 @@ impl KernelRef {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct RecoveryDataImageRef {
+    version: Version,
+}
+impl RecoveryDataImageRef {
+    pub const fn new(version: Version) -> Self {
+        Self { version }
+    }
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemTarget {
+    image: SystemImageRef,
+    init: InitRef,
+    kernel: KernelRef,
+}
+impl SystemTarget {
+    pub const fn new(image: SystemImageRef, init: InitRef, kernel: KernelRef) -> Self {
+        Self {
+            image,
+            init,
+            kernel,
+        }
+    }
+    pub const fn image(&self) -> &SystemImageRef {
+        &self.image
+    }
+    pub const fn init(&self) -> &InitRef {
+        &self.init
+    }
+    pub const fn kernel(&self) -> &KernelRef {
+        &self.kernel
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoveryTarget {
+    target: SystemTarget,
+    data: RecoveryDataImageRef,
+}
+impl RecoveryTarget {
+    pub const fn new(target: SystemTarget, data: RecoveryDataImageRef) -> Self {
+        Self { target, data }
+    }
+    pub const fn target(&self) -> &SystemTarget {
+        &self.target
+    }
+    pub const fn data(&self) -> &RecoveryDataImageRef {
+        &self.data
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SystemState {
-    current: SystemImageRef,
-    factory: SystemImageRef,
-    current_kernel: KernelRef,
-    factory_kernel: KernelRef,
+    current: SystemTarget,
+    factory: SystemTarget,
+    recovery: RecoveryTarget,
 }
 impl SystemState {
     pub const fn new(
-        current: SystemImageRef,
-        factory: SystemImageRef,
-        current_kernel: KernelRef,
-        factory_kernel: KernelRef,
+        current: SystemTarget,
+        factory: SystemTarget,
+        recovery: RecoveryTarget,
     ) -> Self {
         Self {
             current,
             factory,
-            current_kernel,
-            factory_kernel,
+            recovery,
         }
     }
-    pub const fn current(&self) -> &SystemImageRef {
+    pub const fn current(&self) -> &SystemTarget {
         &self.current
     }
-    pub const fn factory(&self) -> &SystemImageRef {
+    pub const fn factory(&self) -> &SystemTarget {
         &self.factory
     }
-    pub const fn current_kernel(&self) -> &KernelRef {
-        &self.current_kernel
-    }
-    pub const fn factory_kernel(&self) -> &KernelRef {
-        &self.factory_kernel
+    pub const fn recovery(&self) -> &RecoveryTarget {
+        &self.recovery
     }
 }
 
@@ -92,9 +154,15 @@ impl fmt::Display for SystemManagerError {
 impl std::error::Error for SystemManagerError {}
 
 const CURRENT_IMAGE: &str = "system/current/image";
+const CURRENT_INIT: &str = "system/current/init";
 const CURRENT_KERNEL: &str = "system/current/kernel";
 const FACTORY_IMAGE: &str = "system/factory/image";
+const FACTORY_INIT: &str = "system/factory/init";
 const FACTORY_KERNEL: &str = "system/factory/kernel";
+const RECOVERY_IMAGE: &str = "system/recovery/image";
+const RECOVERY_INIT: &str = "system/recovery/init";
+const RECOVERY_KERNEL: &str = "system/recovery/kernel";
+const RECOVERY_DATA: &str = "system/recovery/data";
 
 pub struct PersistentSystemManager<S: StateStore> {
     store: S,
@@ -124,23 +192,24 @@ impl<S: StateStore> PersistentSystemManager<S> {
     pub fn set_current(
         &mut self,
         image: Version,
+        init: Version,
         kernel: Version,
         expected: Revision,
     ) -> Result<Revision, SystemManagerError> {
         let next = SystemState::new(
-            SystemImageRef::new(image),
+            SystemTarget::new(
+                SystemImageRef::new(image),
+                InitRef::new(init),
+                KernelRef::new(kernel),
+            ),
             self.state.factory().clone(),
-            KernelRef::new(kernel),
-            self.state.factory_kernel().clone(),
+            self.state.recovery().clone(),
         );
-        let mut tx = StateTransaction::new();
-        tx.set(
-            StateKey::new(CURRENT_IMAGE),
-            StateValue::new(image.to_string().into_bytes()),
-        )
-        .set(
-            StateKey::new(CURRENT_KERNEL),
-            StateValue::new(kernel.to_string().into_bytes()),
+        let tx = target_transaction(
+            CURRENT_IMAGE,
+            CURRENT_INIT,
+            CURRENT_KERNEL,
+            next.current(),
         );
         let revision = self.store.transaction(expected, tx).map_err(state_error)?;
         self.state = next;
@@ -171,33 +240,89 @@ impl<S: StateStore> SystemQuery for PersistentSystemManager<S> {
 }
 
 fn encode_state(state: &SystemState) -> StateTransaction {
-    let mut tx = StateTransaction::new();
+    let mut tx = target_transaction(
+        CURRENT_IMAGE,
+        CURRENT_INIT,
+        CURRENT_KERNEL,
+        state.current(),
+    );
     tx.set(
-        StateKey::new(CURRENT_IMAGE),
-        StateValue::new(state.current().version().to_string().into_bytes()),
-    )
-    .set(
-        StateKey::new(CURRENT_KERNEL),
-        StateValue::new(state.current_kernel().version().to_string().into_bytes()),
-    )
-    .set(
         StateKey::new(FACTORY_IMAGE),
-        StateValue::new(state.factory().version().to_string().into_bytes()),
+        StateValue::new(state.factory().image().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(FACTORY_INIT),
+        StateValue::new(state.factory().init().version().to_string().into_bytes()),
     )
     .set(
         StateKey::new(FACTORY_KERNEL),
-        StateValue::new(state.factory_kernel().version().to_string().into_bytes()),
+        StateValue::new(state.factory().kernel().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(RECOVERY_IMAGE),
+        StateValue::new(state.recovery().target().image().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(RECOVERY_INIT),
+        StateValue::new(state.recovery().target().init().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(RECOVERY_KERNEL),
+        StateValue::new(state.recovery().target().kernel().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(RECOVERY_DATA),
+        StateValue::new(state.recovery().data().version().to_string().into_bytes()),
     );
     tx
 }
+
+fn target_transaction(
+    image_key: &'static str,
+    init_key: &'static str,
+    kernel_key: &'static str,
+    target: &SystemTarget,
+) -> StateTransaction {
+    let mut tx = StateTransaction::new();
+    tx.set(
+        StateKey::new(image_key),
+        StateValue::new(target.image().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(init_key),
+        StateValue::new(target.init().version().to_string().into_bytes()),
+    )
+    .set(
+        StateKey::new(kernel_key),
+        StateValue::new(target.kernel().version().to_string().into_bytes()),
+    );
+    tx
+}
+
 fn read_state<S: StateStore>(store: &S) -> Result<SystemState, SystemManagerError> {
     Ok(SystemState::new(
-        SystemImageRef::new(read_version(store, CURRENT_IMAGE)?),
-        SystemImageRef::new(read_version(store, FACTORY_IMAGE)?),
-        KernelRef::new(read_version(store, CURRENT_KERNEL)?),
-        KernelRef::new(read_version(store, FACTORY_KERNEL)?),
+        read_target(store, CURRENT_IMAGE, CURRENT_INIT, CURRENT_KERNEL)?,
+        read_target(store, FACTORY_IMAGE, FACTORY_INIT, FACTORY_KERNEL)?,
+        RecoveryTarget::new(
+            read_target(store, RECOVERY_IMAGE, RECOVERY_INIT, RECOVERY_KERNEL)?,
+            RecoveryDataImageRef::new(read_version(store, RECOVERY_DATA)?),
+        ),
     ))
 }
+
+fn read_target<S: StateStore>(
+    store: &S,
+    image_key: &'static str,
+    init_key: &'static str,
+    kernel_key: &'static str,
+) -> Result<SystemTarget, SystemManagerError> {
+    Ok(SystemTarget::new(
+        SystemImageRef::new(read_version(store, image_key)?),
+        InitRef::new(read_version(store, init_key)?),
+        KernelRef::new(read_version(store, kernel_key)?),
+    ))
+}
+
 fn read_version<S: StateStore>(
     store: &S,
     key: &'static str,
@@ -210,6 +335,7 @@ fn read_version<S: StateStore>(
         .map_err(|_| SystemManagerError::InvalidVersion("non-utf8".into()))?;
     parse_version(text).ok_or_else(|| SystemManagerError::InvalidVersion(text.into()))
 }
+
 fn parse_version(value: &str) -> Option<Version> {
     let mut parts = value.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -221,6 +347,7 @@ fn parse_version(value: &str) -> Option<Version> {
         Some(Version::new(major, minor, patch))
     }
 }
+
 fn state_error(error: luna_state::StateError) -> SystemManagerError {
     SystemManagerError::State(error.to_string())
 }
@@ -229,40 +356,73 @@ fn state_error(error: luna_state::StateError) -> SystemManagerError {
 mod tests {
     use super::*;
     use luna_state::MemoryStateStore;
-    fn state() -> SystemState {
-        SystemState::new(
-            SystemImageRef::new(Version::new(3, 0, 0)),
-            SystemImageRef::new(Version::new(1, 0, 0)),
-            KernelRef::new(Version::new(8, 2, 0)),
-            KernelRef::new(Version::new(7, 0, 0)),
+
+    fn target(image: (u64, u64, u64), init: (u64, u64, u64), kernel: (u64, u64, u64)) -> SystemTarget {
+        SystemTarget::new(
+            SystemImageRef::new(Version::new(image.0, image.1, image.2)),
+            InitRef::new(Version::new(init.0, init.1, init.2)),
+            KernelRef::new(Version::new(kernel.0, kernel.1, kernel.2)),
         )
     }
-    #[test]
-    fn system_state_keeps_current_factory_image_and_kernel_separate() {
-        let state = state();
-        assert_eq!(state.current().version(), Version::new(3, 0, 0));
-        assert_eq!(state.factory().version(), Version::new(1, 0, 0));
-        assert_eq!(state.current_kernel().version(), Version::new(8, 2, 0));
-        assert_eq!(state.factory_kernel().version(), Version::new(7, 0, 0));
+
+    fn state() -> SystemState {
+        SystemState::new(
+            target((3, 0, 0), (3, 1, 0), (8, 2, 0)),
+            target((1, 0, 0), (1, 0, 1), (7, 0, 0)),
+            RecoveryTarget::new(
+                target((2, 0, 0), (2, 1, 0), (8, 1, 0)),
+                RecoveryDataImageRef::new(Version::new(1, 4, 0)),
+            ),
+        )
     }
+
+    #[test]
+    fn system_state_keeps_atomic_current_factory_and_recovery_targets() {
+        let state = state();
+        assert_eq!(state.current().image().version(), Version::new(3, 0, 0));
+        assert_eq!(state.current().init().version(), Version::new(3, 1, 0));
+        assert_eq!(state.current().kernel().version(), Version::new(8, 2, 0));
+        assert_eq!(state.factory().image().version(), Version::new(1, 0, 0));
+        assert_eq!(state.factory().init().version(), Version::new(1, 0, 1));
+        assert_eq!(state.factory().kernel().version(), Version::new(7, 0, 0));
+        assert_eq!(state.recovery().target().image().version(), Version::new(2, 0, 0));
+        assert_eq!(state.recovery().target().init().version(), Version::new(2, 1, 0));
+        assert_eq!(state.recovery().target().kernel().version(), Version::new(8, 1, 0));
+        assert_eq!(state.recovery().data().version(), Version::new(1, 4, 0));
+    }
+
     #[test]
     fn durable_system_state_round_trips() {
+        let initial = state();
+        let store = MemoryStateStore::new();
+        let manager = PersistentSystemManager::initialize(store.clone(), initial.clone()).unwrap();
+        let restored = PersistentSystemManager::load(store).unwrap();
+        assert_eq!(restored.state(), &initial);
+        assert_eq!(manager.state(), &initial);
+    }
+
+    #[test]
+    fn current_update_preserves_factory_and_recovery() {
         let initial = state();
         let mut manager =
             PersistentSystemManager::initialize(MemoryStateStore::new(), initial.clone()).unwrap();
         let revision = manager.revision();
         let next = manager
-            .set_current(Version::new(4, 0, 0), Version::new(9, 0, 0), revision)
+            .set_current(
+                Version::new(4, 0, 0),
+                Version::new(4, 1, 0),
+                Version::new(9, 0, 0),
+                revision,
+            )
             .unwrap();
         assert_eq!(next, revision.next());
-        assert_eq!(manager.state().current().version(), Version::new(4, 0, 0));
-        assert_eq!(
-            manager.state().current_kernel().version(),
-            Version::new(9, 0, 0)
-        );
+        assert_eq!(manager.state().current().image().version(), Version::new(4, 0, 0));
+        assert_eq!(manager.state().current().init().version(), Version::new(4, 1, 0));
+        assert_eq!(manager.state().current().kernel().version(), Version::new(9, 0, 0));
         assert_eq!(manager.state().factory(), initial.factory());
-        assert_eq!(manager.state().factory_kernel(), initial.factory_kernel());
+        assert_eq!(manager.state().recovery(), initial.recovery());
     }
+
     #[test]
     fn stale_revision_does_not_change_state() {
         let initial = state();
@@ -271,20 +431,24 @@ mod tests {
         let stale = Revision::initial();
         let current = manager.revision();
         assert_ne!(current, stale);
-        assert!(
-            manager
-                .set_current(Version::new(5, 0, 0), Version::new(10, 0, 0), stale)
-                .is_err()
-        );
+        assert!(manager
+            .set_current(
+                Version::new(5, 0, 0),
+                Version::new(5, 1, 0),
+                Version::new(10, 0, 0),
+                stale,
+            )
+            .is_err());
         assert_eq!(manager.state(), &initial);
     }
+
     #[test]
     fn missing_redb_state_is_initialized() {
         let root =
             std::env::temp_dir().join(format!("luna-system-manager-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let manager = PersistentSystemManager::open_or_initialize_redb(&root, state()).unwrap();
-        assert_eq!(manager.state().current().version(), Version::new(3, 0, 0));
+        assert_eq!(manager.state().current().image().version(), Version::new(3, 0, 0));
         let _ = std::fs::remove_dir_all(root);
     }
 }
