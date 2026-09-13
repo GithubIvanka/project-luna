@@ -65,7 +65,29 @@ FD 3 = read-only Luna boot-context
 
 FD 3 begins at offset 0 and contains the serialized validated handoff. `luna-init` closes FD 3 after parsing it.
 
-## 4. No initramfs
+## 4. Direct PID1 execution and dependency closure
+
+`luna-init` is a direct initial userspace executable. Its own execution path must not depend on a runtime ELF interpreter or on dynamically loaded userspace libraries that have to be discovered from the System Image before PID 1 can start.
+
+The canonical build target is:
+
+```text
+x86_64-unknown-linux-musl
+```
+
+Release builds use a static CRT configuration and `panic = abort`. The resulting artifact is required to be a self-contained ELF64 executable for x86_64 with no requested program interpreter and no dynamic ELF section.
+
+The repository helper:
+
+```text
+tools/check-luna-init-static.sh
+```
+
+validates these properties against the release artifact.
+
+This is a prerequisite for the later System Image dependency closure: dependency resolution for the System Environment starts only after the direct PID1 executable itself is known to be independently executable.
+
+## 5. No initramfs
 
 Project Luna has no initramfs userspace layer in the production boot architecture.
 
@@ -85,13 +107,13 @@ luna-init PID 1
 
 A cpio/gzip initramfs, an initramfs `/init`, `switch_root` and `pivot_root` are not part of the target architecture.
 
-## 5. Responsibility
+## 6. Responsibility
 
 `luna-init` owns early userspace bootstrap and construction of the initial System Environment. It may reason about physical storage, block devices, hardware and firmware information exposed by Linux.
 
 It does not own UserSession or application lifecycle.
 
-## 6. SYSTEM and System Image
+## 7. SYSTEM and System Image
 
 The canonical storage layout is:
 
@@ -126,7 +148,7 @@ Kernel
 
 The `.init` file name is intentionally independent of the internal executable representation. The current direct Linux execution path uses an ELF64 binary payload, while `.init` is the Luna artifact name and is not a user-facing file-format name.
 
-## 7. Init compatibility manifest
+## 8. Init compatibility manifest
 
 For an init core `luna-X.Y.Z.init`, the adjacent manifest `luna-X.Y.Z.toml` describes that init artifact.
 
@@ -146,17 +168,17 @@ compatible = ["K1", "K2"]
 
 The init manifest must not define System Image compatibility. That relationship belongs to the System Image manifest.
 
-## 8. RAM-backed logical root
+## 9. RAM-backed logical root
 
 The logical system environment is RAM-backed. Boot-critical files are materialized according to the System Image bootstrap/materialization contract rather than copying the entire System Image merely for convenience.
 
 The physical SYSTEM partition and the selected SquashFS remain internal sources and are not exposed as ordinary user filesystem paths.
 
-## 9. DATA
+## 10. DATA
 
 DATA is persistent storage, not the logical root. `luna-init` provides trusted physical access to the DATA identity received in the handoff; higher policy layers decide which DATA resources become visible in the System Environment.
 
-## 10. Runtime filesystems
+## 11. Runtime filesystems
 
 `luna-init` establishes the prerequisites for:
 
@@ -170,7 +192,7 @@ DATA is persistent storage, not the logical root. `luna-init` provides trusted p
 
 These are runtime facilities and are not persistent copies of SYSTEM.
 
-## 11. Starting `luna-system-runtime`
+## 12. Starting `luna-system-runtime`
 
 Once the minimal System Environment is ready:
 
@@ -182,7 +204,7 @@ luna-system-runtime
 
 `luna-init` remains PID 1, reaps children and owns system-wide lifecycle obligations.
 
-## 12. Failure semantics
+## 13. Failure semantics
 
 `luna-init` fails closed on:
 
@@ -197,7 +219,7 @@ luna-system-runtime
 
 It must not fall back to unrelated paths or legacy command-line selectors when the structured boot context is invalid.
 
-## 13. Lifecycle independence
+## 14. Lifecycle independence
 
 The following are independently versioned and retained:
 
@@ -211,6 +233,6 @@ A boot target is a compatibility relation among these three artifacts rather tha
 
 Retention is evaluated independently for each artifact, subject to the requirement that at least one valid compatible boot chain remains available.
 
-## 14. Implementation rule
+## 15. Implementation rule
 
 The old transitional implementation must not be extended. Any remaining code that assumes an initramfs, BusyBox bootstrap root, `pivot_root`, `switch_root`, a second `/sbin/init`, or System Image ownership of `luna-init` belongs to the obsolete implementation and should be removed as the direct-init path is completed.
