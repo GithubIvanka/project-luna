@@ -72,7 +72,6 @@ impl LinuxMountNamespace {
         Ok(Self)
     }
 
-
     /// Enforce every mapping's Read/Write/Execute permissions with Landlock.
     pub fn enforce_filesystem_access(
         &self,
