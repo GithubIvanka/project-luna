@@ -4,7 +4,10 @@ use std::process::ExitStatus;
 use std::time::Duration;
 
 use luna_common::{UserId, Version};
-use luna_system_manager::{KernelRef, PersistentSystemManager, SystemImageRef, SystemState};
+use luna_system_manager::{
+    InitRef, KernelRef, PersistentSystemManager, RecoveryDataImageRef, RecoveryTarget,
+    SystemImageRef, SystemState, SystemTarget,
+};
 use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeService};
 use luna_user_session::SessionState;
 
@@ -48,12 +51,22 @@ fn set_cloexec(fd: i32) -> Result<(), String> {
     Ok(())
 }
 
+fn target(image: Version, init: Version, kernel: Version) -> SystemTarget {
+    SystemTarget::new(
+        SystemImageRef::new(image),
+        InitRef::new(init),
+        KernelRef::new(kernel),
+    )
+}
+
 fn default_development_system_state() -> SystemState {
     SystemState::new(
-        SystemImageRef::new(Version::new(0, 1, 0)),
-        SystemImageRef::new(Version::new(0, 1, 0)),
-        KernelRef::new(Version::new(0, 1, 0)),
-        KernelRef::new(Version::new(0, 1, 0)),
+        target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
+        target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
+        RecoveryTarget::new(
+            target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
+            RecoveryDataImageRef::new(Version::new(0, 1, 0)),
+        ),
     )
 }
 
@@ -184,9 +197,10 @@ fn main() {
             let state = manager.state().clone();
             runtime.attach_system_manager(manager);
             eprintln!(
-                "luna-system-runtime: System Image {}, kernel {}",
-                state.current().version(),
-                state.current_kernel().version()
+                "luna-system-runtime: System Image {}, init {}, kernel {}",
+                state.current().image().version(),
+                state.current().init().version(),
+                state.current().kernel().version()
             );
         }
         Err(error) => {
