@@ -7,6 +7,9 @@ use uefi::mem::memory_map::MemoryMapOwned;
 use uefi::proto::console::text::Input;
 use uefi::runtime::{self, ResetType};
 
+use luna_common::{BootAttemptProgress, BootStage};
+
+use crate::boot_attempt::{BootAttempt, BootAttemptMarker};
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
 use crate::e820::E820Extension;
@@ -27,6 +30,8 @@ pub fn boot_flow() -> BootResult<()> {
     let mut input = open_protocol_exclusive::<Input>(input_handle)?;
     let menu_requested = boot_menu_requested(&mut input);
     drop(input);
+
+    let previous_attempt = BootAttemptMarker::read()?;
 
     let mut filesystem = match SystemFilesystem::open() {
         Ok(value) => Some(value),
@@ -177,6 +182,15 @@ pub fn boot_flow() -> BootResult<()> {
             .push_str(" loglevel=7 ignore_loglevel");
     }
 
+    let attempt_id = BootAttemptMarker::next_attempt_id(
+        previous_attempt,
+        prepared.init_address,
+        prepared.init_size,
+        &prepared.kernel_digest,
+    );
+    let mut attempt = BootAttempt::new(attempt_id);
+    attempt.advance(BootStage::BootloaderCompleted);
+
     let manifest_bytes = filesystem.read_file(&target.manifest_path)?;
     let image_digest = filesystem.hash_file(&target.system_image_path)?;
     let kernel_identity = PreparedIdentity {
@@ -184,14 +198,17 @@ pub fn boot_flow() -> BootResult<()> {
     };
     let boot_state = BootState {
         fallback_depth: catalog.boot_state.fallback_depth,
-        previous_attempt_failed: catalog.boot_state.previous_attempt_failed,
-        previous_attempt_id: catalog.boot_state.attempt_id,
+        previous_attempt_failed: previous_attempt.is_some() || catalog.boot_state.previous_attempt_failed,
+        previous_attempt_id: previous_attempt
+            .map(|value| value.attempt_id)
+            .unwrap_or(catalog.boot_state.attempt_id),
         failure_code: catalog.boot_state.failure_code,
     };
     let luna_handoff = LunaHandoff::build(
         &target,
         mode,
         boot_state,
+        attempt_id,
         filesystem.system_partition(),
         filesystem.data_partition(),
         &manifest_bytes,
@@ -212,6 +229,11 @@ pub fn boot_flow() -> BootResult<()> {
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
     reserved.push((e820_ext.address, e820_ext.allocation_pages));
     reserved.push((page_table, page_table_pages));
+
+    // Persist exactly one minimal checkpoint before handing control to the
+    // kernel. Detailed progress remains volatile in `BootAttempt`.
+    BootAttemptMarker::begin(attempt.attempt_id())?;
+    attempt.advance(BootStage::KernelHandoff);
 
     // From this point onward Boot Services are gone. The post-EBS path is
     // deliberately non-returning so failures can never reach efi_main().
