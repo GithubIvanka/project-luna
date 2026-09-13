@@ -252,7 +252,7 @@ impl TargetFields {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct InitRecord {
     pub version: String,
     pub init_path: String,
@@ -333,8 +333,8 @@ impl BootCatalog {
         inits.sort_by(|a, b| version_cmp(&b.version, &a.version));
 
         let mut targets = Vec::new();
-        let mut recovery = None;
-        let mut factory = None;
+        let mut recovery_candidates = Vec::new();
+        let mut factory_candidates = Vec::new();
         for image in images
             .iter()
             .filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs"))
@@ -378,24 +378,36 @@ impl BootCatalog {
             target = target.with_cmdline("quiet loglevel=3");
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
-                ImageRole::Factory => {
-                    if target_matches(&target, boot_state.factory.as_ref()) {
-                        factory = Some(target.factory());
-                    } else if factory.is_none() && boot_state.factory.is_none() {
-                        factory = Some(target.factory());
-                    }
-                }
-                ImageRole::Recovery => {
-                    if target_matches(&target, boot_state.recovery.as_ref()) {
-                        recovery = Some(target.recovery());
-                    } else if recovery.is_none() && boot_state.recovery.is_none() {
-                        recovery = Some(target.recovery());
-                    }
-                }
+                ImageRole::Factory => factory_candidates.push(target.factory()),
+                ImageRole::Recovery => recovery_candidates.push(target.recovery()),
             }
         }
 
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
+        recovery_candidates.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
+        factory_candidates.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
+
+        let recovery = boot_state
+            .recovery
+            .as_ref()
+            .and_then(|reference| {
+                recovery_candidates
+                    .iter()
+                    .find(|target| target_matches(target, Some(reference)))
+                    .cloned()
+            })
+            .or_else(|| recovery_candidates.first().cloned());
+        let factory = boot_state
+            .factory
+            .as_ref()
+            .and_then(|reference| {
+                factory_candidates
+                    .iter()
+                    .find(|target| target_matches(target, Some(reference)))
+                    .cloned()
+            })
+            .or_else(|| factory_candidates.first().cloned());
+
         let default_target = boot_state
             .current
             .as_ref()
