@@ -61,10 +61,22 @@ fn target(image: Version, init: Version, kernel: Version) -> SystemTarget {
 
 fn default_development_system_state() -> SystemState {
     SystemState::new(
-        target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
-        target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
+        target(
+            Version::new(0, 1, 0),
+            Version::new(0, 1, 0),
+            Version::new(0, 1, 0),
+        ),
+        target(
+            Version::new(0, 1, 0),
+            Version::new(0, 1, 0),
+            Version::new(0, 1, 0),
+        ),
         RecoveryTarget::new(
-            target(Version::new(0, 1, 0), Version::new(0, 1, 0), Version::new(0, 1, 0)),
+            target(
+                Version::new(0, 1, 0),
+                Version::new(0, 1, 0),
+                Version::new(0, 1, 0),
+            ),
             RecoveryDataImageRef::new(Version::new(0, 1, 0)),
         ),
     )
