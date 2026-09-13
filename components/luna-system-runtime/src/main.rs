@@ -11,6 +11,8 @@ use luna_system_manager::{
 use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeService};
 use luna_user_session::SessionState;
 
+mod boot_success;
+
 const SYSTEM_SOURCE_FD_ENV: &str = "LUNA_SYSTEM_SOURCE_FD";
 const IMAGE_SOURCE_FD_ENV: &str = "LUNA_IMAGE_SOURCE_FD";
 
@@ -223,6 +225,12 @@ fn main() {
 
     runtime.start();
     let system_services = start_system_services(&mut runtime);
+
+    if let Err(error) = boot_success::confirm_boot_success() {
+        eprintln!("luna-system-runtime: boot success confirmation failed: {error}");
+        std::process::exit(1);
+    }
+    eprintln!("luna-system-runtime: boot success confirmed");
 
     loop {
         let session = match runtime.create_login_session(UserId::from("luna")) {
