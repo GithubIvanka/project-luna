@@ -62,6 +62,7 @@ impl LunaHandoff {
         target: &BootTarget,
         mode: BootMode,
         state: BootState,
+        attempt_id: u64,
         system: &Partition,
         data: Option<&Partition>,
         manifest_bytes: &[u8],
@@ -109,7 +110,6 @@ impl LunaHandoff {
         bytes[16..20].copy_from_slice(&(total_size as u32).to_le_bytes());
         bytes[20..24].copy_from_slice(&0u32.to_le_bytes());
         bytes[24..28].copy_from_slice(&0u32.to_le_bytes());
-        let attempt_id = init_address ^ ((init_size as u64) << 32) ^ kernel.digest_prefix();
         bytes[28..36].copy_from_slice(&attempt_id.to_le_bytes());
         bytes[36..44].copy_from_slice(&(payload_offset as u64).to_le_bytes());
         bytes[44..52].copy_from_slice(&((total_size - payload_offset) as u64).to_le_bytes());
@@ -150,11 +150,6 @@ impl LunaHandoff {
 
 pub struct PreparedIdentity {
     pub kernel_digest: [u8; 32],
-}
-impl PreparedIdentity {
-    fn digest_prefix(&self) -> u64 {
-        u64::from_le_bytes(self.kernel_digest[..8].try_into().unwrap())
-    }
 }
 
 fn push_partition_record(
@@ -308,11 +303,8 @@ luna_linux_entry:
     .align 8
 luna_boot_gdt:
     .quad 0x0000000000000000
-    // 0x08 unused: keep descriptor numbering explicit.
     .quad 0x0000000000000000
-    // 0x10: 64-bit code.
     .quad 0x00af9a000000ffff
-    // 0x18: flat writable data.
     .quad 0x00cf92000000ffff
 luna_boot_gdt_ptr:
     .word 0x1f
