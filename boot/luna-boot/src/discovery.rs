@@ -1,4 +1,4 @@
-//! Discovery of System Images, luna-init cores and compatible kernels from SYSTEM.
+//! Discovery of System Images, luna-init cores and compatible kernels from LUNA-SYS.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -134,7 +134,125 @@ impl InitManifest {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BootTargetRef {
+    pub image: String,
+    pub init: String,
+    pub kernel: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BootStateConfig {
+    pub format: u64,
+    pub generation: u64,
+    pub current: Option<BootTargetRef>,
+    pub fallback: Option<BootTargetRef>,
+    pub recovery: Option<BootTargetRef>,
+    pub factory: Option<BootTargetRef>,
+    pub attempt_id: u64,
+    pub previous_attempt_failed: bool,
+    pub fallback_depth: u8,
+    pub failure_code: u32,
+}
+
+impl BootStateConfig {
+    pub fn parse(bytes: &[u8]) -> BootResult<Self> {
+        let text = core::str::from_utf8(bytes).map_err(|_| BootError::InvalidConfig)?;
+        let mut section = "";
+        let mut result = Self::default();
+        let mut targets = [
+            TargetFields::default(),
+            TargetFields::default(),
+            TargetFields::default(),
+            TargetFields::default(),
+        ];
+
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                section = &line[1..line.len() - 1];
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            let value = value.trim();
+            match (section, key) {
+                ("state", "format") => {
+                    result.format = parse_u64(value).ok_or(BootError::InvalidConfig)?;
+                }
+                ("state", "generation") => {
+                    result.generation = parse_u64(value).ok_or(BootError::InvalidConfig)?;
+                }
+                ("boot", "attempt_id") => {
+                    result.attempt_id = parse_u64(value).ok_or(BootError::InvalidConfig)?;
+                }
+                ("boot", "previous_attempt_failed") => {
+                    result.previous_attempt_failed =
+                        parse_bool(value).ok_or(BootError::InvalidConfig)?;
+                }
+                ("boot", "fallback_depth") => {
+                    result.fallback_depth = parse_u64(value)
+                        .and_then(|value| u8::try_from(value).ok())
+                        .ok_or(BootError::InvalidConfig)?;
+                }
+                ("boot", "failure_code") => {
+                    result.failure_code = parse_u64(value)
+                        .and_then(|value| u32::try_from(value).ok())
+                        .ok_or(BootError::InvalidConfig)?;
+                }
+                ("targets.current", "image") => targets[0].image = parse_string(value),
+                ("targets.current", "init") => targets[0].init = parse_string(value),
+                ("targets.current", "kernel") => targets[0].kernel = parse_string(value),
+                ("targets.fallback", "image") => targets[1].image = parse_string(value),
+                ("targets.fallback", "init") => targets[1].init = parse_string(value),
+                ("targets.fallback", "kernel") => targets[1].kernel = parse_string(value),
+                ("targets.recovery", "image") => targets[2].image = parse_string(value),
+                ("targets.recovery", "init") => targets[2].init = parse_string(value),
+                ("targets.recovery", "kernel") => targets[2].kernel = parse_string(value),
+                ("targets.factory", "image") => targets[3].image = parse_string(value),
+                ("targets.factory", "init") => targets[3].init = parse_string(value),
+                ("targets.factory", "kernel") => targets[3].kernel = parse_string(value),
+                _ => {}
+            }
+        }
+
+        if result.format != 1 {
+            return Err(BootError::InvalidConfig);
+        }
+
+        result.current = targets[0].finish()?;
+        result.fallback = targets[1].finish()?;
+        result.recovery = targets[2].finish()?;
+        result.factory = targets[3].finish()?;
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Default)]
+struct TargetFields {
+    image: Option<String>,
+    init: Option<String>,
+    kernel: Option<String>,
+}
+
+impl TargetFields {
+    fn finish(self) -> BootResult<Option<BootTargetRef>> {
+        match (self.image, self.init, self.kernel) {
+            (None, None, None) => Ok(None),
+            (Some(image), Some(init), Some(kernel)) => {
+                Ok(Some(BootTargetRef { image, init, kernel }))
+            }
+            _ => Err(BootError::InvalidConfig),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct InitRecord {
     pub version: String,
     pub init_path: String,
@@ -153,6 +271,7 @@ pub struct BootCatalog {
     pub recovery: Option<BootTarget>,
     pub factory: Option<BootTarget>,
     pub default_target: usize,
+    pub boot_state: BootStateConfig,
 }
 
 impl BootCatalog {
@@ -160,6 +279,13 @@ impl BootCatalog {
         let images = fs.read_dir("/images")?;
         let cores = fs.read_dir("/cores")?;
         let kernel_dirs = fs.read_dir("/kernels")?;
+        let boot_state = match fs.read_file("/config/boot-state.toml") {
+            Ok(bytes) => match BootStateConfig::parse(&bytes) {
+                Ok(state) => state,
+                Err(_) => BootStateConfig::default(),
+            },
+            Err(_) => BootStateConfig::default(),
+        };
 
         let mut kernels = Vec::new();
         for entry in kernel_dirs.iter().filter(|entry| entry.is_dir()) {
@@ -252,12 +378,30 @@ impl BootCatalog {
             target = target.with_cmdline("quiet loglevel=3");
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
-                ImageRole::Factory => factory = Some(target.factory()),
-                ImageRole::Recovery => recovery = Some(target.recovery()),
+                ImageRole::Factory => {
+                    if target_matches(&target, boot_state.factory.as_ref()) {
+                        factory = Some(target.factory());
+                    } else if factory.is_none() && boot_state.factory.is_none() {
+                        factory = Some(target.factory());
+                    }
+                }
+                ImageRole::Recovery => {
+                    if target_matches(&target, boot_state.recovery.as_ref()) {
+                        recovery = Some(target.recovery());
+                    } else if recovery.is_none() && boot_state.recovery.is_none() {
+                        recovery = Some(target.recovery());
+                    }
+                }
             }
         }
 
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));
+        let default_target = boot_state
+            .current
+            .as_ref()
+            .and_then(|reference| targets.iter().position(|target| target_matches(target, Some(reference))))
+            .unwrap_or(0);
+
         if targets.is_empty() && factory.is_none() && recovery.is_none() {
             return Err(BootError::NoBootTargets);
         }
@@ -265,9 +409,44 @@ impl BootCatalog {
             targets,
             recovery,
             factory,
-            default_target: 0,
+            default_target,
+            boot_state,
         })
     }
+
+    pub fn target_for_ref(&self, reference: &BootTargetRef) -> Option<BootTarget> {
+        if let Some(target) = self
+            .targets
+            .iter()
+            .find(|target| target_matches(target, Some(reference)))
+        {
+            return Some(target.clone());
+        }
+        if self
+            .recovery
+            .as_ref()
+            .is_some_and(|target| target_matches(target, Some(reference)))
+        {
+            return self.recovery.clone();
+        }
+        if self
+            .factory
+            .as_ref()
+            .is_some_and(|target| target_matches(target, Some(reference)))
+        {
+            return self.factory.clone();
+        }
+        None
+    }
+}
+
+fn target_matches(target: &BootTarget, reference: Option<&BootTargetRef>) -> bool {
+    let Some(reference) = reference else {
+        return false;
+    };
+    target.system_version == reference.image
+        && target.init_path == format!("/cores/luna-{}.init", reference.init)
+        && target.kernel_id == reference.kernel
 }
 
 fn select_init(manifest: &ImageManifest, inits: &[InitRecord]) -> Option<InitRecord> {
@@ -313,6 +492,7 @@ fn parse_string(value: &str) -> Option<String> {
         None
     }
 }
+
 fn parse_string_array(value: &str) -> Vec<String> {
     let value = value.trim();
     if !value.starts_with('[') || !value.ends_with(']') {
@@ -323,6 +503,19 @@ fn parse_string_array(value: &str) -> Vec<String> {
         .filter_map(parse_string)
         .collect()
 }
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_u64(value: &str) -> Option<u64> {
+    value.trim().parse().ok()
+}
+
 fn version_cmp(a: &str, b: &str) -> Ordering {
     let mut left = a.split('.');
     let mut right = b.split('.');
