@@ -6,6 +6,7 @@
 //! to their owning crates.
 
 mod access;
+mod boot_attempt;
 mod id;
 mod profile;
 mod runtime;
@@ -13,6 +14,7 @@ mod user;
 mod version;
 
 pub use access::ResourceAccess;
+pub use boot_attempt::{BootAttemptProgress, BootStage};
 pub use id::{BundleId, ComponentId};
 pub use profile::{ProfileError, RuntimeProfile};
 pub use runtime::{ParseRuntimeKindError, RuntimeKind, RuntimeSpec};
