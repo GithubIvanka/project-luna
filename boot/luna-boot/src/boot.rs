@@ -107,7 +107,14 @@ pub fn boot_flow() -> BootResult<()> {
     // target's manifest/image with another target's prepared kernel.
     let mut candidates = Vec::new();
     candidates.push(selected.clone());
-    if matches!(selection.action, BootMenuAction::Continue) {
+
+    if selection.action == BootMenuAction::Recovery {
+        if let Some(factory) = catalog.factory.as_ref()
+            && !same_target(&selected, factory)
+        {
+            candidates.push(factory.clone());
+        }
+    } else if matches!(selection.action, BootMenuAction::Continue) {
         if let Some(reference) = catalog.boot_state.fallback.as_ref()
             && let Some(fallback) = catalog.target_for_ref(reference)
             && !same_target(&selected, &fallback)
