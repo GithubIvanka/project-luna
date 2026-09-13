@@ -140,7 +140,7 @@ REQUIRED_SECTORS=$((DATA_END + 34))
 REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
 [ "$IMAGE_SIZE_MIB" -ge "$REQUIRED_MIB" ] || { echo "image size ${IMAGE_SIZE_MIB} MiB is too small; need at least ${REQUIRED_MIB} MiB" >&2; exit 1; }
 
-mkdir -p "$SYSTEM_PARTITION_ROOT/cores" "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
+mkdir -p "$SYSTEM_PARTITION_ROOT/config" "$SYSTEM_PARTITION_ROOT/cores" "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.squashfs"
 cp "$LUNA_INIT" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
 chmod 0755 "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
@@ -175,16 +175,38 @@ compatible = ["$LUNA_INIT_VERSION"]
 EOF
 cp "$MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.toml"
 
+cat > "$SYSTEM_PARTITION_ROOT/config/luna-data.toml" <<'EOF'
+[data]
+preferred_disk_guid = ""
+preferred_partition_guid = ""
+EOF
+cat > "$SYSTEM_PARTITION_ROOT/config/boot-state.toml" <<EOF
+[state]
+format = 1
+generation = 1
+
+[targets.current]
+image = "$LUNA_VERSION"
+init = "$LUNA_INIT_VERSION"
+kernel = "$KERNEL_VERSION"
+
+[boot]
+attempt_id = 0
+previous_attempt_failed = false
+fallback_depth = 0
+failure_code = 0
+EOF
+
 truncate -s "${DATA_SIZE_MIB}M" "$OUT/luna-data.img"
 mkfs.ext4 -q -F -L LUNA-DATA -d "$DATA_ROOT" "$OUT/luna-data.img" >/dev/null
 truncate -s "${SYSTEM_SIZE_MIB}M" "$OUT/luna-system.img"
-mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$SYSTEM_PARTITION_ROOT" "$OUT/luna-system.img" >/dev/null
+mkfs.ext4 -q -F -L LUNA-SYS -d "$SYSTEM_PARTITION_ROOT" "$OUT/luna-system.img" >/dev/null
 
 truncate -s "${IMAGE_SIZE_MIB}M" "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
 sgdisk -n "1:2048:$((2048 + 128 * 2048 - 1))" -t 1:ef00 -c 1:EFI \
-       -n "2:${SYSTEM_START}:${SYSTEM_END}" -t 2:8300 -c 2:SYSTEM \
-       -n "3:${DATA_START}:${DATA_END}" -t 3:8300 -c 3:DATA "$OUT/luna-pc.img" >/dev/null
+       -n "2:${SYSTEM_START}:${SYSTEM_END}" -t 2:8300 -c 2:LUNA-SYS \
+       -n "3:${DATA_START}:${DATA_END}" -t 3:8300 -c 3:LUNA-DATA "$OUT/luna-pc.img" >/dev/null
 truncate -s 128M "$OUT/luna-efi.img"
 mkfs.fat -F 32 "$OUT/luna-efi.img" >/dev/null
 mmd -i "$OUT/luna-efi.img" ::/EFI; mmd -i "$OUT/luna-efi.img" ::/EFI/LUNA; mmd -i "$OUT/luna-efi.img" ::/EFI/BOOT
@@ -205,7 +227,7 @@ system_libc=musl
 bootloader=luna-boot.efi
 uefi_fallback=EFI/BOOT/BOOTX64.EFI
 kernel_version=$KERNEL_VERSION
-partitions=EFI:128MiB,SYSTEM:${SYSTEM_SIZE_MIB}MiB,DATA:${DATA_SIZE_MIB}MiB
+partitions=EFI:128MiB,LUNA-SYS:${SYSTEM_SIZE_MIB}MiB,LUNA-DATA:${DATA_SIZE_MIB}MiB
 image_size=${IMAGE_SIZE_MIB}MiB
 boot_ui=graphical
 login_ui=/usr/bin/luna-login
