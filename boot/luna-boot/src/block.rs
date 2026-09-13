@@ -129,6 +129,10 @@ impl UefiBlockDevice {
         })
     }
 
+    pub fn block_count(&self) -> u64 {
+        self.block_count
+    }
+
     fn read_chunk(&mut self, lba: u64, dst: &mut [u8]) -> BootResult<()> {
         #[repr(align(4096))]
         struct Aligned([u8; IO_CHUNK]);
