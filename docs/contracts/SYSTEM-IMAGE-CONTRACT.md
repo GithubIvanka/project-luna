@@ -1,59 +1,76 @@
 # Контракт System Image
 
-**Статус:** черновик для Phase 0; детали materialization/hydration уточняются отдельной реализацией.  
+**Статус:** принят как базовый контракт; детали materialization/hydration уточняются отдельной реализацией.  
 **Scope:** System Image → `luna-init` → running RAM-backed system
 
 ## 1. Назначение
 
-Этот контракт определяет границу между версионированным System Image, его manifest-файлом, загрузчиком, `luna-init`, runtime materialization и подсистемами обновления.
+Этот контракт определяет границу между версионированными System Images, manifest-файлами, загрузчиком, `luna-init`, DATA abstraction, Recovery Environment и подсистемами обновления.
 
-## 2. Инвариант формата
+## 2. Обычный System Image
 
 System Image — непосредственно файловая система SquashFS.
 
 Каноническая пара:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.squashfs
-SYSTEM/images/luna-X.Y.Z.toml
+LUNA-SYS/images/luna-X.Y.Z.squashfs
+LUNA-SYS/images/luna-X.Y.Z.toml
 ```
 
-`.squashfs` не является `.lbp`, контейнером или архивом, внутри которого лежит SquashFS.
+`.squashfs` является самим filesystem payload.
 
-## 3. Идентичность
+## 3. Recovery System Image
+
+Recovery имеет отдельную область на `LUNA-SYS`:
+
+```text
+LUNA-SYS/recovery/
+├── recovery-X.Y.Z.squashfs
+├── recovery-X.Y.Z.toml
+└── ...
+```
+
+Recovery System Image — отдельный версионируемый SquashFS payload. Его lifecycle независим от обычных System Images и Factory target.
+
+Recovery manifest описывает собственную идентичность и совместимость с `luna-init`. Manifest выбранного `luna-init` определяет совместимые kernels.
+
+```text
+Recovery System Image
+        ↓ compatible luna-init
+luna-init
+        ↓ compatible kernel
+Kernel
+```
+
+Recovery System Image может обновляться независимо, например для добавления новых средств диагностики, восстановления и системного обслуживания.
+
+## 4. Идентичность
 
 Для обнаруженного образа должны быть однозначно определимы:
 
-- имя семейства системы;
+- имя семейства или Recovery role;
 - версия `X.Y.Z`;
 - архитектура;
 - путь к payload;
 - путь к соответствующему manifest.
 
-Несоответствие имени, версии или manifest должно приводить к отказу от использования образа.
+Несоответствие имени, версии или manifest приводит к отказу от использования образа.
 
-## 4. Manifest
+## 5. Manifest
 
-Manifest является источником метаданных именно для своего образа. Минимальный набор семантик:
+Manifest является источником метаданных именно для своего payload. Минимальный набор семантик:
 
 - идентичность и версия;
 - архитектура;
 - формат `squashfs`;
-- совместимые `luna-init` cores;
+- совместимые `luna-init` версии;
 - параметры, необходимые для передачи управления ядру;
 - сведения о целостности, если они определены политикой доверия.
 
-Совместимость System Image задаётся односторонне:
+Manifest System Image не определяет kernels напрямую. Совместимость kernel является ответственностью manifest выбранного `luna-init`.
 
-```text
-System Image manifest
-        ↓
-compatible luna-init versions
-```
-
-Manifest System Image **не** определяет совместимые kernels напрямую. Совместимость kernel является ответственностью manifest выбранного `luna-init` core.
-
-Пример:
+Пример обычного Image manifest:
 
 ```toml
 [image]
@@ -68,25 +85,11 @@ arch = "x86_64"
 compatible = ["2.0.0", "2.1.0"]
 ```
 
-Точная TOML-схема ещё не принята. До её утверждения поля нельзя объявлять обязательными только из-за удобства реализации.
+Точная TOML-схема будет отдельным контрактом. Реализация загрузчика не должна расширять смысл полей молча.
 
-## 5. Целостность
+## 6. Boot target
 
-До активации необходимо проверить как минимум структурную корректность SquashFS и внутреннюю согласованность manifest. Проверка подлинности и доверия должна определяться отдельным security/update-контрактом.
-
-## 6. Связь с `luna-init`
-
-System Image и `luna-init` — независимые сущности. Image manifest задаёт явную область совместимости init core.
-
-```text
-System Image A ── compatible ── luna-init 2.0
-System Image A ── compatible ── luna-init 2.1
-System Image B ── compatible ── luna-init 2.1
-```
-
-Выбор init без проверки image compatibility запрещён.
-
-После выбора совместимого init его manifest определяет допустимые kernels. Поэтому итоговая boot-комбинация строится по двум последовательным отношениям:
+Окончательная загрузочная комбинация строится как атомарный target:
 
 ```text
 System Image
@@ -96,69 +99,140 @@ luna-init
 Kernel
 ```
 
-## 7. Жизненный цикл
+Recovery target имеет тот же принцип и дополнительно содержит ссылку на Recovery DATA Image.
+
+Нельзя заменять один элемент target на произвольный элемент другого target без повторной проверки полной совместимости.
+
+## 7. DATA abstraction
+
+System Image не содержит пользовательский физический DATA.
+
+Luna использует единую DATA abstraction с двумя provider-типами:
 
 ```text
-обнаружение
-  ↓
-чтение manifest
-  ↓
-структурная проверка
-  ↓
-проверка целостности/доверия
-  ↓
-доступен для выбора
-  ↓
-активация через update-manager
-  ↓
-подтверждение здоровья
-  ↓
-допускается в retention policy
+DATA
+├── PhysicalData
+│   └── physical LUNA-DATA
+│
+└── VirtualData
+    └── Recovery DATA Image → RAM
 ```
 
-Удаление active, factory или необходимого fallback-образа запрещено до прохождения materialization/lifetime checks.
+Для `current` и `factory` DATA provider — физический `LUNA-DATA`.
 
-Удаление System Image не должно автоматически удалять `luna-init` core. Init core может обслуживать несколько образов.
+Для `recovery` `luna-init` сначала материализует указанный Recovery DATA Image в RAM и представляет получившуюся среду как DATA.
 
-## 8. Загрузка и материализация
+Остальная система использует одну и ту же логическую DATA interface и не должна различать normal и Recovery только из-за способа хранения DATA.
 
-`luna-boot.efi` выбирает образ и передаёт kernel контекст. Он не обязан монтировать SquashFS как Linux `/`.
+## 8. Recovery DATA Image
 
-`luna-init` использует выбранный image как **immutable source** для построения рабочего окружения:
+Recovery DATA Image — отдельный versioned artifact, связанный с Recovery target.
+
+Он имеет логическую структуру DATA:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.squashfs
-          │
-          ▼
-      luna-init
-          │
-          ├── RAM: boot-critical system base
-          ├── RAM: runtime directories and pseudo-filesystems
-          └── lazy hydration of additional immutable system content
-                       ↓
-               RAM-backed logical `/`
+Recovery DATA Image
+├── system/
+│   ├── apps/
+│   ├── drivers/
+│   ├── libs/
+│   ├── config/
+│   └── ...
+├── users/
+│   └── recovery/
+│       ├── home/
+│       ├── data/
+│       └── config/
+├── data/
+└── cache/
 ```
 
-SquashFS **не является долгосрочным backing store для `/`**.
+Recovery DATA Image содержит программы, libraries, configuration и временное пользовательское окружение Recovery.
 
-На раннем этапе в RAM материализуется минимальный системный base, необходимый для запуска `luna-system-runtime` и базовой работоспособности. Псевдофайловые системы и volatile directories (`/dev`, `/proc`, `/sys`, `/run`, `/tmp`) создаются отдельно в runtime memory.
+Физический `LUNA-DATA` не является источником этого окружения и не требуется для запуска Recovery.
 
-Остальной immutable system content может материализоваться лениво по требованию. Lazy hydration должна приводить к обычным объектам logical root и не должна раскрывать приложению физические `SYSTEM/...` paths.
+## 9. Работа Recovery с физическим DATA
 
-Уже материализованный content не должен становиться недоступным только из-за удаления исходного image. Перед удалением active image update/retention layer обязан подтвердить, что все ещё необходимые runtime resources либо уже materialized в RAM/другом валидном источнике, либо больше не требуются.
+После создания RAM-backed DATA Recovery может работать с физическими DATA-кандидатами как с отдельными системными объектами.
 
-Таким образом рабочая система не является mounted SquashFS root: System Image — источник первоначальной материализации и последующей hydration, а не runtime root.
+Recovery utilities могут:
 
-## 9. Независимость от DATA
+- сканировать физические диски;
+- находить и валидировать `LUNA-DATA`;
+- показывать несколько кандидатов;
+- выбирать нужный DATA;
+- обновлять binding configuration через контролируемый системный механизм;
+- диагностировать и восстанавливать DATA.
 
-Пользовательские данные, изменяемое системное состояние, данные приложений и cache не входят в System Image.
+Recovery DATA discovery не использует `luna-data.toml` для определения того, откуда взять собственную DATA-среду.
 
-## 10. Открытые вопросы
+## 10. Загрузка и материализация
 
-- точная схема manifest;
-- точное описание version compatibility для `luna-init`;
-- точный набор boot-critical RAM base;
-- формат и владелец lazy-hydration cache/index;
-- механизм materialization без прямого раскрытия SYSTEM приложению;
-- проверка "image no longer required" перед retention removal;
-- точный переход от early userspace к `luna-system-runtime`.
+`luna-boot.efi` выбирает target и передаёт kernel контекст. Сам загрузчик не является владельцем Linux filesystem materialization.
+
+`luna-init` использует выбранный System Image как immutable source для построения рабочего окружения:
+
+```text
+System Image
+     │
+     ▼
+luna-init
+     │
+     ├── RAM: boot-critical system base
+     ├── RAM: runtime directories and pseudo-filesystems
+     └── lazy hydration of additional immutable system content
+                     ↓
+             RAM-backed logical `/`
+```
+
+Для Recovery дополнительно:
+
+```text
+Recovery DATA Image
+        │
+        ▼
+   materialization
+        │
+        ▼
+ VirtualData in RAM
+```
+
+VirtualData становится обычным DATA provider для дальнейшего запуска системы.
+
+## 11. Независимость lifecycle
+
+Обычные System Images, Factory target, Recovery System Image и Recovery DATA Image имеют отдельные lifecycle и retention rules.
+
+Обновление Recovery может происходить независимо от обновления обычного System Image.
+
+Recovery DATA Image также может обновляться независимо для расширения диагностического и восстановительного инструментария.
+
+## 12. Взаимодействие с System State
+
+Persistent System State содержит:
+
+```text
+current
+├── image
+├── init
+└── kernel
+
+factory
+├── image
+├── init
+└── kernel
+
+recovery
+├── image
+├── init
+├── kernel
+└── data
+```
+
+`recovery.data` идентифицирует Recovery DATA Image, которую необходимо материализовать в RAM при запуске Recovery.
+
+## 13. Целостность
+
+До активации необходимо проверить структурную корректность payload и внутреннюю согласованность manifest. Проверка подлинности и доверия определяется отдельным security/update-контрактом.
+
+Каждый boot target обязан сохранять идентичность конкретных Image, init и kernel, а Recovery target — также конкретного Recovery DATA Image.
