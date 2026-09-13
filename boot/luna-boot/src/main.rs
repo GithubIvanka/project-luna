@@ -7,25 +7,6 @@ use uefi::boot::open_protocol_exclusive;
 use uefi::prelude::*;
 use uefi::proto::console::text::Output;
 
-mod block;
-mod boot;
-mod boot_key;
-mod boot_params;
-mod discovery;
-mod e820;
-mod error;
-mod ext4;
-mod external;
-mod filesystem;
-mod gpt;
-mod handoff;
-mod kernel;
-mod linux;
-mod menu;
-mod paging;
-mod splash;
-mod target;
-
 #[entry]
 fn efi_main() -> Status {
     uefi::helpers::init().expect("failed to initialize UEFI services");
@@ -44,3 +25,23 @@ fn efi_main() -> Status {
         }
     }
 }
+
+mod block;
+mod boot;
+mod boot_attempt;
+mod boot_key;
+mod boot_params;
+mod discovery;
+mod e820;
+mod error;
+mod ext4;
+mod external;
+mod filesystem;
+mod gpt;
+mod handoff;
+mod kernel;
+mod linux;
+mod menu;
+mod paging;
+mod splash;
+mod target;
