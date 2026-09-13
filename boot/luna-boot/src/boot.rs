@@ -7,9 +7,7 @@ use uefi::mem::memory_map::MemoryMapOwned;
 use uefi::proto::console::text::Input;
 use uefi::runtime::{self, ResetType};
 
-use luna_common::{BootAttemptProgress, BootStage};
-
-use crate::boot_attempt::{BootAttempt, BootAttemptMarker};
+use crate::boot_attempt::{BootAttempt, BootAttemptMarker, BootStage};
 use crate::boot_key::boot_menu_requested;
 use crate::discovery::BootCatalog;
 use crate::e820::E820Extension;
@@ -198,7 +196,8 @@ pub fn boot_flow() -> BootResult<()> {
     };
     let boot_state = BootState {
         fallback_depth: catalog.boot_state.fallback_depth,
-        previous_attempt_failed: previous_attempt.is_some() || catalog.boot_state.previous_attempt_failed,
+        previous_attempt_failed: previous_attempt.is_some()
+            || catalog.boot_state.previous_attempt_failed,
         previous_attempt_id: previous_attempt
             .map(|value| value.attempt_id)
             .unwrap_or(catalog.boot_state.attempt_id),
