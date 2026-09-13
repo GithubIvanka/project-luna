@@ -236,3 +236,7 @@ Retention is evaluated independently for each artifact, subject to the requireme
 ## 15. Implementation rule
 
 The old transitional implementation must not be extended. Any remaining code that assumes an initramfs, BusyBox bootstrap root, `pivot_root`, `switch_root`, a second `/sbin/init`, or System Image ownership of `luna-init` belongs to the obsolete implementation and should be removed as the direct-init path is completed.
+
+## Bootstrap critical resources
+
+The selected System Image manifest declares `[bootstrap].critical`. `luna-init` validates these paths before starting `luna-system-runtime` and fails closed on malformed, unsafe, missing, or non-regular resources.

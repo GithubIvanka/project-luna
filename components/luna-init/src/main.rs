@@ -9,6 +9,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::FromRawFd;
 use std::time::Duration;
 
+#[allow(dead_code)]
+mod bootstrap;
+
 const HANDOFF_MAGIC: &[u8; 8] = b"LUNAHD01";
 const HANDOFF_MAJOR: u16 = 1;
 const HANDOFF_HEADER_SIZE: usize = 84;
@@ -179,8 +182,7 @@ fn validate_checksum(bytes: &mut [u8]) -> Result<(), String> {
     let expected = bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + CHECKSUM_SIZE].to_vec();
     bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + CHECKSUM_SIZE].fill(0);
     let digest = blake3::hash(bytes);
-    bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + CHECKSUM_SIZE]
-        .copy_from_slice(&expected);
+    bytes[CHECKSUM_OFFSET..CHECKSUM_OFFSET + CHECKSUM_SIZE].copy_from_slice(&expected);
 
     if digest.as_bytes() != expected.as_slice() {
         return Err("handoff BLAKE3 checksum mismatch".to_owned());
@@ -196,7 +198,9 @@ fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
         .get(offset..end)
         .ok_or_else(|| "u16 read outside handoff".to_owned())?;
     Ok(u16::from_le_bytes(
-        slice.try_into().map_err(|_| "invalid u16 slice".to_owned())?,
+        slice
+            .try_into()
+            .map_err(|_| "invalid u16 slice".to_owned())?,
     ))
 }
 
@@ -208,7 +212,9 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
         .get(offset..end)
         .ok_or_else(|| "u32 read outside handoff".to_owned())?;
     Ok(u32::from_le_bytes(
-        slice.try_into().map_err(|_| "invalid u32 slice".to_owned())?,
+        slice
+            .try_into()
+            .map_err(|_| "invalid u32 slice".to_owned())?,
     ))
 }
 
@@ -220,7 +226,9 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, String> {
         .get(offset..end)
         .ok_or_else(|| "u64 read outside handoff".to_owned())?;
     Ok(u64::from_le_bytes(
-        slice.try_into().map_err(|_| "invalid u64 slice".to_owned())?,
+        slice
+            .try_into()
+            .map_err(|_| "invalid u64 slice".to_owned())?,
     ))
 }
 

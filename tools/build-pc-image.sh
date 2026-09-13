@@ -172,6 +172,9 @@ arch = "x86_64"
 
 [init]
 compatible = ["$LUNA_INIT_VERSION"]
+
+[bootstrap]
+critical = ["/sbin/luna-system-runtime"]
 EOF
 cp "$MANIFEST_TMP" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.toml"
 
