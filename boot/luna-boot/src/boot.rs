@@ -12,7 +12,7 @@ use crate::discovery::BootCatalog;
 use crate::e820::E820Extension;
 use crate::error::{BootError, BootResult};
 use crate::external::boot_first_external;
-use crate::filesystem::SystemFilesystem;
+use crate::filesystem::{DataStatus, SystemFilesystem};
 use crate::handoff::{
     BootMode, BootState, KernelHandoff, LunaHandoff, PreparedIdentity, current_stack_pointer,
     transition_entry_address,
@@ -39,7 +39,7 @@ pub fn boot_flow() -> BootResult<()> {
         None => BootCatalog::default(),
     };
 
-    let selection = if menu_requested {
+    let mut selection = if menu_requested {
         let stdout_handle = boot::get_handle_for_protocol::<uefi::proto::console::text::Output>()?;
         let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
         let stdout = open_protocol_exclusive(stdout_handle)?;
@@ -63,6 +63,22 @@ pub fn boot_flow() -> BootResult<()> {
     }
 
     let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
+
+    let data_missing = !matches!(filesystem.data_status(), DataStatus::Found);
+    if data_missing
+        && matches!(
+            selection.action,
+            BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot
+        )
+    {
+        log::warn!(
+            "Luna: LUNA-DATA is unavailable; entering Recovery Environment"
+        );
+        selection = BootSelection {
+            action: BootMenuAction::Recovery,
+            target_index: catalog.default_target,
+        };
+    }
 
     let selected = match selection.action {
         BootMenuAction::Recovery => catalog
@@ -93,10 +109,22 @@ pub fn boot_flow() -> BootResult<()> {
     // target's manifest/image with another target's prepared kernel.
     let mut candidates = Vec::new();
     candidates.push(selected.clone());
-    if matches!(
-        selection.action,
-        BootMenuAction::Continue | BootMenuAction::SystemImage | BootMenuAction::VerboseBoot
-    ) {
+    if matches!(selection.action, BootMenuAction::Continue) {
+        if let Some(reference) = catalog.boot_state.fallback.as_ref()
+            && let Some(fallback) = catalog.target_for_ref(reference)
+            && !same_target(&selected, &fallback)
+        {
+            candidates.push(fallback);
+        }
+        candidates.extend(
+            catalog
+                .targets
+                .iter()
+                .skip(selection.target_index + 1)
+                .cloned(),
+        );
+    } else if matches!(selection.action, BootMenuAction::SystemImage | BootMenuAction::VerboseBoot)
+    {
         candidates.extend(
             catalog
                 .targets
@@ -147,10 +175,16 @@ pub fn boot_flow() -> BootResult<()> {
     let kernel_identity = PreparedIdentity {
         kernel_digest: prepared.kernel_digest,
     };
+    let boot_state = BootState {
+        fallback_depth: catalog.boot_state.fallback_depth,
+        previous_attempt_failed: catalog.boot_state.previous_attempt_failed,
+        previous_attempt_id: catalog.boot_state.attempt_id,
+        failure_code: catalog.boot_state.failure_code,
+    };
     let luna_handoff = LunaHandoff::build(
         &target,
         mode,
-        BootState::default(),
+        boot_state,
         filesystem.system_partition(),
         filesystem.data_partition(),
         &manifest_bytes,
@@ -183,6 +217,12 @@ pub fn boot_flow() -> BootResult<()> {
         e820_ext,
         reserved,
     )
+}
+
+fn same_target(left: &crate::target::BootTarget, right: &crate::target::BootTarget) -> bool {
+    left.system_image_path == right.system_image_path
+        && left.init_path == right.init_path
+        && left.kernel_path == right.kernel_path
 }
 
 fn enter_kernel_after_exit_boot_services(
