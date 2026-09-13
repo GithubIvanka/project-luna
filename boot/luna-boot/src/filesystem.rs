@@ -1,6 +1,6 @@
 //! Storage discovery for Luna's ext4 LUNA-SYS partition.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use uefi::Handle;
 use uefi::boot;
 use uefi::proto::media::block::BlockIO;
