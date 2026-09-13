@@ -27,6 +27,8 @@ pub const RECORD_LUNA_INIT_IMAGE: u16 = 5;
 pub const RECORD_BOOT_MODE: u16 = 6;
 pub const RECORD_BOOT_STATE: u16 = 7;
 
+const PARTITION_FLAG_ABSENT: u16 = 1;
+
 #[derive(Clone, Copy)]
 pub enum BootMode {
     Normal = 0,
@@ -61,7 +63,7 @@ impl LunaHandoff {
         mode: BootMode,
         state: BootState,
         system: &Partition,
-        data: &Partition,
+        data: Option<&Partition>,
         manifest_bytes: &[u8],
         image_digest: &[u8; 32],
         kernel: &PreparedIdentity,
@@ -73,7 +75,7 @@ impl LunaHandoff {
 
         let mut bytes = Vec::with_capacity(1024);
         bytes.resize(HEADER_ALIGNED_SIZE, 0);
-        push_partition_record(&mut bytes, RECORD_SYSTEM_PARTITION, system)?;
+        push_partition_record(&mut bytes, RECORD_SYSTEM_PARTITION, Some(system))?;
         push_partition_record(&mut bytes, RECORD_DATA_PARTITION, data)?;
         push_system_image_record(&mut bytes, target, &manifest_identity, image_digest)?;
         push_kernel_record(&mut bytes, target, kernel)?;
@@ -155,18 +157,27 @@ impl PreparedIdentity {
     }
 }
 
-fn push_partition_record(bytes: &mut Vec<u8>, ty: u16, partition: &Partition) -> BootResult<()> {
-    let label = partition.label.as_bytes();
+fn push_partition_record(
+    bytes: &mut Vec<u8>,
+    ty: u16,
+    partition: Option<&Partition>,
+) -> BootResult<()> {
+    let (flags, disk_guid, partition_guid, label) = match partition {
+        Some(partition) => (0, partition.disk_guid, partition.partition_guid, partition.label.as_bytes()),
+        None if ty == RECORD_DATA_PARTITION => (PARTITION_FLAG_ABSENT, [0u8; 16], [0u8; 16], &[][..]),
+        None => return Err(BootError::InvalidFilesystem),
+    };
+
     if label.len() > u16::MAX as usize {
         return Err(BootError::Unsupported("partition label is too long"));
     }
     let mut payload = Vec::with_capacity(36 + label.len());
-    payload.extend_from_slice(&partition.disk_guid);
-    payload.extend_from_slice(&partition.partition_guid);
+    payload.extend_from_slice(&disk_guid);
+    payload.extend_from_slice(&partition_guid);
     payload.extend_from_slice(&(label.len() as u16).to_le_bytes());
     payload.extend_from_slice(&0u16.to_le_bytes());
     payload.extend_from_slice(label);
-    push_record(bytes, ty, 0, &payload)
+    push_record(bytes, ty, flags, &payload)
 }
 
 fn push_system_image_record(
