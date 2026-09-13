@@ -81,6 +81,51 @@ pub trait PolicyAuthority {
     fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError>;
 }
 
+/// Supplies the complete request set for one security decision.
+pub trait AuthorizationSource {
+    fn authorization_requests(&self) -> Vec<AuthorizationRequest>;
+}
+
+/// A value sealed by `luna-security` after every request was allowed.
+#[derive(Clone, Debug)]
+pub struct Authorized<T> {
+    value: T,
+}
+
+impl<T> Authorized<T> {
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn into_value(self) -> T {
+        self.value
+    }
+}
+
+/// The only constructor for `Authorized<T>`.
+pub fn authorize<T: AuthorizationSource>(
+    policy: &dyn PolicyAuthority,
+    value: T,
+) -> Result<Authorized<T>, SecurityError> {
+    for request in value.authorization_requests() {
+        match policy.authorize(&request)? {
+            Decision::Allow => {}
+            Decision::Deny => return Err(SecurityError::new(format!("denied: {request:?}"))),
+            Decision::Ask => {
+                return Err(SecurityError::new(
+                    "authorization requires explicit user confirmation",
+                ));
+            }
+            Decision::Constrained { constraints } => {
+                return Err(SecurityError::new(format!(
+                    "constraint enforcement is not available: {constraints:?}"
+                )));
+            }
+        }
+    }
+    Ok(Authorized { value })
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StaticPolicyAuthority {
     grants: BTreeSet<(Principal, Resource, Permission)>,

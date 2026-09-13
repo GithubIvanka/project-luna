@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use luna_app_runtime::{ApplicationPlan, ExecutableSpec, PlanError};
+use luna_app_runtime::{ApplicationPlan, ExecutableSpec, authorize_application_plan};
 use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource};
 use luna_common::{BundleId, ResourceAccess, RuntimeSpec, UserId, Version};
 use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
@@ -81,9 +81,9 @@ fn runtime_authorization_precedes_explicit_resource_requests() {
     };
     let policy = RecordingPolicy::new(vec![Decision::Allow, Decision::Allow, Decision::Allow]);
 
-    let authorized = plan(vec![explicit.clone()]).authorize(&policy).unwrap();
+    let authorized = authorize_application_plan(plan(vec![explicit.clone()]), &policy).unwrap();
 
-    assert_eq!(authorized.application().as_str(), "example.app");
+    assert_eq!(authorized.value().application().as_str(), "example.app");
     let seen = policy.seen.borrow();
     assert_eq!(seen.len(), 3);
     assert_eq!(
@@ -121,9 +121,9 @@ fn explicit_denial_stops_authorization_pipeline() {
         Decision::Deny,
     ]);
 
-    let result = plan(vec![first.clone(), second]).authorize(&policy);
+    let result = authorize_application_plan(plan(vec![first.clone(), second]), &policy);
 
-    assert!(matches!(result, Err(PlanError::Security(_))));
+    assert!(result.is_err());
     let seen = policy.seen.borrow();
     assert_eq!(seen.len(), 4);
     assert_eq!(

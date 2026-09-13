@@ -6,13 +6,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
-use luna_bundle::{BundleManifest, validate_manifest};
+use luna_bundle::validate_manifest;
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
-use luna_namespace::{LinuxMountNamespace, LogicalRoot, NamespaceError};
+use luna_namespace::NamespaceError;
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
-use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource,
-};
 use luna_system_runtime::{ProcessError, ProcessId, ProcessState, SystemRuntimeService};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -58,6 +55,25 @@ impl ProcessExit {
             }
         }
         Self::UnknownFailure
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CleanupOutcome {
+    Succeeded,
+    Failed { message: String },
+}
+
+impl CleanupOutcome {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Succeeded)
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Succeeded => None,
+            Self::Failed { message } => Some(message),
+        }
     }
 }
 
@@ -139,6 +155,7 @@ pub struct ApplicationInstance {
     state: InstanceState,
     process: Option<ApplicationProcess>,
     failure: Option<InstanceFailure>,
+    cleanup: Option<CleanupOutcome>,
 }
 impl ApplicationInstance {
     pub fn new(
@@ -165,6 +182,7 @@ impl ApplicationInstance {
             state: InstanceState::Created,
             process: None,
             failure: None,
+            cleanup: None,
         }
     }
     pub const fn id(&self) -> ApplicationInstanceId {
@@ -202,6 +220,12 @@ impl ApplicationInstance {
     }
     pub fn failure(&self) -> Option<&InstanceFailure> {
         self.failure.as_ref()
+    }
+    pub fn cleanup(&self) -> Option<&CleanupOutcome> {
+        self.cleanup.as_ref()
+    }
+    pub(crate) fn record_cleanup(&mut self, outcome: CleanupOutcome) {
+        self.cleanup = Some(outcome);
     }
     pub const fn is_terminal(&self) -> bool {
         matches!(
@@ -241,7 +265,6 @@ impl ApplicationInstance {
                 | (InstanceState::Running, InstanceState::Crashed)
                 | (InstanceState::Running, InstanceState::Failed)
                 | (InstanceState::Stopping, InstanceState::Stopped)
-                | (InstanceState::Stopping, InstanceState::Crashed)
                 | (InstanceState::Stopping, InstanceState::Failed)
         );
         if !valid {
@@ -262,10 +285,7 @@ impl ApplicationInstance {
         self.failure = Some(InstanceFailure::new(stage, message));
         Ok(())
     }
-    pub(crate) fn record_process_exit(
-        &mut self,
-        status: ExitStatus,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) fn record_process_exit(&mut self, status: ExitStatus) -> Result<(), RuntimeError> {
         match self.process {
             None => return Err(RuntimeError::NoProcess),
             Some(process) if process.exit.is_some() => {
@@ -283,10 +303,7 @@ impl ApplicationInstance {
         self.process.as_mut().expect("process checked above").exit = Some(outcome);
         Ok(())
     }
-    pub(crate) fn record_requested_stop(
-        &mut self,
-        status: ExitStatus,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) fn record_requested_stop(&mut self, status: ExitStatus) -> Result<(), RuntimeError> {
         match self.process {
             None => return Err(RuntimeError::NoProcess),
             Some(process) if process.exit.is_some() => {
@@ -333,7 +350,10 @@ impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidTransition { from, to } => {
-                write!(f, "invalid application instance transition from {from:?} to {to:?}")
+                write!(
+                    f,
+                    "invalid application instance transition from {from:?} to {to:?}"
+                )
             }
             Self::InvalidBundle(e) => write!(f, "invalid bundle: {e}"),
             Self::Mapping(e) => write!(f, "mapping error: {e}"),
@@ -386,34 +406,6 @@ pub trait ApplicationRuntime {
         plan: application_plan::AuthorizedApplicationPlan,
         session: &UserSession,
     ) -> Result<ApplicationInstance, Self::Error>;
-    fn authorize(
-        &self,
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<Decision, Self::Error>;
-}
-
-pub struct NamespacePreparation<'a> {
-    pub namespace: &'a LinuxMountNamespace,
-    pub root: &'a Path,
-    pub base_root: &'a Path,
-    pub mapping: &'a MappingTable,
-    pub policy: &'a dyn PolicyAuthority,
-    pub requests: &'a [AuthorizationRequest],
-    pub runtime: RuntimeSpec,
-}
-#[derive(Debug)]
-pub struct PreparedApplicationNamespace {
-    instance: ApplicationInstanceId,
-    root: LogicalRoot,
-}
-impl PreparedApplicationNamespace {
-    pub fn instance(&self) -> ApplicationInstanceId {
-        self.instance
-    }
-    pub fn root(&self) -> &LogicalRoot {
-        &self.root
-    }
 }
 
 #[derive(Default)]
@@ -464,55 +456,6 @@ impl InMemoryApplicationRuntime {
     pub(crate) fn insert(&mut self, instance: ApplicationInstance) {
         self.instances.insert(instance.id(), instance);
     }
-    pub fn prepare_authorized_namespace_for_session(
-        &self,
-        instance: ApplicationInstanceId,
-        preparation: NamespacePreparation<'_>,
-    ) -> Result<PreparedApplicationNamespace, RuntimeError> {
-        let stored = self
-            .instances
-            .get(&instance)
-            .ok_or(RuntimeError::InstanceNotFound)?;
-        if stored.runtime() != preparation.runtime {
-            return Err(RuntimeError::RuntimeMismatch {
-                mapping: preparation.mapping.runtime(),
-                requested: preparation.runtime.kind(),
-            });
-        }
-        Self::validate_mapping_only(preparation.mapping, preparation.runtime)?;
-        let runtime_request = AuthorizationRequest {
-            principal: Principal::Application(stored.application().clone()),
-            resource: Resource::Runtime(preparation.runtime.kind()),
-            permission: Permission::Use,
-        };
-        Self::require_allow(preparation.policy, &runtime_request)?;
-        for request in preparation.requests {
-            Self::require_allow(preparation.policy, request)?;
-        }
-        let root = preparation
-            .namespace
-            .materialize_logical_root(preparation.root, preparation.base_root, preparation.mapping)
-            .map_err(RuntimeError::Namespace)?;
-        Ok(PreparedApplicationNamespace { instance, root })
-    }
-    fn require_allow(
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<(), RuntimeError> {
-        match policy
-            .authorize(request)
-            .map_err(|e| RuntimeError::Security(e.to_string()))?
-        {
-            Decision::Allow => Ok(()),
-            Decision::Deny => Err(RuntimeError::Security(format!("denied: {request:?}"))),
-            Decision::Ask => Err(RuntimeError::Security(
-                "authorization requires user confirmation".into(),
-            )),
-            Decision::Constrained { constraints } => Err(RuntimeError::Security(format!(
-                "constraint enforcement not supplied: {constraints:?}"
-            ))),
-        }
-    }
     pub fn instance(
         &self,
         id: ApplicationInstanceId,
@@ -551,35 +494,30 @@ impl ApplicationRuntime for InMemoryApplicationRuntime {
         plan: application_plan::AuthorizedApplicationPlan,
         session: &UserSession,
     ) -> Result<ApplicationInstance, Self::Error> {
-        Self::validate_session(plan.session(), session)?;
-        Self::validate_mapping_only(plan.mapping(), plan.runtime())?;
-        validate_manifest(plan.manifest())
+        Self::validate_session(plan.value().session(), session)?;
+        Self::validate_mapping_only(plan.value().mapping(), plan.value().runtime())?;
+        validate_manifest(plan.value().manifest())
             .map_err(|e| RuntimeError::InvalidBundle(e.to_string()))?;
-        for resource in plan.manifest().resources() {
-            let logical = LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
-            plan.mapping().resolve(&logical).map_err(RuntimeError::Mapping)?;
+        for resource in plan.value().manifest().resources() {
+            let logical =
+                LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
+            plan.value()
+                .mapping()
+                .resolve(&logical)
+                .map_err(RuntimeError::Mapping)?;
         }
         let id = self.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
             id,
-            plan.application().clone(),
-            plan.version(),
-            plan.session(),
-            plan.runtime(),
+            plan.value().application().clone(),
+            plan.value().version(),
+            plan.value().session(),
+            plan.value().runtime(),
         );
         instance.transition(InstanceState::Starting)?;
         instance.transition(InstanceState::Running)?;
         self.insert(instance.clone());
         Ok(instance)
-    }
-    fn authorize(
-        &self,
-        policy: &dyn PolicyAuthority,
-        request: &AuthorizationRequest,
-    ) -> Result<Decision, Self::Error> {
-        policy
-            .authorize(request)
-            .map_err(|e| RuntimeError::Security(e.to_string()))
     }
 }
 
@@ -621,9 +559,10 @@ impl LinuxApplicationRuntime {
             ProcessState::Running => Ok(InstanceState::Running),
             ProcessState::Exited(status) => {
                 self.processes.remove(&process);
-                self.cleanup_root(process);
+                let cleanup = self.cleanup_root(process);
                 let instance = self.model.instance_mut(id)?;
                 instance.record_process_exit(status)?;
+                instance.record_cleanup(cleanup);
                 Ok(instance.state())
             }
         }
@@ -647,16 +586,18 @@ impl LinuxApplicationRuntime {
         let status = match runtime.terminate_supervised_process(process) {
             Ok(status) => status,
             Err(error) => {
-                self.model.instance_mut(id)?.record_failure(
-                    FailureStage::Stopping,
-                    error.to_string(),
-                )?;
+                self.model
+                    .instance_mut(id)?
+                    .record_failure(FailureStage::Stopping, error.to_string())?;
                 return Err(error.into());
             }
         };
         self.processes.remove(&process);
-        self.cleanup_root(process);
-        self.model.instance_mut(id)?.record_requested_stop(status)
+        let cleanup = self.cleanup_root(process);
+        let instance = self.model.instance_mut(id)?;
+        instance.record_requested_stop(status)?;
+        instance.record_cleanup(cleanup);
+        Ok(())
     }
     pub fn reconcile(
         &mut self,
@@ -669,9 +610,10 @@ impl LinuxApplicationRuntime {
                 ProcessState::Running => {}
                 ProcessState::Exited(status) => {
                     if let Some(id) = self.processes.remove(&process) {
-                        self.cleanup_root(process);
+                        let cleanup = self.cleanup_root(process);
                         let instance = self.model.instance_mut(id)?;
                         instance.record_process_exit(status)?;
+                        instance.record_cleanup(cleanup);
                         changes.push((id, instance.state()));
                     }
                 }
@@ -679,13 +621,27 @@ impl LinuxApplicationRuntime {
         }
         Ok(changes)
     }
-    pub(crate) fn cleanup_root(&mut self, process: ProcessId) {
-        if let Some(root) = self.roots.remove(&process) {
-            let parent = root.parent().unwrap_or(Path::new("/tmp"));
-            let name = root.file_name().and_then(|v| v.to_str()).unwrap_or("root");
-            let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
-            let _ = fs::remove_dir_all(root);
-            let _ = fs::remove_dir_all(support);
+    pub(crate) fn cleanup_root(&mut self, process: ProcessId) -> CleanupOutcome {
+        let Some(root) = self.roots.remove(&process) else {
+            return CleanupOutcome::Succeeded;
+        };
+        let parent = root.parent().unwrap_or(Path::new("/tmp"));
+        let name = root.file_name().and_then(|v| v.to_str()).unwrap_or("root");
+        let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
+        let mut failures = Vec::new();
+        for path in [&root, &support] {
+            if let Err(error) = fs::remove_dir_all(path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                failures.push(format!("{}: {error}", path.display()));
+            }
+        }
+        if failures.is_empty() {
+            CleanupOutcome::Succeeded
+        } else {
+            CleanupOutcome::Failed {
+                message: failures.join("; "),
+            }
         }
     }
 }
@@ -693,8 +649,8 @@ impl LinuxApplicationRuntime {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::{
-        ApplicationInstance, ApplicationInstanceId, FailureStage, InstanceState, ProcessExit,
-        RuntimeError,
+        ApplicationInstance, ApplicationInstanceId, CleanupOutcome, FailureStage, InstanceState,
+        LinuxApplicationRuntime, ProcessExit, RuntimeError,
     };
     use luna_common::{BundleId, Version};
     use luna_system_runtime::ProcessId;
@@ -766,6 +722,36 @@ mod lifecycle_tests {
         instance.record_process_exit(status).unwrap();
         assert_eq!(instance.state(), InstanceState::Stopped);
         assert_eq!(instance.exit(), Some(ProcessExit::Exited { code: 0 }));
+    }
+
+    #[test]
+    fn cleanup_failure_is_observable_without_losing_successful_exit() {
+        let mut instance = instance();
+        instance.transition(InstanceState::Starting).unwrap();
+        instance.attach_process(ProcessId::new(42)).unwrap();
+        instance.transition(InstanceState::Running).unwrap();
+        let status = Command::new("sh").args(["-c", "exit 0"]).status().unwrap();
+        instance.record_process_exit(status).unwrap();
+        instance.record_cleanup(CleanupOutcome::Failed {
+            message: "permission denied".into(),
+        });
+        assert_eq!(instance.state(), InstanceState::Stopped);
+        assert_eq!(instance.exit(), Some(ProcessExit::Exited { code: 0 }));
+        assert_eq!(
+            instance.cleanup().unwrap().message(),
+            Some("permission denied")
+        );
+    }
+
+    #[test]
+    fn remove_dir_failure_is_returned_by_cleanup_root() {
+        let mut runtime = LinuxApplicationRuntime::new();
+        let process = ProcessId::new(99);
+        runtime
+            .roots
+            .insert(process, std::path::PathBuf::from("/proc/self"));
+        let outcome = runtime.cleanup_root(process);
+        assert!(matches!(outcome, CleanupOutcome::Failed { .. }));
     }
 
     #[test]

@@ -683,6 +683,7 @@ dependencies = [
 name = "luna-app-runtime"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "luna-bundle",
  "luna-common",
  "luna-namespace",

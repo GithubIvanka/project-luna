@@ -11,9 +11,7 @@ use std::path::{Path, PathBuf};
 use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
-use luna_security::{
-    AuthorizationRequest, Decision, Permission, PolicyAuthority, Principal, Resource, SecurityError,
-};
+use luna_security::{AuthorizationRequest, AuthorizationSource, Permission, Principal, Resource};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
 /// The executable identity that an application plan is permitted to launch.
@@ -178,25 +176,6 @@ impl ApplicationPlan {
         requests
     }
 
-    pub fn authorize(
-        self,
-        policy: &dyn PolicyAuthority,
-    ) -> Result<AuthorizedApplicationPlan, PlanError> {
-        let runtime_request = AuthorizationRequest {
-            principal: Principal::Application(self.application.clone()),
-            resource: Resource::Runtime(self.runtime.kind()),
-            permission: Permission::Use,
-        };
-        require_allow(policy, &runtime_request)?;
-        for request in self.declared_requests() {
-            require_allow(policy, &request)?;
-        }
-        for request in &self.requests {
-            require_allow(policy, request)?;
-        }
-        Ok(AuthorizedApplicationPlan { plan: self })
-    }
-
     pub fn application(&self) -> &BundleId {
         &self.application
     }
@@ -230,46 +209,25 @@ impl ApplicationPlan {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct AuthorizedApplicationPlan {
+pub type AuthorizedApplicationPlan = luna_security::Authorized<ApplicationPlan>;
+
+pub fn authorize_application_plan(
     plan: ApplicationPlan,
+    policy: &dyn luna_security::PolicyAuthority,
+) -> Result<AuthorizedApplicationPlan, luna_security::SecurityError> {
+    luna_security::authorize(policy, plan)
 }
 
-impl AuthorizedApplicationPlan {
-    pub fn application(&self) -> &BundleId {
-        self.plan.application()
-    }
-
-    pub fn version(&self) -> Version {
-        self.plan.version()
-    }
-
-    pub fn session(&self) -> SessionId {
-        self.plan.session()
-    }
-
-    pub fn runtime(&self) -> RuntimeSpec {
-        self.plan.runtime()
-    }
-
-    pub fn executable(&self) -> &ExecutableSpec {
-        self.plan.executable()
-    }
-
-    pub fn manifest(&self) -> &BundleManifest {
-        self.plan.manifest()
-    }
-
-    pub fn mapping(&self) -> &MappingTable {
-        self.plan.mapping()
-    }
-
-    pub fn requests(&self) -> &[AuthorizationRequest] {
-        self.plan.requests()
-    }
-
-    pub fn into_plan(self) -> ApplicationPlan {
-        self.plan
+impl AuthorizationSource for ApplicationPlan {
+    fn authorization_requests(&self) -> Vec<AuthorizationRequest> {
+        let mut requests = vec![AuthorizationRequest {
+            principal: Principal::Application(self.application.clone()),
+            resource: Resource::Runtime(self.runtime.kind()),
+            permission: Permission::Use,
+        }];
+        requests.extend(self.declared_requests());
+        requests.extend(self.requests.iter().cloned());
+        requests
     }
 }
 
@@ -290,7 +248,6 @@ pub enum PlanError {
     ForeignPrincipal {
         expected: BundleId,
     },
-    Security(String),
 }
 
 impl fmt::Display for PlanError {
@@ -318,31 +275,11 @@ impl fmt::Display for PlanError {
                 f,
                 "authorization request principal does not match application {expected}"
             ),
-            Self::Security(error) => write!(f, "authorization failed: {error}"),
         }
     }
 }
 
 impl std::error::Error for PlanError {}
-
-fn require_allow(
-    policy: &dyn PolicyAuthority,
-    request: &AuthorizationRequest,
-) -> Result<(), PlanError> {
-    match policy
-        .authorize(request)
-        .map_err(|error: SecurityError| PlanError::Security(error.to_string()))?
-    {
-        Decision::Allow => Ok(()),
-        Decision::Deny => Err(PlanError::Security(format!("denied: {request:?}"))),
-        Decision::Ask => Err(PlanError::Security(
-            "authorization requires explicit user confirmation".into(),
-        )),
-        Decision::Constrained { constraints } => Err(PlanError::Security(format!(
-            "constraint enforcement is not part of this plan boundary: {constraints:?}"
-        ))),
-    }
-}
 
 fn has_navigation_syntax(path: &Path) -> bool {
     path.to_string_lossy()
@@ -352,7 +289,7 @@ fn has_navigation_syntax(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationPlan, ExecutableSpec, PlanError};
+    use super::{ApplicationPlan, ExecutableSpec, PlanError, authorize_application_plan};
     use luna_bundle::{BundleKind, BundleManifest, BundleMetadata, BundleResource, ResourceAccess};
     use luna_common::{BundleId, RuntimeSpec, UserId, Version};
     use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
@@ -515,8 +452,8 @@ mod tests {
 
     #[test]
     fn authorization_is_fail_closed() {
-        let result = plan().authorize(&Deny);
-        assert!(matches!(result, Err(PlanError::Security(_))));
+        let result = authorize_application_plan(plan(), &Deny);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -543,7 +480,7 @@ mod tests {
             vec![],
         )
         .unwrap();
-        assert!(plan.clone().authorize(&Deny).is_err());
+        assert!(authorize_application_plan(plan.clone(), &Deny).is_err());
 
         struct RecordingAllow {
             seen: std::cell::RefCell<Vec<AuthorizationRequest>>,
@@ -558,7 +495,7 @@ mod tests {
         let policy = RecordingAllow {
             seen: std::cell::RefCell::new(Vec::new()),
         };
-        plan.authorize(&policy).unwrap();
+        authorize_application_plan(plan, &policy).unwrap();
         let seen = policy.seen.borrow();
         assert!(seen.iter().any(|request| {
             request.resource == Resource::FilesystemPath("/home/alice/config".into())
@@ -587,7 +524,7 @@ mod tests {
             }
         }
 
-        assert!(plan().authorize(&RuntimeDeny).is_err());
+        assert!(authorize_application_plan(plan(), &RuntimeDeny).is_err());
     }
 
     #[test]
@@ -614,16 +551,19 @@ mod tests {
             }
         }
 
-        assert!(plan().authorize(&Ask).is_err());
-        assert!(plan().authorize(&Constrained).is_err());
+        assert!(authorize_application_plan(plan(), &Ask).is_err());
+        assert!(authorize_application_plan(plan(), &Constrained).is_err());
     }
 
     #[test]
     fn successful_authorization_returns_owned_authorized_plan() {
-        let authorized = plan().authorize(&Allow).unwrap();
-        assert_eq!(authorized.application().as_str(), "example.app");
-        assert_eq!(authorized.runtime(), RuntimeSpec::luna());
-        assert_eq!(authorized.executable().path().to_str().unwrap(), "/bin/app");
+        let authorized = authorize_application_plan(plan(), &Allow).unwrap();
+        assert_eq!(authorized.value().application().as_str(), "example.app");
+        assert_eq!(authorized.value().runtime(), RuntimeSpec::luna());
+        assert_eq!(
+            authorized.value().executable().path().to_str().unwrap(),
+            "/bin/app"
+        );
     }
 
     #[test]

@@ -410,3 +410,11 @@ Phase 1.6 — accepted through the HZ decision set and subsequent accepted clari
 RFC-0002 Bundle Format v1 — accepted
 RAM-backed logical root / luna-init bootstrap — accepted architecture; implementation still in progress
 ```
+
+
+### App-runtime P0 boundary
+
+- Только `luna-security` создаёт sealed `AuthorizedApplicationPlan`.
+- Production root: fresh tmpfs + trusted runtime + authorized mappings; whole-image OverlayFS запрещён.
+- Landlock включает обе категории ресурсов.
+- FD inheritance default-deny: stdio следует explicit `Command` policy; `CLOSE_RANGE_CLOEXEC` помечает FD >= 3, и ядро закрывает их при успешном `execve()`; разрешённых non-stdio runtime FD сейчас нет.

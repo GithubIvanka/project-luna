@@ -47,6 +47,8 @@ impl fmt::Display for CapabilityName {
     }
 }
 
+/// An authority-created capability grant. Its fields are private so provider
+/// registration alone cannot construct or expand it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityGrant {
     principal: Principal,
@@ -55,18 +57,6 @@ pub struct CapabilityGrant {
 }
 
 impl CapabilityGrant {
-    pub(crate) fn new(
-        principal: Principal,
-        capability: CapabilityName,
-        provider: impl Into<String>,
-    ) -> Self {
-        Self {
-            principal,
-            capability,
-            provider: provider.into(),
-        }
-    }
-
     pub fn principal(&self) -> &Principal {
         &self.principal
     }
@@ -113,23 +103,14 @@ impl CapabilityRegistry {
         Ok(())
     }
 
+    /// Resolve only provider identity. Registration is not authorization and
+    /// this registry deliberately cannot mint a `CapabilityGrant`.
     pub fn provider_for(&self, capability: &CapabilityName) -> Option<&str> {
         self.providers.get(capability).map(String::as_str)
     }
 
     pub fn is_registered(&self, capability: &CapabilityName) -> bool {
         self.providers.contains_key(capability)
-    }
-
-    pub fn grant(
-        &self,
-        principal: Principal,
-        capability: CapabilityName,
-    ) -> Result<CapabilityGrant, SecurityError> {
-        let provider = self
-            .provider_for(&capability)
-            .ok_or_else(|| SecurityError::new(format!("unknown capability: {capability}")))?;
-        Ok(CapabilityGrant::new(principal, capability, provider))
     }
 
     pub fn with_default_providers() -> Self {
@@ -157,8 +138,6 @@ impl CapabilityRegistry {
 #[cfg(test)]
 mod tests {
     use super::{CapabilityName, CapabilityProvider, CapabilityRegistry};
-    use crate::Principal;
-    use luna_common::BundleId;
 
     struct TestProvider {
         capability: CapabilityName,
@@ -179,23 +158,12 @@ mod tests {
     }
 
     #[test]
-    fn unknown_capability_cannot_be_granted() {
-        let registry = CapabilityRegistry::new();
-        let principal = Principal::Application(BundleId::from("example.app"));
-        let result = registry.grant(principal, CapabilityName::new("network").unwrap());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn registered_capability_produces_typed_grant() {
+    fn registry_lookup_does_not_create_a_grant() {
         let mut registry = CapabilityRegistry::new();
         let name = CapabilityName::new("network").unwrap();
+        assert_eq!(registry.provider_for(&name), None);
         registry.register(name.clone(), "network").unwrap();
-        let principal = Principal::Application(BundleId::from("example.app"));
-        let grant = registry.grant(principal.clone(), name.clone()).unwrap();
-        assert_eq!(grant.principal(), &principal);
-        assert_eq!(grant.capability(), &name);
-        assert_eq!(grant.provider(), "network");
+        assert_eq!(registry.provider_for(&name), Some("network"));
     }
 
     #[test]
