@@ -157,15 +157,21 @@ luna-init / system runtime
 
 Успех не считается достигнутым только потому, что `luna-init` был запущен.
 
-Финальную семантическую проверку выполняет `luna-system-runtime`.
+Финальную семантическую проверку выполняет `luna-system-runtime` после успешной инициализации runtime и system state.
 
-Только после подтверждения:
+После достижения success boundary `luna-system-runtime` очищает persistent marker через Linux `efivarfs`:
 
 ```text
-attempt N → SUCCESS
+luna-system-runtime started
+        ↓
+system state initialized
+        ↓
+confirm SUCCESS
+        ↓
+remove LunaBootAttempt from efivarfs
 ```
 
-`luna-system-runtime` удаляет persistent `LunaBootAttempt` marker из NVRAM.
+Очистка идемпотентна: отсутствие marker уже является состоянием успеха.
 
 Таким образом:
 
@@ -174,13 +180,15 @@ marker отсутствует → предыдущая загрузка заве
 marker in_progress  → предыдущая загрузка не дошла до SUCCESS
 ```
 
-Пока success reporter не реализован, marker намеренно остаётся persistent после старта kernel/userspace. Это позволяет следующим загрузкам обнаруживать незавершённую попытку.
+После `ExitBootServices` `luna-boot` больше не управляет NVRAM marker. Его очисткой занимается userspace через kernel-provided `efivarfs` interface.
 
 ## Failure
 
 Если failure возникает до `ExitBootServices` и Luna может безопасно сохранить диагностическую информацию, она может быть отражена в отдельном failure state.
 
 После `ExitBootServices` bootloader больше не изменяет UEFI state. При kernel panic persistent `in_progress` marker просто остаётся существовать и будет обнаружен следующей загрузкой.
+
+Если `luna-system-runtime` не может подтвердить SUCCESS или не может очистить marker, он не должен молча сообщать об успешной загрузке.
 
 ## Relationship with Boot State
 
