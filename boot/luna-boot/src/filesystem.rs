@@ -134,8 +134,27 @@ fn discover_data_partition(
     config: Option<&DataConfig>,
 ) -> BootResult<(Option<Partition>, DataStatus)> {
     let handles = boot::find_handles::<BlockIO>().map_err(BootError::from)?;
-    let mut candidates = Vec::new();
 
+    if let Some(config) = config
+        && let (Some(disk_guid), Some(partition_guid)) =
+            (config.preferred_disk_guid, config.preferred_partition_guid)
+    {
+        for handle in handles.iter().copied() {
+            let Ok(mut disk) = UefiBlockDevice::whole_disk(handle) else {
+                continue;
+            };
+            let Ok(partitions) = find_data_partitions(&mut disk) else {
+                continue;
+            };
+            if let Some(partition) = partitions.into_iter().find(|partition| {
+                partition.disk_guid == disk_guid && partition.partition_guid == partition_guid
+            }) {
+                return Ok((Some(partition), DataStatus::Found));
+            }
+        }
+    }
+
+    let mut candidates = Vec::new();
     for handle in handles {
         let Ok(mut disk) = UefiBlockDevice::whole_disk(handle) else {
             continue;
@@ -146,29 +165,6 @@ fn discover_data_partition(
         for partition in partitions {
             if !candidates.contains(&partition) {
                 candidates.push(partition);
-            }
-        }
-    }
-
-    if let Some(config) = config
-        && let (Some(disk_guid), Some(partition_guid)) =
-            (config.preferred_disk_guid, config.preferred_partition_guid)
-    {
-        let matches: Vec<_> = candidates
-            .iter()
-            .filter(|partition| {
-                partition.disk_guid == disk_guid && partition.partition_guid == partition_guid
-            })
-            .cloned()
-            .collect();
-
-        match matches.as_slice() {
-            [partition] => {
-                return Ok((Some(partition.clone()), DataStatus::Found));
-            }
-            [] => {}
-            _ => {
-                return Ok((None, DataStatus::Ambiguous));
             }
         }
     }
