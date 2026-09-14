@@ -5,7 +5,7 @@
 
 ## 1. Назначение
 
-Luna строит логическое файловое пространство из нескольких источников. System Image является immutable базой, а `LUNA-DATA` предоставляет изменяемое расширение и более новые версии ресурсов.
+Luna строит логическое файловое пространство из нескольких источников. System Image является immutable базой, а `LUNA-DATA` предоставляет изменяемое расширение и более новые версии разрешённых ресурсов.
 
 Resolution отвечает на вопрос:
 
@@ -23,20 +23,20 @@ LUNA-DATA/users/<user>
 
 System Image содержит immutable base.
 
-`LUNA-DATA/system` содержит system-wide extensions, обновления и изменяемую системную конфигурацию.
+`LUNA-DATA/system` содержит system-wide extensions, дополнительные компоненты, разрешённые обновляемые системные ресурсы и изменяемую системную конфигурацию.
 
 `LUNA-DATA/users/<user>` содержит индивидуальные пользовательские данные и конфигурацию.
 
 ## 3. Priority
 
-Для объектов, разрешаемых из System Image и DATA, более высокий priority имеет DATA.
+Для сущностей, которым разрешено разрешение между System Image и DATA, более высокий priority имеет DATA.
 
 Базовая логика:
 
 ```text
 requested path
       ↓
-DATA candidate exists?
+LUNA-DATA candidate exists?
       ├── yes → DATA candidate
       └── no  → System Image candidate
 ```
@@ -48,11 +48,11 @@ Resolution выполняется на уровне конкретного logic
 DATA может:
 
 - содержать объект, которого нет в System Image;
-- содержать более новую версию объекта из System Image;
+- содержать более новую или изменённую версию объекта, если его DATA replacement разрешён policy;
 - предоставлять изменённую system-wide configuration;
 - предоставлять пользовательский объект в user scope.
 
-Если для одного logical path существуют оба кандидата, DATA candidate имеет priority.
+Если для одного logical path существуют оба кандидата, DATA candidate имеет priority только для DATA-replaceable сущности.
 
 Если DATA candidate отсутствует, используется System Image candidate.
 
@@ -60,13 +60,11 @@ DATA может:
 
 ```text
 System Image
-├── /apps/niri
 ├── /libs/libA.so
 ├── /resources/fonts/LunaSans.ttf
 └── /resources/fonts/LunaMono.ttf
 
 LUNA-DATA/system
-├── /apps/niri
 ├── /libs/libC.so
 └── /resources/fonts/LunaSans.ttf
 ```
@@ -74,7 +72,6 @@ LUNA-DATA/system
 Logical result:
 
 ```text
-/apps/niri                    → DATA
 /libs/libA.so                 → System Image
 /libs/libC.so                 → DATA
 /resources/fonts/LunaSans.ttf → DATA
@@ -102,25 +99,36 @@ activate or fallback
 ```text
 apps
 libs
- drivers
+drivers
 firmware
 ```
 
 Path priority отвечает только за выбор первого кандидата.
 
-## 7. Приложения
+## 7. Системные и пользовательские приложения
 
-Базовые системные приложения поставляются в System Image.
+Базовые системные приложения поставляются только в System Image.
 
-DATA может содержать их более новую совместимую копию. Такая копия имеет priority для запуска, а базовая версия в System Image остаётся fallback.
+Они являются частью конкретной версии System Image и обновляются только вместе с обновлением System Image.
 
-Обновление базовой версии системного приложения происходит только вместе с обновлением соответствующего System Image.
+`LUNA-DATA/system` не может содержать replacement-копию базового системного приложения и не является механизмом его независимого обновления.
 
-Пользовательские приложения также могут использовать DATA как собственный источник bundle-файлов в соответствии с Application Bundle contract.
+Поэтому для базового системного приложения отсутствует DATA → System Image replacement path:
+
+```text
+System Image
+└── base system application
+        ↓
+   authoritative source
+```
+
+Пользовательские приложения используют DATA как собственный источник Bundle-файлов в соответствии с Application Bundle contract.
+
+DATA может также содержать дополнительные системные компоненты, если отдельный contract явно определяет такую сущность как DATA-managed; это не распространяется автоматически на базовые системные приложения System Image.
 
 ## 8. Библиотеки и ABI
 
-Library resolution использует общий priority DATA → System Image, но ABI/runtime compatibility проверяется отдельно.
+Library resolution использует общий priority DATA → System Image для DATA-replaceable библиотек, но ABI/runtime compatibility проверяется отдельно.
 
 Базовым userspace ABI Luna является musl.
 
@@ -132,9 +140,11 @@ glibc не является обязательной частью System Image �
 
 `drivers/` и `firmware/` являются различными сущностями.
 
-Для драйверов общий priority DATA → System Image применяется только после проверки совместимости kernel, hardware и иных обязательных свойств.
+Для drivers общий priority DATA → System Image применяется только после проверки совместимости kernel, hardware и иных обязательных свойств, а конкретные DATA replacements должны быть разрешены driver policy.
 
 Для firmware действуют отдельные integrity/compatibility правила соответствующей подсистемы.
+
+System Image содержит firmware, необходимую минимальной базовой системе.
 
 ## 10. Configuration
 
@@ -156,7 +166,7 @@ System Image предоставляет immutable defaults.
 
 ## 11. Resources
 
-Тот же file-level priority применяется к ресурсам:
+Тот же file-level priority применяется к DATA-replaceable ресурсам:
 
 ```text
 fonts
@@ -195,7 +205,7 @@ DATA:
 
 ## 13. Runtime state
 
-Runtime/generated state не является частью этого immutable overlay model.
+Runtime/generated state не является частью этого immutable resolution model.
 
 Volatile runtime facilities создаются runtime subsystem и не должны использовать System Image как изменяемое хранилище.
 
@@ -206,8 +216,9 @@ Recovery использует VirtualData, materialized из Recovery DATA Image
 ## 15. Инварианты
 
 1. System Image остаётся immutable.
-2. DATA имеет более высокий priority при совпадении logical path.
-3. Resolution выполняется на уровне конкретного объекта.
-4. DATA может расширять System Image без необходимости дублировать весь каталог.
-5. Compatibility, integrity и security проверки выполняются после выбора candidate.
-6. Отсутствие DATA candidate возвращает resolution к System Image.
+2. Базовые системные приложения принадлежат только System Image и обновляются только вместе с ним.
+3. DATA имеет более высокий priority только для сущностей, которым разрешён DATA replacement.
+4. Resolution выполняется на уровне конкретного logical path.
+5. DATA может расширять System Image без необходимости дублировать весь каталог.
+6. Compatibility, integrity и security проверки выполняются после выбора candidate.
+7. Отсутствие DATA candidate возвращает resolution к System Image для DATA-replaceable сущностей.
