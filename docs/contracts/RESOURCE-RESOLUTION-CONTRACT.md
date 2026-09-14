@@ -5,7 +5,7 @@
 
 ## 1. Назначение
 
-Luna строит логическое файловое пространство из нескольких источников. System Image является immutable базой, а `LUNA-DATA` предоставляет изменяемое расширение и более новые версии разрешённых ресурсов.
+Luna строит логическое файловое пространство из нескольких источников. System Image является immutable базой, а `LUNA-DATA` предоставляет изменяемое расширение и более новые версии разрешённых компонентов и ресурсов.
 
 Resolution отвечает на вопрос:
 
@@ -23,7 +23,7 @@ LUNA-DATA/users/<user>
 
 System Image содержит immutable base.
 
-`LUNA-DATA/system` содержит system-wide extensions, дополнительные компоненты, разрешённые обновляемые системные ресурсы и изменяемую системную конфигурацию.
+`LUNA-DATA/system` содержит system-wide extensions, разрешённые обновления компонентов и изменяемую системную конфигурацию.
 
 `LUNA-DATA/users/<user>` содержит индивидуальные пользовательские данные и конфигурацию.
 
@@ -56,6 +56,8 @@ DATA может:
 
 Если DATA candidate отсутствует, используется System Image candidate.
 
+Boot-critical System Image components не относятся к DATA-replaceable объектам и не могут быть заменены через этот механизм.
+
 ## 5. Пример
 
 ```text
@@ -69,7 +71,7 @@ LUNA-DATA/system
 └── /resources/fonts/LunaSans.ttf
 ```
 
-Logical result:
+Logical result для разрешённых DATA-replaceable путей:
 
 ```text
 /libs/libA.so                 → System Image
@@ -78,9 +80,11 @@ Logical result:
 /resources/fonts/LunaMono.ttf → System Image
 ```
 
+`/apps/luna-system-runtime` является boot-critical и не может иметь DATA replacement path.
+
 ## 6. Resolution не означает безусловное доверие
 
-Выбранный DATA candidate не обязан автоматически становиться исполняемым или активным.
+Выбранный DATA candidate не обязан автоматически становиться активным.
 
 После resolution соответствующая подсистема выполняет необходимые проверки:
 
@@ -94,15 +98,6 @@ Compatibility / Integrity / Security Policy
 activate or fallback
 ```
 
-Это особенно важно для:
-
-```text
-apps
-libs
-drivers
-firmware
-```
-
 Path priority отвечает только за выбор первого кандидата.
 
 ## 7. Системные и пользовательские приложения
@@ -111,20 +106,13 @@ Path priority отвечает только за выбор первого ка�
 
 Они являются частью конкретной версии System Image и обновляются только вместе с обновлением System Image.
 
-`LUNA-DATA/system` не может содержать replacement-копию базового системного приложения и не является механизмом его независимого обновления.
+`luna-system-runtime` — boot-critical системное приложение. Его нельзя обновить или заменить через DATA.
 
-Поэтому для базового системного приложения отсутствует DATA → System Image replacement path:
+Другие системные компоненты, например Niri и связанные с desktop/session stack приложения, могут иметь более новую совместимую копию в `LUNA-DATA/system/apps/`. Такая копия имеет priority при разрешении пути, а базовая версия System Image остаётся fallback.
 
-```text
-System Image
-└── base system application
-        ↓
-   authoritative source
-```
+Это позволяет обновлять разрешённые системные компоненты независимо от следующего System Image, не перенося сам boot-critical runtime из immutable System Image.
 
 Пользовательские приложения используют DATA как собственный источник Bundle-файлов в соответствии с Application Bundle contract.
-
-DATA может также содержать дополнительные системные компоненты, если отдельный contract явно определяет такую сущность как DATA-managed; это не распространяется автоматически на базовые системные приложения System Image.
 
 ## 8. Библиотеки и ABI
 
@@ -211,14 +199,16 @@ Volatile runtime facilities создаются runtime subsystem и не дол�
 
 ## 14. Recovery
 
-Recovery использует VirtualData, materialized из Recovery DATA Image, согласно System Image/Recovery contracts. Физический normal `LUNA-DATA` не становится скрытым источником Recovery environment только из-за наличия такого устройства.
+Recovery использует VirtualData, materialized из Recovery DATA Image, согласно Recovery contracts. Физический normal `LUNA-DATA` не становится скрытым источником Recovery environment только из-за наличия такого устройства.
 
 ## 15. Инварианты
 
 1. System Image остаётся immutable.
-2. Базовые системные приложения принадлежат только System Image и обновляются только вместе с ним.
+2. Базовые boot-critical системные приложения принадлежат только System Image и обновляются только вместе с ним.
 3. DATA имеет более высокий priority только для сущностей, которым разрешён DATA replacement.
-4. Resolution выполняется на уровне конкретного logical path.
-5. DATA может расширять System Image без необходимости дублировать весь каталог.
-6. Compatibility, integrity и security проверки выполняются после выбора candidate.
-7. Отсутствие DATA candidate возвращает resolution к System Image для DATA-replaceable сущностей.
+4. Разрешённые системные компоненты, например Niri, могут обновляться через DATA.
+5. `luna-system-runtime` не имеет DATA replacement path.
+6. Resolution выполняется на уровне конкретного logical path.
+7. DATA может расширять System Image без необходимости дублировать весь каталог.
+8. Compatibility, integrity и security проверки выполняются после выбора candidate.
+9. Отсутствие DATA candidate возвращает resolution к System Image для DATA-replaceable сущностей.
