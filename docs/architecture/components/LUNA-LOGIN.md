@@ -1,39 +1,21 @@
 # `luna-login`
 
-**Статус:** интеграция с greetd/Noctalia существует; финальная Luna authentication IPC не завершена.
-
 ## Назначение
 
-Графическая граница входа пользователя в `UserSession`.
+Графическая граница входа в систему, которая выполняет аутентификацию до предоставления активной `UserSession`.
 
 ## Владеет
 
-- graphical login flow;
-- выбором пользователя;
-- передачей authentication request;
-- представлением успеха/ошибки входа;
-- созданием перехода к Active `UserSession` после успешной аутентификации.
+исполняемым файлом входа и передачей результата аутентификации в границу `UserSession`/system runtime.
 
 ## Не владеет
 
-Identity database, authorization policy, application runtime, system-wide supervision или UEFI boot.
+PID 1, supervision приложений или общей security policy.
 
-## Правило состояния
+## Взаимодействие
 
-```text
-Starting
-  ↓
-Authenticating
-  ↓ success
-Active
-```
+После успешной аутентификации создаётся или активируется `UserSession`; затем запускается пользовательская графическая среда Wayland → niri → Noctalia Shell.
 
-Ошибка, отмена или отказ authentication никогда не переводят UserSession в Active.
+## Статус
 
-## Provider
-
-greetd/greeter может быть implementation infrastructure. Наличие provider не создаёт нового Luna architectural component.
-
-## Открыто
-
-Финальная authentication IPC, credential backend, session switching и production security integration.
+Исполняемый файл для разработки существует и включается сборщиком PC image. Полная production-интеграция аутентификации и сессий ещё не завершена.

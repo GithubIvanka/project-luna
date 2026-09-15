@@ -1,48 +1,15 @@
-# Boot Attempt Contract
+# Контракт Boot Attempt
 
-**Статус:** Accepted  
-**Версия:** 1  
-**Scope:** `luna-boot` → Linux kernel → `luna-init` → `luna-system-runtime`
+**Статус:** принят
+**Область:** `luna-boot.efi` → Linux kernel → `luna-init` → `luna-system-runtime`
 
 ## Назначение
 
-`BootAttempt` описывает один конкретный запуск Luna от момента запуска `luna-boot` до подтверждённого успеха системы.
+`BootAttempt` описывает одну конкретную попытку загрузки — от запуска `luna-boot.efi` до подтверждённого `SUCCESS` или незавершённой попытки.
 
-Главный принцип:
+Подробный progress находится только в RAM. Persistent storage содержит минимальный marker, необходимый для обнаружения незавершённой загрузки после перезагрузки.
 
-> подробный progress живёт в RAM; persistent storage содержит только минимальный marker, необходимый для обнаружения незавершённой попытки после reboot, panic или power loss.
-
-Это предотвращает постоянные перезаписи `boot-state.toml` во время нормальной загрузки.
-
-## Жизненный цикл
-
-```text
-UEFI
-  ↓
-luna-boot loaded
-  ↓
-luna-boot completed
-  ↓
-kernel handoff
-  ↓
-kernel started
-  ↓
-luna-init started
-  ↓
-luna-init ready
-  ↓
-luna-system-runtime started
-  ↓
-SUCCESS
-```
-
-Подробные стадии являются volatile runtime state и не требуют записи на диск при каждом переходе.
-
-## Volatile progress
-
-`BootAttemptProgress` и `BootAttempt` принадлежат `luna-boot`, потому что bootloader работает как `no_std` UEFI-приложение и runtime progress является его локальным состоянием.
-
-Модель:
+## Progress в RAM
 
 ```text
 BootAttemptProgress
@@ -50,7 +17,7 @@ BootAttemptProgress
 └── stage
 ```
 
-Допустимые стадии:
+Допустимые монотонные стадии:
 
 ```text
 BootloaderLoaded
@@ -63,22 +30,18 @@ SystemRuntimeStarted
 Success
 ```
 
-Стадия монотонна: переход назад запрещён.
-
-Этот progress хранится только в RAM текущего запуска.
+Стадия назад не переходит. Этот progress не является историческим журналом.
 
 ## Persistent marker
 
-Persistent marker хранится в UEFI variable storage (NVRAM), а не в `LUNA-SYS/config/boot-state.toml`.
-
-Текущая реализация использует:
+Marker хранится в UEFI NVRAM, отдельно от `LUNA-SYS/config/boot-state.toml`.
 
 ```text
 Variable name: LunaBootAttempt
 State: in_progress
 ```
 
-Marker содержит только минимальные данные:
+Минимальные поля:
 
 ```text
 magic
@@ -88,11 +51,11 @@ attempt_id
 checksum
 ```
 
-Размер фиксирован и мал.
+Размер marker фиксированный и мал.
 
-## Запись marker
+## Запись
 
-Для каждой новой попытки загрузки `luna-boot` выполняет одну persistent-запись marker в NVRAM после того, как все необходимые boot objects подготовлены, и непосредственно перед `ExitBootServices`:
+Для каждой новой попытки `luna-boot.efi` делает одну persistent-запись после подготовки всех необходимых boot objects:
 
 ```text
 prepare target
@@ -106,112 +69,54 @@ build Luna Handoff
 write LunaBootAttempt = in_progress
     ↓
 ExitBootServices
-    ↓
-kernel
 ```
 
-Промежуточные стадии между этими точками не записываются в persistent storage.
+Промежуточные стадии не записываются в NVRAM.
 
-Если запись marker невозможна, запуск не должен продолжаться так, будто crash detection гарантирован.
+Если запись marker невозможна, boot не должен продолжаться так, будто crash detection гарантирован.
 
-## Обнаружение незавершённой попытки
+## Обнаружение
 
-При следующем запуске `luna-boot` читает marker из NVRAM.
-
-Если существует валидный marker `in_progress`, это означает:
+При следующем запуске `luna-boot.efi` читает marker.
 
 ```text
-previous attempt did not reach SUCCESS
+marker отсутствует → предыдущая попытка достигла SUCCESS
+marker in_progress  → предыдущая попытка не достигла SUCCESS
 ```
 
-Причина может быть любой:
-
-- kernel panic;
-- reset;
-- power loss;
-- failure before userspace success confirmation.
-
-Отдельно выяснять причину по самому marker не требуется.
-
-`BOOT_STATE.previous_attempt_failed` в Luna Handoff должен отражать наличие такого незавершённого marker.
+Причина не определяется marker. Возможны kernel panic, reset, потеря питания или failure до userspace success.
 
 ## Attempt ID
 
-Каждая новая попытка получает собственный `attempt_id`.
+Каждая попытка имеет собственный `attempt_id`.
 
-Если предыдущий persistent marker существует, новый ID получается последовательным увеличением предыдущего ID.
+Если предыдущий marker существует, новый ID получается последовательным увеличением предыдущего. Если marker отсутствует, ID детерминированно создаётся из параметров подготовленного запуска через BLAKE3 и не может быть нулевым.
 
-Если marker отсутствует, ID детерминированно создаётся из параметров текущего подготовленного запуска с BLAKE3 и не может быть нулевым.
+ID передаётся через Luna Handoff как identity текущего запуска.
 
-ID сохраняется в runtime handoff:
+## Успех
 
-```text
-persistent marker
-        ↓
-Luna Handoff
-        ↓
-luna-init / system runtime
-```
+Запуск `luna-init` сам по себе не означает успех. Финальную semantic success confirmation выполняет `luna-system-runtime` после успешной инициализации runtime и system state.
 
-## Success
-
-Успех не считается достигнутым только потому, что `luna-init` был запущен.
-
-Финальную семантическую проверку выполняет `luna-system-runtime` после успешной инициализации runtime и system state.
-
-После достижения success boundary `luna-system-runtime` очищает persistent marker через Linux `efivarfs`:
+После подтверждения:
 
 ```text
-luna-system-runtime started
-        ↓
-system state initialized
-        ↓
 confirm SUCCESS
-        ↓
-remove LunaBootAttempt from efivarfs
+      ↓
+remove LunaBootAttempt via efivarfs
 ```
 
-Очистка идемпотентна: отсутствие marker уже является состоянием успеха.
+После `ExitBootServices` `luna-boot.efi` больше не управляет marker. Очистка идемпотентна.
 
-Таким образом:
+## Отказы
 
-```text
-marker отсутствует → предыдущая загрузка завершилась успешно
-marker in_progress  → предыдущая загрузка не дошла до SUCCESS
-```
+После `ExitBootServices` bootloader не изменяет UEFI state. При kernel panic `in_progress` остаётся и обнаруживается при следующем запуске.
 
-После `ExitBootServices` `luna-boot` больше не управляет NVRAM marker. Его очисткой занимается userspace через kernel-provided `efivarfs` interface.
+## Связь с Boot State
 
-## Failure
+`BootAttempt` отвечает только за конкретную попытку и crash detection. `boot-state.toml` хранит долгоживший boot context и atomic targets.
 
-Если failure возникает до `ExitBootServices` и Luna может безопасно сохранить диагностическую информацию, она может быть отражена в отдельном failure state.
-
-После `ExitBootServices` bootloader больше не изменяет UEFI state. При kernel panic persistent `in_progress` marker просто остаётся существовать и будет обнаружен следующей загрузкой.
-
-Если `luna-system-runtime` не может подтвердить SUCCESS или не может очистить marker, он не должен молча сообщать об успешной загрузке.
-
-## Relationship with Boot State
-
-`BootAttempt` и `boot-state.toml` имеют разные роли.
-
-`boot-state.toml` хранит долгоживший boot context и atomic targets:
-
-```text
-current
-fallback
-recovery
-factory
-```
-
-`BootAttempt` отвечает только за конкретный текущий запуск и crash-detection marker.
-
-Подробный runtime progress не должен превращаться в постоянный журнал в `boot-state.toml`.
-
-## Relationship with Luna Handoff
-
-`Luna Handoff ABI v1` передаёт `attempt_id` как идентичность текущего запуска.
-
-`BOOT_STATE` передаёт persistent context предыдущей попытки:
+В Handoff передаётся контекст предыдущей попытки:
 
 ```text
 previous_attempt_failed
@@ -220,15 +125,9 @@ fallback_depth
 failure_code
 ```
 
-Это не журнал всех runtime stages.
-
-## Persistent write budget
-
-В обычном успешном запуске persistent Boot Attempt state изменяется только на необходимых границах:
+Обычный успешный запуск имеет persistent budget:
 
 ```text
 start attempt → one NVRAM write
 success       → one NVRAM clear
 ```
-
-Все промежуточные стадии остаются в RAM.

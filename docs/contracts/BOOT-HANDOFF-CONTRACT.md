@@ -1,156 +1,19 @@
-# Контракт передачи управления из `luna-boot`
+# Контракт Boot Handoff
 
-**Статус:** Accepted / ABI v1 implementation in progress  
-**Scope:** `luna-boot.efi` → Linux kernel → `luna-init`
-
-## Целевая цепочка
+Каноническая граница:
 
 ```text
-UEFI
-  ↓
 luna-boot.efi
   ↓
-Luna Linux kernel
+Linux boot protocol + LunaBootHandoffV1
   ↓
-luna-init (PID 1)
-  ↓
-luna-system-runtime
+Linux kernel direct-init path
 ```
 
-Отдельного initramfs userspace этапа нет.
+Bootloader подготавливает все данные, которые потребуются после `ExitBootServices`, до выхода из UEFI Boot Services.
 
-## Ответственность `luna-boot`
+Handoff использует физическую identity разделов и артефактов, а не имена Linux device nodes как архитектурный ABI.
 
-`luna-boot.efi` отвечает за UEFI boundary, обнаружение `LUNA-SYS` на диске самого bootloader, discovery System Images и kernels, чтение manifest, выбор совместимой пары, чтение persistent boot-state, preferred `LUNA-DATA` discovery, Boot Menu, fallback, подготовку Linux boot context, загрузку kernel и `luna-init`, построение `LunaBootHandoffV1`, `ExitBootServices` и передачу управления kernel.
+`LUNA-SYS` — управляемый ОС системный раздел, связанный с EFI на одном физическом диске. `luna-boot.efi` проверяет эту связь и загружает ОС только из `LUNA-SYS` этого диска. `LUNA-DATA` может находиться на том же или другом физическом диске. Его обычная привязка определяется GUID диска и GUID раздела из `LUNA-SYS/config/luna-data.toml`. Recovery может запускаться без физического DATA.
 
-После `ExitBootServices` загрузчик не использует UEFI Boot Services, UEFI filesystem protocols или UEFI console APIs.
-
-## Handoff transport
-
-Luna-specific boot data передаётся через Linux x86 `setup_data` как один `LunaBootHandoffV1` object. Handoff находится в физической памяти и не является файлом.
-
-Каноническая ABI v1 описана в `docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md`.
-
-## Что передаётся
-
-Обязательные v1 records:
-
-- `SYSTEM_PARTITION`;
-- `DATA_PARTITION`;
-- `SYSTEM_IMAGE`;
-- `KERNEL_IDENTITY`;
-- `LUNA_INIT_IMAGE`;
-- `BOOT_MODE`;
-- `BOOT_STATE`.
-
-`DATA_PARTITION` остаётся обязательным record даже в Recovery: при отсутствии `LUNA-DATA` он помечается флагом `ABSENT`, а GUID и label fields обнуляются.
-
-Handoff содержит identity и digest выбранных артефактов и идентичность физических SYSTEM/DATA partition. Linux device names не являются ABI.
-
-## `luna-init`
-
-Для выбранного System Image `luna-boot` загружает отдельный `.init` artifact:
-
-```text
-LUNA-SYS/cores/luna-X.Y.Z.init
-```
-
-Artifact является memory-resident и boot-reserved. В `LUNA_INIT_IMAGE` передаются физический адрес, размер и BLAKE3-256 digest exact byte range.
-
-Kernel обязан валидировать этот объект и запустить его непосредственно как initial userspace process. `luna-init` становится PID 1.
-
-## LUNA-SYS / LUNA-DATA
-
-`LUNA-SYS` ищется исключительно на физическом диске, с которого был загружен `luna-boot.efi`.
-
-`LUNA-DATA` является независимым persistent ресурсом и может находиться на другом физическом диске. Preferred identity хранится в:
-
-```text
-LUNA-SYS/config/luna-data.toml
-```
-
-Если preferred DATA не найден, bootloader не выбирает случайный диск при наличии нескольких кандидатов. Обычная загрузка переходит в Recovery, где DATA Discovery utility позволяет выбрать нужный `LUNA-DATA` и обновить preferred binding через системный механизм записи.
-
-## Boot state
-
-Persistent boot state находится в:
-
-```text
-LUNA-SYS/config/boot-state.toml
-```
-
-Он идентифицирует атомарные boot targets как комбинации:
-
-```text
-System Image + luna-init + Kernel
-```
-
-и хранит `current`, `fallback`, `recovery` и `factory`, а также persistent context последней boot attempt.
-
-## Memory ownership
-
-Handoff и загруженный `luna-init` являются boot-reserved objects. Их диапазоны не должны рассматриваться kernel как свободная RAM до завершения соответствующего kernel-side processing.
-
-Kernel должен сохранить исходные bytes `luna-init` до момента успешной загрузки ELF и освобождать backing memory только после того, как она больше не нужна.
-
-## Command line
-
-Kernel command line остаётся для стандартных Linux parameters и временной диагностики.
-
-Production boot не зависит от:
-
-```text
-luna.system_device
-luna.data_device
-luna.system_image
-```
-
-Эти значения не являются primary Luna boot ABI.
-
-## System Image
-
-`luna-boot` выбирает конкретный System Image и передаёт его identity/digest через handoff. `luna-init` не должен выбирать другой image из-за случайного совпадения имени.
-
-System Image остаётся immutable source и не становится физическим `/`.
-
-## Hardware boundary
-
-Handoff не дублирует ACPI, E820 или другую generic hardware information. Эта информация передаётся/обнаруживается через стандартный Linux boot path.
-
-## Initramfs policy
-
-Luna production boot **не использует initramfs**.
-
-`luna-init` не транспортируется в cpio/gzip archive и не запускается через отдельный initramfs `/init`.
-
-Целевой путь:
-
-```text
-Linux kernel
-    ↓
-LunaBootHandoffV1
-    ↓
-memory-resident luna-init
-    ↓
-luna-init PID 1
-```
-
-Любая документация, build script или image builder, создающие `luna-initramfs.img` либо описывающие `kernel → initramfs → luna-init`, считаются устаревшими и должны быть удалены.
-
-## Userspace channel
-
-После валидации handoff kernel предоставляет `luna-init` canonical boot context через:
-
-```text
-FD 3 = read-only Luna boot-context
-```
-
-FD 3 начинается с offset 0 и содержит сериализованные bytes валидированного `LunaBootHandoffV1`. `luna-init` обязан прочитать context и закрыть FD 3 до создания/запуска обычных дочерних процессов.
-
-## Failure
-
-Повреждённый или неполный handoff, отсутствующий обязательный record, невалидный `LUNA_INIT_IMAGE`, невозможная memory range или failure direct-init startup — это boot failure.
-
-Отсутствующий `LUNA-DATA` сам по себе не является повреждением handoff: в Recovery `DATA_PARTITION` имеет флаг `ABSENT`.
-
-`luna-init` не должен молча переходить на legacy path discovery или выбирать другой image/device, если structured ABI invalid.
+Production initramfs transport layer в этом контракте отсутствует.

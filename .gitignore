@@ -3,6 +3,7 @@
 dist
 out
 target/
+docs/archive/
 
 .idea/
 .vscode/

@@ -1,54 +1,49 @@
 # `luna-update-manager`
 
-**Статус:** transaction foundation реализован; полноценная mutation/reconciliation/rollback integration продолжается.
-
 ## Назначение
 
-Оркестрирует state-changing обновления Luna и согласует их с `luna-state`, System Image, kernel и checkpoint/rollback semantics.
+Оркестрирует транзакционные операции обновления, checkpoint и rollback, не становясь реализацией storage.
 
 ## Владеет
 
-- update transaction lifecycle;
-- staging;
-- activation coordination;
-- checkpoint/rollback orchestration;
-- reconciliation после незавершённых операций;
-- безопасным retention после подтверждения здоровья.
+- update plans и фазами;
+- durable revision-aware состоянием операций;
+- созданием checkpoint;
+- выполнением подтверждённых update operations через backend;
+- reconciliation незавершённых операций;
+- изменением durable boot targets через `luna-system-manager`.
 
 ## Не владеет
 
-Самим Bundle codec, low-level kernel inventory, UEFI loader, GUI или process supervision.
+Форматом System Image, компиляцией ядра, выбором UEFI target или lifecycle процесса приложения.
 
-## System Image update
+## Жизненный цикл
 
 ```text
-obtain
-  ↓
-verify
-  ↓
-stage
-  ↓
-leave current intact
-  ↓
-activate
-  ↓
-reboot
-  ↓
-health confirmation
-  ↓
-commit / rollback
+prepare → checkpoint → apply → verify → commit
+                    ↘ failure / recovery
 ```
 
-Неуспешное обновление не должно уничтожать последнюю подтверждённую рабочую версию.
+## Boot targets
 
-## Независимость
+При изменении системы сохраняется полная identity target:
 
-Обновление System Image не должно требовать обновления kernel, если старое kernel совместимо. И наоборот.
+```text
+current  = System Image + luna-init + kernel
+factory  = System Image + luna-init + kernel
+recovery = System Image + luna-init + kernel + Recovery DATA Image
+```
 
-## State
+System Image, `luna-init` и kernel остаются независимо версионированными, но commit/rollback выполняются для совместимого полного target.
 
-Долгоживущие transaction facts хранятся через `luna-state`. После crash менеджер должен уметь определить незавершённую операцию и безопасно её reconciliate.
+## Подтверждение обновления
 
-## Открыто
+Новый target не считается подтверждённым только потому, что его файлы записаны. Успех требует semantic runtime startup, после которого `luna-system-runtime` очищает `LunaBootAttempt`, а `luna-update-manager`/`luna-system-manager` фиксируют подтверждённый current target.
 
-Health gating, финальная transaction state machine, independent kernel update path, automatic rollback и Recovery/Factory integration.
+## Ошибка и восстановление
+
+Незавершённая update operation должна быть обнаружена по durable state и либо безопасно завершена, либо приведена к согласованному состоянию до следующего conflicting update.
+
+## Статус
+
+Planning, transactional state и test backends существуют. Полные artifact/filesystem mutation backends ещё интегрируются.

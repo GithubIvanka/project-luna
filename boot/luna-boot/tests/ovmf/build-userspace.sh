@@ -22,9 +22,9 @@ mkdir -p "$SYSROOT"/{bin,sbin,etc,dev,proc,sys,run,tmp,data,boot,home,lib,lib64,
 mkdir -p "$SYSROOT/usr/bin" "$SYSROOT/usr/lib" "$SYSROOT/usr/sbin" "$SYSROOT/etc/luna"
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
-cargo build --release --manifest-path "$REPO_ROOT/components/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
+cargo build --release --manifest-path "$REPO_ROOT/components/system/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
-LUNA_INIT="$REPO_ROOT/components/luna-init/target/$RUNTIME_TARGET/release/luna-init"
+LUNA_INIT="$REPO_ROOT/components/system/luna-init/target/$RUNTIME_TARGET/release/luna-init"
 if [ ! -x "$LUNA_INIT" ]; then
     LUNA_INIT="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-init"
 fi

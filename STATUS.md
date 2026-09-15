@@ -1,206 +1,40 @@
-# Project Luna — текущее состояние
+# Project Luna — status
 
-**Последнее обновление:** 2026-09-07
+**Revision:** 2026-09-15
 
-> `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
+`docs/ARCHITECTURE.md` is the architectural authority. This file records implementation status only.
 
-## Общее состояние
+## Implemented foundation
 
-Архитектурный цикл завершён через **Phase 1.1–1.6-HZ**. Сейчас Project Luna находится в **Phase 2: runtime/boot integration, PC bring-up, desktop integration и hardening**.
+- Rust workspace and shared domain types.
+- LBP1 Bundle codec with BLAKE3, TAR, zstd, TOML and Ed25519 support.
+- Logical mapping model in `luna-root-mapping`.
+- Linux namespace and Landlock primitives in `luna-namespace`.
+- Authorization model in `luna-security`.
+- Durable `redb` state backend in `luna-state`.
+- System target/state model in `luna-system-manager`.
+- Update/checkpoint orchestration in `luna-update-manager`.
+- Process supervision and session APIs in `luna-system-runtime`.
+- Application plan and instance lifecycle in `luna-app-runtime`.
+- UEFI discovery, target selection, kernel loading, boot menu, external boot and handoff code.
+- Direct-memory `luna-init` kernel plumbing and FD 3 handoff support.
+- x86_64 PC image builder using `LUNA-SYS` and `LUNA-DATA` labels.
 
-## Состояние областей
+## Partial implementation
 
-| Область | Состояние |
-|---|---|
-| Architecture 1.1–1.6-HZ | принято и консолидировано |
-| Post-1.6 architecture decisions | консолидированы в SoT и decision records |
-| Foundation/domain APIs | baseline реализован |
-| Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
-| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` реализованы как properties execution environment |
-| Runtime profile | `RuntimeProfile::minimal()` добавлен как явный contract trusted system resources |
-| Capability contract | `CapabilityName` / `CapabilityRegistry` / `CapabilityGrant` / `CapabilityProvider` добавлены; provider invocation ещё не подключён |
-| Generic `luna-runtime` | явно отклонён и удалён |
-| Runtime ↔ mapping ↔ Security | contract реализован; authorization предшествует namespace materialization |
-| Linux namespace/materialization | development backend реализован; RAM-backed logical root/profile-driven system view и production child-creation hardening продолжаются |
-| Persistent state | durable `redb` backend в `DATA/system/state` реализован |
-| Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
-| Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
-| `luna-system-runtime` | real child supervision, UserSession lifecycle ownership и trusted immutable-source FD intake реализованы |
-| `luna-app-runtime` | ApplicationInstance lifecycle, ApplicationPlan и typed execution boundary реализованы |
-| `luna-init` | native musl early-userspace с прямым RAM-backed logical `/`, DATA в `/data`, hidden SYSTEM/Image source boundary, manifest-driven bootstrap и `pivot_root` в `luna-system-runtime` реализован; dependency closure и lazy hydration ещё продолжаются |
-| `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
-| Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
-| External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
-| x86_64 PC image | воспроизводимый GPT/UEFI development image builder реализован |
-| Graphical desktop | login boundary существует; финальная niri + Noctalia + seat/device integration продолжается |
+`luna-init` currently validates FD 3 and keeps the initial process alive, but the full architecture-defined logical-root construction and child startup of `luna-system-runtime` are not implemented yet.
 
-## Нормальная загрузка
+The bootloader has discovery/selection/handoff machinery, but complete end-to-end boot success, persistent fallback behavior and production hardening still require integration testing.
 
-```text
-Power
- ↓
-UEFI
- ↓
-luna-boot.efi
- ↓
-Luna GUI boot splash
- ↓
-Linux kernel
- ↓
-luna-init
- ↓
-SYSTEM + selected System Image source
- ↓
-RAM-backed logical /
- ↓
-luna-system-runtime (PID 1)
- ↓
-UserSession
- ↓
-GUI login
- ↓
-authentication
- ↓
-Active UserSession
- ↓
-Wayland
- ↓
-niri
- ↓
-Noctalia Shell
-```
+Application runtime has planning, authorization and namespace primitives, but production-safe child creation and complete install-to-launch integration remain incomplete.
 
-Обычный вход не использует TTY, console shell или `luna-session`.
+Device, network, audio, Bluetooth, files and graphical login components provide domain/UI baselines; production backends and desktop integration remain in development.
 
-`B` открывает исключительное текстовое Boot Menu.
+## Explicit implementation discrepancies
 
-## Runtime
+1. The current kernel/init implementation establishes `luna-init` as the initial userspace task; the remaining gap is completing the architecture-defined bootstrap and child startup of `luna-system-runtime` while keeping `luna-init` as PID 1.
+2. Existing builder and runtime paths still contain implementation-era assumptions that must be reconciled with the canonical `LUNA-SYS`/`LUNA-DATA` layout and direct-init model.
+3. Semantic boot-success confirmation must be connected to clearing `LunaBootAttempt`.
+4. `luna-system-manager` and the bootloader state parser still contain legacy `init` fields for current/factory targets; the current contract intentionally excludes those fields and resolves init through manifests at boot.
 
-Владение:
-
-```text
-luna-system-runtime (PID 1)
-├── UserSession
-│   └── luna-app-runtime
-│       └── ApplicationInstance
-```
-
-Execution pipeline:
-
-```text
-Bundle
-  ↓
-ApplicationPlan
-  ↓ validate
-luna-security
-  ↓ Allow
-AuthorizedApplicationPlan
-  ↓
-ApplicationLaunchContext + RuntimeProfile
-  ↓
-luna-namespace
-  ↓
-process execution
-  ↓
-ApplicationInstance
-```
-
-`ApplicationInstance` является representation конкретного execution lifecycle, а не security policy boundary.
-
-`RuntimeKind` — только тип execution environment; generic `luna-runtime` отсутствует.
-
-## Security model
-
-Filesystem access и named capabilities разделены.
-
-```text
-Filesystem:
-  read / write / execute — explicit
-  empty access            — no access
-
-Capabilities:
-  namespaced identity
-  explicit registry entry
-  explicit authorization
-  typed CapabilityGrant
-  no implicit inheritance
-```
-
-`luna-security` решает, разрешён ли запрос. `luna-namespace` и provider backends должны применять уже авторизованный результат.
-
-### SYSTEM security boundary
-
-```text
-ordinary user / application → NO ACCESS
-normal system runtime       → controlled read-only source access
-luna-updater                → sole SYSTEM writer
-```
-
-SYSTEM не является частью logical `/` и не должен появляться в application filesystem mappings. В normal boot он подключается read-only. Runtime source access передаётся через trusted handoff boundary; физические SYSTEM/source pathnames остаются за пределами user-visible root.
-
-### Текущее состояние namespace
-
-Production materialization уже использует RAM-backed logical root и profile-selected trusted resources вместо полного System Image OverlayFS lower layer. Открыты hardening/integration задачи для privileged Linux tests, filtered `/dev`, child-creation primitive и полной lazy hydration.
-
-## System initialization
-
-```text
-Linux kernel
-    ↓
-initramfs
-    ↓
-/init = luna-init
-    ↓
-RAM-backed logical root + DATA at /data
-    ↓
-SYSTEM/Image mounted outside future logical root
-    ↓
-boot-critical materialization
-    ↓
-pivot_root()
-    ↓
-/sbin/luna-system-runtime = system PID 1
-```
-
-Старые initramfs `/proc`, `/sys`, `/dev` mounts закрываются перед root transition. SYSTEM и selected System Image не становятся `/` и не отдаются приложениям как pathname tree.
-
-Классический `switch_root` к SquashFS root больше не используется целевым `luna-init` path.
-
-## Process/PID model
-
-```text
-system PID namespace
-└── PID 1 luna-system-runtime
-    ├── system services
-    ├── UserSession
-    │   └── luna-app-runtime / ApplicationInstance
-    └── application processes
-```
-
-`luna-app-init` отсутствует. PID namespace не требуется по умолчанию для application isolation. Приложение запускается непосредственно как `ApplicationInstance` и получает обычный non-1 system PID.
-
-## Ближайшие технические приоритеты
-
-1. Довести manifest-driven bootstrap до полной dependency closure для boot-critical binaries и их runtime resources.
-2. Реализовать lazy System Image hydration поверх trusted source boundary так, чтобы materialized resources не зависели от pathname/source lifetime.
-3. Завершить physical symlink/containment hardening для mapping roots и staging paths.
-4. Подключить capability providers через IPC, сохранив security decision исключительно в `luna-security`.
-5. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
-6. Завершить graphical login + niri + Noctalia integration.
-7. Завершить resource limits/cgroups, restart policy и lifecycle reconciliation.
-8. Завершить durable boot/update success/failure state и enforcement updater-only SYSTEM writes.
-9. Завершить LBP1 conformance и Ed25519 trust binding.
-10. Реализовать filtered `/dev`, device/volume integration и `.lbp` install → ApplicationInstance launch/recovery loop.
-11. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
-
-## Phase 0 documentation
-
-Канонические документы bootstrap:
-
-```text
-docs/architecture/components/LUNA-INIT.md
-docs/contracts/LUNA-INIT-CONTRACT.md
-docs/decisions/0008-pid-namespace-and-ram-hydration.md
-```
-
-Они описывают принятую модель: `luna-init` строит прямой RAM-backed logical `/`, `luna-system-runtime` является PID 1, SYSTEM остаётся физическим скрытым source boundary, а отдельного `luna-app-init` нет.
+These items do not authorize architecture changes.

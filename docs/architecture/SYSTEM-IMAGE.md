@@ -1,132 +1,91 @@
-# Project Luna — System Image
+# Архитектура System Image
 
-**Статус:** принятое направление формата; детальная спецификация уточняется в Phase 0.  
-**Канонический payload:** `luna-X.Y.Z.squashfs`
+## Определение
 
-## 1. Определение
-
-System Image — неизменяемый filesystem payload одной версии Luna.
-
-Он является **непосредственно файловой системой SquashFS**.
-
-System Image не является:
-
-- `.lbp` Bundle;
-- Bundle, содержащим SquashFS;
-- произвольным контейнером, внутри которого SquashFS является payload.
-
-## 2. Представление на диске
+System Image — неизменяемая версионированная userspace-файловая система конкретного релиза Luna. Это источник, из которого `luna-init` материализует работающую системную среду в RAM-backed logical `/`.
 
 ```text
-SYSTEM/images/
+LUNA-SYS/images/
 ├── luna-X.Y.Z.squashfs
 └── luna-X.Y.Z.toml
 ```
 
-Имя payload содержит версию. Соседний TOML manifest описывает metadata, которые нужны загрузке и управлению.
+`.squashfs` является самой System Image. Внешней оболочки вокруг неё нет. `.lbp` относится только к Bundle.
 
-SYSTEM является внутренней областью хранения Luna. Она не является обычным пользовательским filesystem namespace: пользователь не должен получать визуальный или обычный физический доступ к System Images.
-
-## 3. Содержимое image
-
-SquashFS содержит неизменяемую системную userspace среду, необходимую для построения logical Linux root.
-
-В зависимости от system build contract сюда могут входить:
-
-- системные binaries и libraries;
-- значения конфигурации по умолчанию;
-- runtime components;
-- desktop/login assets;
-- неизменяемые ресурсы.
-
-Изменяемое состояние машины, пользователя, приложений и cache должно находиться вне image.
-
-## 4. Manifest
-
-Manifest относится именно к своему image и семантически является источником для:
-
-- имени и версии Luna;
-- идентичности image;
-- архитектуры;
-- kernel compatibility;
-- boot metadata;
-- integrity/trust metadata, если они определены отдельной политикой.
-
-Точная TOML-схема ещё не утверждена. Реализация не должна сама превращать удобное для неё поле в обязательный архитектурный контракт.
-
-## 5. Совместимость с kernel
-
-Image и kernel — независимые сущности.
+## Внутренняя структура
 
 ```text
-System Image A ── совместим ── Kernel 1
-System Image A ── совместим ── Kernel 2
-System Image B ── совместим ── Kernel 2
+/
+├── apps/
+├── drivers/
+├── firmware/
+├── libs/
+├── config/
+└── resources/
+    ├── fonts/
+    ├── icons/
+    ├── themes/
+    ├── cursors/
+    ├── locales/
+    └── translations/
 ```
 
-Совместимость должна быть явной. Нельзя автоматически выбирать самое новое ядро для любого image.
+`drivers/` и `firmware/` — разные resource classes. `drivers/` содержит driver entities/modules, `firmware/` — firmware payloads. Firmware никогда не является частью `drivers/`.
 
-## 6. Модель доступа
+`state/` и `volumes/` отсутствуют намеренно: это mutable DATA concerns и они находятся в `LUNA-DATA/system`.
 
-System Image остаётся физическим неизменяемым источником system content на скрытом SYSTEM-разделе.
+## Манифест
 
-Он **не является физическим Linux `/` приложения** и не должен целиком копироваться в runtime root.
+Файл `luna-X.Y.Z.toml` находится рядом с образом и читается до открытия SquashFS. Он описывает identity/version image и совместимые `luna-init` cores.
 
-Runtime создаёт отдельный **RAM-backed logical Linux root `/`**. Требуемые системные ресурсы предоставляются в него через явные trusted mappings/profile и могут подгружаться лениво из System Image.
+Точная TOML grammar определяется контрактом System Image. Реализация не должна добавлять неподтверждённые поля ради удобства.
+
+## Совместимость
+
+Полный target разрешается только так:
 
 ```text
-SYSTEM/images/luna-X.Y.Z.squashfs
-                │
-                │ explicit mapping / lazy access
-                ▼
-private application namespace
-                │
-                └── RAM-backed logical `/`
+System Image
+    ↓ manifest image
+совместимый luna-init
+    ↓ manifest init
+совместимый kernel
 ```
 
-Пустая физическая директория staging, используемая как mountpoint, не считается backing filesystem для `/`: содержимое logical root находится в runtime/virtual filesystem state.
+System Image не задаёт прямую image → kernel compatibility.
 
-Уже материализованный активный system content нельзя освобождать только потому, что исходный image позднее удалён, если другого валидного источника нет.
+## Материализация
 
-## 7. Factory
+System Image остаётся immutable source на `LUNA-SYS`. `luna-init` материализует boot-critical system resources в RAM-backed logical root. Весь image целиком в RAM не копируется; дополнительные immutable resources могут загружаться лениво.
 
-Factory — сохранённый известный рабочий System Image вместе с factory kernel.
+Уже материализированные ресурсы должны работать независимо от дальнейшего существования pathname исходного image.
+
+## Жизненный цикл
 
 ```text
-Factory System Image
-+
-Factory Kernel
+build
+  ↓
+validate
+  ↓
+install в LUNA-SYS
+  ↓
+discovery
+  ↓
+select
+  ↓
+boot как immutable source
+  ↓
+rollback / retention
+  ↓
+retire
 ```
 
-Обычные update/retention операции не имеют права удалять или заменять factory.
+System Image не становится writable после успешной загрузки. Mutable изменения принадлежат `LUNA-DATA`.
 
-## 8. Retention
+## Обновление
 
-System Images версионируются и удерживаются по policy. До удаления должны оставаться current и необходимые fallback choices.
+Обновление System Image не означает автоматического обновления kernel или `luna-init`. Все артефакты остаются независимо версионированными, но перед загрузкой обязаны образовать совместимый полный target.
 
-Точное количество сохранённых версий — policy, а не свойство файловой системы.
+## Recovery
 
-## 9. Update boundary
-
-`luna-update-manager` выполняет state-changing update transactions. `luna-system-manager` владеет semantics системного состояния и запросов. `luna-kernel-manager` владеет inventory и compatibility queries для kernel.
-
-Сам формат System Image не владеет update transaction.
-
-## 10. Проверка
-
-До того как image станет доступным для загрузки, boot/update path должен подтвердить структурную корректность и внутреннюю согласованность metadata. Authenticity/trust policy определяется отдельно и не смешивается с Bundle trust model.
-
-## 11. Связь с `.lbp`
-
-```text
-Application / component Bundle → .lbp → установленный Bundle
-Luna System Image              → .squashfs + .toml → SYSTEM image
-```
-
-Это независимые форматы и независимые lifecycle domains.
-
-## 12. Полный контракт
-
-Расширенный Phase 0 draft находится в:
-
-`docs/contracts/SYSTEM-IMAGE-CONTRACT.md`
+Recovery не имеет отдельной System Image. Используется обычный выбранный System Image, совместимые `luna-init` и kernel, а дополнительным recovery-источником является только отдельный Recovery DATA Image.

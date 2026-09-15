@@ -1,112 +1,49 @@
-# `luna-boot`
+# luna-boot.efi
 
-`luna-boot` — самостоятельный UEFI-загрузчик Project Luna. Он намеренно находится отдельно от обычного Cargo workspace userspace.
+`luna-boot.efi` is the UEFI bootloader for Project Luna.
 
-## Текущая архитектура
+## Canonical path
 
 ```text
 UEFI
-  ↓
+ ↓
 luna-boot.efi
-  ↓
-GPT → SYSTEM → ext4
-  ↓
-System Image manifest + совместимый Linux bzImage
-  ↓
-boot_params + E820 + LunaBootHandoffV1
-  ↓
-ExitBootServices
-  ↓
-identity paging + вход x86_64 Linux
-  ↓
-Luna Linux kernel
-  ↓
-luna-init (PID 1)
+ ↓
+Linux kernel
+ ↓
+luna-init
+ ↓
+luna-system-runtime
 ```
 
-`luna-boot` не загружает отдельный initramfs userspace. Luna kernel должен содержать boot-critical driver/filesystem/crypto support, необходимый для непосредственного запуска `luna-init`.
+## Storage discovery
 
-Меню загрузки не имеет таймера. `luna-boot` один раз проверяет очередь ввода UEFI при запуске: если в очереди есть `B`, открывается меню; иначе загрузка продолжается без искусственной задержки.
-
-Сам System Image загрузчик не интерпретирует как Linux root. Он остаётся файлом `*.squashfs`; `luna-init` использует его как immutable source для построения System Environment.
-
-## Luna Boot Handoff
-
-Luna-specific boot state передаётся как `LunaBootHandoffV1` через Linux x86 `setup_data`.
-
-Handoff находится в выделенной физической памяти и не является файлом.
-
-В v1 передаются:
-
-- identity SYSTEM partition;
-- identity DATA partition;
-- selected System Image identity and digest;
-- running kernel identity and digest;
-- boot mode;
-- boot attempt/state context.
-
-Полный ABI:
+The loader verifies that the EFI System Partition and `LUNA-SYS` are on the same physical disk, then reads the root of that `LUNA-SYS` partition:
 
 ```text
-docs/contracts/LUNA-BOOT-HANDOFF-ABI-V1.md
+/images
+/cores
+/kernels
+/config
+/recovery
 ```
 
-## Граница ответственности
+`LUNA-DATA` may be on the same disk or another disk. Normal DATA discovery uses the disk GUID and partition GUID stored in `/config/luna-data.toml`. If the bound DATA disk/partition is missing, normal boot enters Recovery. Recovery provides the search/selection utility; multiple valid candidates require explicit user choice, and the selected GUIDs may be written back to `luna-data.toml`.
 
-`luna-boot` отвечает за:
+## Target discovery
 
-- UEFI boot flow;
-- обнаружение SYSTEM и boot-метаданных;
-- выбор совместимой пары System Image + kernel;
-- Boot Menu;
-- boot-time fallback;
-- Linux boot-protocol setup;
-- Luna Boot Handoff;
-- `ExitBootServices`;
-- передачу управления Linux kernel.
+A normal candidate is the complete `System Image + luna-init + kernel` target. The System Image manifest selects compatible init cores; the init manifest selects compatible kernels. `luna-boot.efi` loads the kernel and `.init`, then the kernel starts `luna-init`, which materializes the System Image. The highest-version compatible image is the default normal target unless durable state or explicit menu selection says otherwise.
 
-Он не владеет `luna-init` runtime supervision, UserSession, application lifecycle, DATA management или обычным userspace runtime.
+## Boot Menu
 
-## Сборка
+Normal boot has no artificial menu delay. Held `B` opens the exceptional Boot Menu with Continue, Verbose Boot, System Image selection, Recovery, Factory and External/USB boot.
 
-### Необходимые инструменты
+## Handoff
 
-Минимально требуются:
+The loader prepares Linux boot parameters plus `LunaBootHandoffV1`, loads the selected `.init` ELF into boot-reserved memory, writes `LunaBootAttempt` once immediately before `ExitBootServices`, then transfers control to Linux.
 
-- Rust stable через `rustup`;
-- `cargo`;
-- target `x86_64-unknown-uefi`;
-- для OVMF-теста: `qemu-system-x86_64`, `sgdisk`, `mkfs.ext4`, `mkfs.fat`, `mformat`, `mmd`, `mcopy`, `dd`.
+## Scope
 
-### Рекомендуемый способ сборки
+The loader owns UEFI-time discovery/selection/handoff. User sessions, applications, Bundle installation and ordinary userspace service management belong to later components.
 
-Из корня репозитория:
-
-```bash
-bash tools/build-luna-boot.sh
-```
-
-Результат:
-
-```text
-boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
-```
-
-Ручная эквивалентная команда:
-
-```bash
-cd boot/luna-boot
-cargo build --release --target x86_64-unknown-uefi
-```
-
-### Проверка
-
-```bash
-file boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
-```
-
-Для OVMF bring-up и полноценной no-initramfs интеграции сценарий тестирования должен использовать Luna kernel и SYSTEM/DATA test image; отдельный `LUNA_TEST_INITRD` больше не является частью целевого boot contract.
-
-## Важное ограничение текущего теста
-
-Существующий OVMF bring-up доказывает UEFI/Linux handoff и тестовую загрузку, но ещё не является доказательством production-сценария `luna-boot → Luna kernel → luna-init PID 1 → luna-system-runtime → UserSession → graphical desktop`.
+Detailed logic: `docs/architecture/BOOT-PATH.md`.
