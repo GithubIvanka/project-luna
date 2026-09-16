@@ -1,27 +1,39 @@
 #!/usr/bin/env python3
-"""Minimal sequential Project Luna agent orchestrator."""
+"""Sequential Project Luna agent orchestrator.
+
+The runner coordinates headless Harness and non-interactive OpenCode in one
+working tree. It never cleans or resets the repository and pauses when the
+working tree is changed outside the runner/agent transaction.
+"""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
+import json
 import os
-import pathlib
+from pathlib import Path
+import shutil
+import signal
 import subprocess
 import sys
 import time
 import tomllib
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-HERE = pathlib.Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
+HERE = Path(__file__).resolve().parent
 TASKS_FILE = HERE / "tasks.toml"
-STATE_FILE = HERE / "state.toml"
 LOG_DIR = HERE / "logs"
-DSH = pathlib.Path.home() / ".npm/_npx/1e7f6d9597241db0/node_modules/.bin/dsh"
-OPENCODE = pathlib.Path.home() / ".local/bin/opencode"
+STATE_DIR = Path.home() / ".local/state/project-luna/luna-agent"
+STATE_FILE = STATE_DIR / "state.json"
+LOCK_FILE = STATE_DIR / "runner.lock"
+HEARTBEAT_FILE = STATE_DIR / "heartbeat.json"
 BRANCH = "alpha-development"
+MAX_ATTEMPTS = 3
+MAX_TURNS_PER_ATTEMPT = 6
 
 
-def run(cmd: list[str], *, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=timeout)
 
 
@@ -29,9 +41,38 @@ def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def load_tasks() -> dict:
+def load_tasks() -> list[dict]:
     with TASKS_FILE.open("rb") as fh:
-        return tomllib.load(fh)
+        return tomllib.load(fh)["tasks"]
+
+
+def load_state() -> dict:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if not STATE_FILE.exists():
+        return {"version": 2, "tasks": {}, "updated_at": now()}
+    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+
+
+def save_state(state: dict) -> None:
+    state["updated_at"] = now()
+    write_heartbeat(state)
+    tmp = STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(STATE_FILE)
+
+
+def write_heartbeat(state: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    heartbeat = {
+        "pid": os.getpid(),
+        "updated_at": now(),
+        "branch": BRANCH,
+        "current_task": state.get("current_task"),
+        "status": state.get("runner_status", "idle"),
+    }
+    tmp = HEARTBEAT_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(heartbeat, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(HEARTBEAT_FILE)
 
 
 def git_status() -> list[str]:
@@ -41,152 +82,288 @@ def git_status() -> list[str]:
 def require_branch() -> None:
     current = run(["git", "branch", "--show-current"]).stdout.strip()
     if current != BRANCH:
-        raise RuntimeError(f"Refusing to run: expected {BRANCH}, got {current or '<detached>'}")
+        raise RuntimeError(f"expected branch {BRANCH!r}, got {current or '<detached>'!r}")
 
 
-def save_state(task: str, phase: str, attempt: int, agent: str, result: str) -> None:
-    content = f'''version = 1\ncurrent_task = {task!r}\nphase = {phase!r}\nattempt = {attempt}\nlast_agent = {agent!r}\nlast_result = {result!r}\nupdated_at = {now()!r}\n\n[limits]\nmax_attempts_per_task = 3\nharness_timeout_seconds = 3600\nopencode_timeout_seconds = 1800\n\n[policy]\nprotected_branch = "develop"\nworking_branch = "alpha-development"\nallow_host_reboot = false\nallow_physical_disk_changes = false\nallow_user_data_deletion = false\n'''
-    STATE_FILE.write_text(content)
+def require_clean(reason: str) -> None:
+    status = git_status()
+    if status:
+        raise RuntimeError(f"working tree is not clean ({reason}); refusing autonomous mutation")
 
 
-def log_path(task: str, agent: str) -> pathlib.Path:
+def next_task(tasks: list[dict], state: dict) -> dict | None:
+    done = {tid for tid, info in state["tasks"].items() if info.get("status") == "done"}
+    ready: list[dict] = []
+    for task in tasks:
+        info = state["tasks"].setdefault(task["id"], {"status": "pending", "attempts": 0})
+        if info.get("status") != "pending":
+            continue
+        if any(dep not in done for dep in task.get("depends_on", [])):
+            continue
+        if info.get("attempts", 0) >= MAX_ATTEMPTS:
+            info["status"] = "blocked"
+            continue
+        ready.append(task)
+    ready.sort(key=lambda t: (0 if t["priority"] == "P0" else 1, t["id"]))
+    return ready[0] if ready else None
+
+
+def log_path(task_id: str, agent: str) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    return LOG_DIR / f"{stamp}-{task}-{agent}.log"
+    return LOG_DIR / f"{stamp}-{task_id}-{agent}.log"
 
 
-def append_log(path: pathlib.Path, text: str) -> None:
-    path.open("a", encoding="utf-8").write(text)
+def resolve_dsh() -> str:
+    candidate = shutil.which("dsh")
+    if candidate:
+        return candidate
+    matches = list(Path.home().glob(".npm/_npx/*/node_modules/.bin/dsh"))
+    if matches:
+        matches.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+        return str(matches[0])
+    raise RuntimeError("dsh CLI not found; install DeepSeek Harness first")
 
 
-def task_ready(task: dict, completed: set[str]) -> bool:
-    return all(dep in completed for dep in task.get("depends_on", []))
+def resolve_opencode() -> str:
+    candidate = shutil.which("opencode")
+    if candidate:
+        return candidate
+    fallback = Path.home() / ".local/bin/opencode"
+    if fallback.exists():
+        return str(fallback)
+    raise RuntimeError("opencode CLI not found")
 
 
-def pick_task(tasks: list[dict]) -> dict | None:
-    completed = {t["id"] for t in tasks if t.get("status") == "done"}
-    pending = [t for t in tasks if t.get("status") == "pending" and task_ready(t, completed)]
-    pending.sort(key=lambda t: (0 if t.get("priority") == "P0" else 1, t["id"]))
-    return pending[0] if pending else None
-
-
-def ensure_pristine_for_agent_start(baseline: list[str]) -> None:
-    current = git_status()
-    if current != baseline:
-        raise RuntimeError("Working tree changed outside Luna Agent; refusing to start another agent task.")
-
-
-def run_agent(agent: str, prompt: str, timeout: int, log: pathlib.Path) -> int:
+def run_agent(agent: str, prompt: str, timeout: int, log: Path) -> int:
     if agent == "harness":
-        cmd = [str(DSH), "--profile", "headless", prompt]
+        cmd = [resolve_dsh(), "--profile", "headless", prompt]
     elif agent == "opencode-review":
-        cmd = [str(OPENCODE), "run", "--auto", "--model", "openrouter/deepseek/deepseek-v4-flash-latest", prompt]
+        cmd = [resolve_opencode(), "run", "--auto", "--model",
+               "openrouter/deepseek/deepseek-v4-flash-latest", prompt]
     else:
-        raise RuntimeError(f"Unknown agent: {agent}")
-    append_log(log, f"\n=== {now()} COMMAND ===\n{' '.join(cmd)}\n")
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=timeout)
-    append_log(log, f"\n=== STDOUT ===\n{proc.stdout}\n=== STDERR ===\n{proc.stderr}\n=== EXIT {proc.returncode} ===\n")
-    return proc.returncode
+        raise RuntimeError(f"unknown agent: {agent}")
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(f"\n=== {now()} COMMAND ===\n{' '.join(cmd)}\n")
+        proc = subprocess.Popen(
+            cmd, cwd=ROOT, text=True, stdout=fh, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            fh.write(f"\n=== TIMEOUT {timeout}s; terminating process group ===\n")
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+            raise
+        fh.write(f"\n=== EXIT {rc} ===\n")
+    return rc
 
 
-def verify_after_agent() -> None:
+def prompt_for(task: dict, info: dict) -> tuple[str, int]:
+    kind = task["agent"]
+    filename = "implement.md" if kind == "harness" else "review.md"
+    prompt = (HERE / "prompts" / filename).read_text(encoding="utf-8")
+    prompt += "\n\nCURRENT TASK\n"
+    prompt += f"ID: {task['id']}\nTITLE: {task['title']}\nPRIORITY: {task['priority']}\n"
+    prompt += f"ATTEMPT: {info.get('attempts', 1)}/{MAX_ATTEMPTS}\n"
+    prompt += f"AI TURN: {info.get('turns', 0) + 1}/{MAX_TURNS_PER_ATTEMPT}\n"
+    if info.get("turns", 0):
+        prompt += "This is a continuation of an earlier AI session. Preserve the existing work, inspect the current tree, and continue from where the previous session stopped. Do not restart or discard the implementation.\n"
+    prompt += "Implement or review this task using the repository's current accepted architecture.\n"
+    return prompt, 3600 if kind == "harness" else 1800
+
+
+def verify() -> None:
     result = run(["git", "diff", "--check"])
     if result.returncode != 0:
-        raise RuntimeError("git diff --check failed after agent run")
+        raise RuntimeError("git diff --check failed")
 
 
-def prompt_for(task: dict, kind: str) -> str:
-    base = (HERE / "prompts" / ("implement.md" if kind == "harness" else "review.md")).read_text()
-    return base + f"\n\nCURRENT TASK\nID: {task['id']}\nTITLE: {task['title']}\nPRIORITY: {task['priority']}\n"
+def find_task(tasks: list[dict], task_id: str) -> dict | None:
+    return next((task for task in tasks if task["id"] == task_id), None)
 
 
-def mark_task(tasks: list[dict], task_id: str, status: str) -> None:
-    for task in tasks:
-        if task["id"] == task_id:
-            task["status"] = status
-            return
+def finalize_committed_task(state: dict, task: dict, info: dict) -> str:
+    after_head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+    before_head = info.get("before_head")
+    if before_head and after_head == before_head:
+        return "pending"
+    verify()
+    info["status"] = "done"
+    info["phase"] = "complete"
+    info["last_result"] = "committed_and_verified"
+    info["completed_at"] = now()
+    info["after_head"] = after_head
+    state["current_task"] = None
+    state["runner_status"] = "idle"
+    save_state(state)
+    return "done"
 
 
-def write_tasks(data: dict, tasks: list[dict]) -> None:
-    lines = ["[queue]", "version = 1", 'branch = "alpha-development"', ""]
-    for task in tasks:
-        lines += ["[[tasks]]", f'id = "{task["id"]}"', f'priority = "{task["priority"]}"',
-                  f'agent = "{task["agent"]}"', f'status = "{task["status"]}"',
-                  f'title = "{task["title"]}"']
-        if task.get("depends_on"):
-            deps = ", ".join(f'"{x}"' for x in task["depends_on"])
-            lines.append(f"depends_on = [{deps}]")
-        lines.append("")
-    TASKS_FILE.write_text("\n".join(lines), encoding="utf-8")
-
-
-def run_once() -> bool:
+def run_once(state: dict) -> str:
     require_branch()
-    data = load_tasks()
-    tasks = data["tasks"]
-    task = pick_task(tasks)
-    if task is None:
-        print("No ready pending tasks.")
-        return False
+    tasks = load_tasks()
 
-    baseline = git_status()
-    baseline_head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    if baseline:
-        raise RuntimeError("Working tree must be clean before an autonomous task. Create a WIP checkpoint first.")
-    attempt = 1
-    save_state(task["id"], "implementation", attempt, task["agent"], "starting")
-    log = log_path(task["id"], task["agent"])
-    kind = task["agent"]
-    timeout = 3600 if kind == "harness" else 1800
-    rc = run_agent(kind, prompt_for(task, kind), timeout, log)
+    active_id = state.get("current_task")
+    active = find_task(tasks, active_id) if active_id else None
+    task = None
+    if active is not None:
+        info = state["tasks"].setdefault(active_id, {"status": "pending", "attempts": 1, "turns": 0})
+        if info.get("status") == "running":
+            state["runner_status"] = "recovering"
+            save_state(state)
+        if info.get("attempts", 0) > MAX_ATTEMPTS:
+            info["status"] = "blocked"
+            state["current_task"] = None
+            save_state(state)
+            active = None
+        else:
+            if not git_status():
+                if info.get("before_head") and run(["git", "rev-parse", "HEAD"]).stdout.strip() != info["before_head"]:
+                    return finalize_committed_task(state, active, info)
+            task = active
+    else:
+        task = None
+
+    if task is None:
+        require_clean("before new task start")
+        task = next_task(tasks, state)
+        save_state(state)
+        if task is None:
+            state["runner_status"] = "idle"
+            save_state(state)
+            return "idle"
+        tid = task["id"]
+        info = state["tasks"][tid]
+        info["attempts"] = int(info.get("attempts", 0)) + 1
+        info["turns"] = 0
+        info["phase"] = "implementation" if task["agent"] == "harness" else "review"
+        info["status"] = "running"
+        info["started_at"] = now()
+        info["before_head"] = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+        state["current_task"] = tid
+        state["runner_status"] = "working"
+        save_state(state)
+    else:
+        tid = task["id"]
+        info = state["tasks"][tid]
+        info["status"] = "running"
+        state["runner_status"] = "working"
+        save_state(state)
+
+    if int(info.get("turns", 0)) >= MAX_TURNS_PER_ATTEMPT:
+        info["status"] = "pending" if int(info.get("attempts", 0)) < MAX_ATTEMPTS else "blocked"
+        info["phase"] = "turn-limit"
+        info["last_result"] = "max_ai_turns_reached"
+        if info["status"] == "blocked":
+            state["current_task"] = None
+        save_state(state)
+        return "failed"
+
+    info["turns"] = int(info.get("turns", 0)) + 1
+    save_state(state)
+    prompt, timeout = prompt_for(task, info)
+    log = log_path(tid, task["agent"])
+    try:
+        rc = run_agent(task["agent"], prompt, timeout, log)
+    except subprocess.TimeoutExpired:
+        dirty = bool(git_status())
+        info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+        info["phase"] = "timeout-resume" if dirty else "timeout"
+        info["last_result"] = "timeout_resume" if dirty else "timeout"
+        if info["status"] == "blocked":
+            state["current_task"] = None
+        save_state(state)
+        return "failed"
 
     if rc != 0:
-        save_state(task["id"], "failed", attempt, kind, f"exit_{rc}")
-        mark_task(tasks, task["id"], "pending")
-        write_tasks(data, tasks)
-        return True
+        dirty = bool(git_status())
+        info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+        info["phase"] = "agent-exit-resume" if dirty else "agent-exit"
+        info["last_result"] = f"exit_{rc}_resume" if dirty else f"exit_{rc}"
+        if info["status"] == "blocked":
+            state["current_task"] = None
+        save_state(state)
+        return "failed"
 
-    current = git_status()
-    if current:
-        save_state(task["id"], "failed", attempt, kind, "dirty_tree_after_agent")
-        print("Agent exited successfully but left uncommitted changes; refusing to mark task done.")
-        return True
-    if run(["git", "rev-parse", "HEAD"]).stdout.strip() == baseline_head:
-        save_state(task["id"], "failed", attempt, kind, "no_commit")
-        print("Agent exited successfully but created no commit; refusing to advance the queue.")
-        return True
-    verify_after_agent()
-    save_state(task["id"], "completed", attempt, kind, "committed_and_clean")
-    mark_task(tasks, task["id"], "done")
-    write_tasks(data, tasks)
-    return True
+    after_head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+    if after_head == info["before_head"]:
+        dirty = bool(git_status())
+        info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+        info["phase"] = "no-commit-resume" if dirty else "no-commit"
+        info["last_result"] = "agent_needs_continuation" if dirty else "agent_created_no_commit"
+        if info["status"] == "blocked":
+            state["current_task"] = None
+        save_state(state)
+        return "failed"
+
+    return finalize_committed_task(state, task, info)
+
+
+def acquire_lock():
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    fh = LOCK_FILE.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise RuntimeError("another Luna Agent runner is already active") from exc
+    return fh
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Sequential Luna Agent orchestrator")
-    parser.add_argument("--once", action="store_true", help="run one ready task and exit")
-    parser.add_argument("--continuous", action="store_true", help="keep processing ready tasks")
+    parser = argparse.ArgumentParser(description="Project Luna sequential agent runner")
+    parser.add_argument("--once", action="store_true", help="process one AI turn")
+    parser.add_argument("--continuous", action="store_true", help="process tasks continuously")
+    parser.add_argument("--status", action="store_true", help="show durable runner/task state")
     args = parser.parse_args()
-    if not args.once and not args.continuous:
-        parser.error("choose --once or --continuous")
+    if args.status:
+        state = load_state()
+        print(json.dumps(state, indent=2, sort_keys=True))
+        return 0
+    if args.once == args.continuous:
+        parser.error("choose exactly one of --once or --continuous")
+
+    lock = acquire_lock()
+    del lock
+    state = load_state()
+    state["runner_status"] = "starting"
+    save_state(state)
 
     if args.once:
-        return 0 if run_once() is not None else 1
+        result = run_once(state)
+        print(result)
+        return 0 if result in {"done", "idle"} else 2
 
     while True:
-        progressed = run_once()
-        if not progressed:
-            time.sleep(30)
-        else:
-            time.sleep(5)
+        try:
+            result = run_once(state)
+            if result == "idle":
+                time.sleep(60)
+            elif result == "done":
+                time.sleep(5)
+            else:
+                time.sleep(30)
+        except KeyboardInterrupt:
+            return 130
+        except Exception as exc:
+            state["runner_error"] = str(exc)
+            state["runner_error_at"] = now()
+            state["runner_status"] = "paused"
+            save_state(state)
+            print(f"Luna Agent paused: {exc}", file=sys.stderr)
+            time.sleep(60)
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        print("Luna Agent stopped by user.")
-        raise SystemExit(130)
-    except Exception as exc:
-        print(f"Luna Agent fatal error: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+    raise SystemExit(main())
