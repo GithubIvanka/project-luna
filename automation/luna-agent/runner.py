@@ -28,6 +28,7 @@ STATE_DIR = Path.home() / ".local/state/project-luna/luna-agent"
 STATE_FILE = STATE_DIR / "state.json"
 LOCK_FILE = STATE_DIR / "runner.lock"
 HEARTBEAT_FILE = STATE_DIR / "heartbeat.json"
+PAUSE_FILE = STATE_DIR / "PAUSE"
 BRANCH = "alpha-development"
 MAX_ATTEMPTS = 3
 MAX_TURNS_PER_ATTEMPT = 6
@@ -85,7 +86,13 @@ def require_branch() -> None:
         raise RuntimeError(f"expected branch {BRANCH!r}, got {current or '<detached>'!r}")
 
 
+def check_not_paused() -> None:
+    if PAUSE_FILE.exists():
+        raise RuntimeError(f"manual pause requested: remove {PAUSE_FILE}")
+
+
 def require_clean(reason: str) -> None:
+    check_not_paused()
     status = git_status()
     if status:
         raise RuntimeError(f"working tree is not clean ({reason}); refusing autonomous mutation")
@@ -341,7 +348,15 @@ def main() -> int:
     save_state(state)
 
     if args.once:
-        result = run_once(state)
+        try:
+            result = run_once(state)
+        except Exception as exc:
+            state["runner_status"] = "paused"
+            state["runner_error"] = str(exc)
+            state["runner_error_at"] = now()
+            save_state(state)
+            print(f"Luna Agent paused: {exc}", file=sys.stderr)
+            return 2
         print(result)
         return 0 if result in {"done", "idle"} else 2
 
