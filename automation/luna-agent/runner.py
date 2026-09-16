@@ -20,6 +20,8 @@ import sys
 import time
 import tomllib
 
+from verification import run_check
+
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 TASKS_FILE = HERE / "tasks.toml"
@@ -218,10 +220,20 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
     return prompt, HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
 
 
-def verify() -> None:
-    result = run(["git", "diff", "--check"])
-    if result.returncode != 0:
-        raise RuntimeError("git diff --check failed")
+def verify_checks(task: dict, state: dict, info: dict, log: Path) -> bool:
+    names = task.get("verification", ["git-diff-check"])
+    info["verification"] = {name: {"status": "running"} for name in names}
+    save_state(state)
+    failed = False
+    with log.open("a", encoding="utf-8") as fh:
+        for name in names:
+            ok, output = run_check(name)
+            info["verification"][name] = {"status": "pass" if ok else "fail", "checked_at": now()}
+            fh.write(f"\n=== VERIFY {name}: {PASS if ok else FAIL} ===\n")
+            fh.write(output.rstrip() + "\n")
+            failed = failed or not ok
+    save_state(state)
+    return not failed
 
 
 def find_task(tasks: list[dict], task_id: str) -> dict | None:
@@ -337,6 +349,17 @@ def run_once(state: dict) -> str:
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "no-commit-resume" if dirty else "no-commit"
         info["last_result"] = "agent_needs_continuation" if dirty else "agent_created_no_commit"
+        if info["status"] == "blocked":
+            state["current_task"] = None
+        save_state(state)
+        return "failed"
+
+    info["phase"] = "verification"
+    save_state(state)
+    if not verify_checks(task, state, info, log):
+        info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+        info["last_result"] = "verification_failed"
+        info["phase"] = "verification-failed"
         if info["status"] == "blocked":
             state["current_task"] = None
         save_state(state)

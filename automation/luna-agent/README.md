@@ -45,6 +45,12 @@ Task acceptance criteria are stored in `tasks.toml` and injected into every AI
 turn so an agent has explicit completion conditions instead of only a title.
 The queue format is versioned and validated before work begins.
 
+## Verification
+
+Every task runs an allow-listed verification phase after the agent reports success.
+See `VERIFICATION.md` for the checks and `verification.py` for the implementation.
+A failed check keeps the task resumable instead of marking it done.
+
 ## Safety
 
 The runner is not an installer and does not authorize physical-disk changes,
