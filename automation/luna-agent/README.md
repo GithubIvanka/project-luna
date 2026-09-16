@@ -81,3 +81,7 @@ systemctl --user status project-luna-agent.service
 ```
 
 Stop it with `systemctl --user disable --now project-luna-agent.service`.
+
+To pause a running service without editing the repository, create the external
+marker `~/.local/state/project-luna/luna-agent/PAUSE`. The runner will stop
+starting/resuming work; remove the marker to continue.
