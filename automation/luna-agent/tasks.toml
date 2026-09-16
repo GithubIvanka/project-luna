@@ -1,0 +1,50 @@
+[queue]
+version = 1
+branch = "alpha-development"
+
+[[tasks]]
+id = "BOOT-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete luna-init PID1 bootstrap"
+
+[[tasks]]
+id = "BOOT-002"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete logical root and persistent DATA integration"
+depends_on = ["BOOT-001"]
+
+[[tasks]]
+id = "BOOT-003"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Make the QEMU direct-boot path end-to-end"
+depends_on = ["BOOT-002"]
+
+[[tasks]]
+id = "REVIEW-001"
+priority = "P0"
+agent = "opencode-review"
+status = "pending"
+title = "Independently audit the completed boot slice"
+depends_on = ["BOOT-003"]
+
+[[tasks]]
+id = "RUNTIME-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Integrate luna-system-runtime, first-run and login"
+depends_on = ["REVIEW-001"]
+
+[[tasks]]
+id = "DESKTOP-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Bring up the niri and Noctalia desktop path"
+depends_on = ["RUNTIME-001"]

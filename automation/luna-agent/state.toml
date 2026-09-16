@@ -1,0 +1,19 @@
+version = 1
+current_task = ""
+phase = "idle"
+attempt = 0
+last_agent = ""
+last_result = ""
+updated_at = ""
+
+[limits]
+max_attempts_per_task = 3
+harness_timeout_seconds = 3600
+opencode_timeout_seconds = 1800
+
+[policy]
+protected_branch = "develop"
+working_branch = "alpha-development"
+allow_host_reboot = false
+allow_physical_disk_changes = false
+allow_user_data_deletion = false
