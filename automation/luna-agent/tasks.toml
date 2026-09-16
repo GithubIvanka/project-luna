@@ -1,5 +1,5 @@
 [queue]
-version = 1
+version = 2
 branch = "alpha-development"
 
 [[tasks]]
@@ -8,6 +8,7 @@ priority = "P0"
 agent = "harness"
 status = "pending"
 title = "Complete luna-init PID1 bootstrap"
+acceptance = ["luna-init is PID1 on the direct boot path", "focused Rust tests pass", "git diff --check passes", "agent creates a focused commit"]
 
 [[tasks]]
 id = "BOOT-002"
@@ -16,6 +17,7 @@ agent = "harness"
 status = "pending"
 title = "Complete logical root and persistent DATA integration"
 depends_on = ["BOOT-001"]
+acceptance = ["logical root follows the accepted Luna mapping contract", "persistent LUNA-DATA integration is exercised by tests", "no initramfs staging is introduced", "agent creates a focused commit"]
 
 [[tasks]]
 id = "BOOT-003"
@@ -24,6 +26,7 @@ agent = "harness"
 status = "pending"
 title = "Make the QEMU direct-boot path end-to-end"
 depends_on = ["BOOT-002"]
+acceptance = ["UEFI to luna-init direct boot is exercised in QEMU/OVMF", "boot reaches the intended userspace milestone", "failure diagnostics are preserved", "agent creates a focused commit"]
 
 [[tasks]]
 id = "REVIEW-001"
@@ -32,6 +35,7 @@ agent = "opencode-review"
 status = "pending"
 title = "Independently audit the completed boot slice"
 depends_on = ["BOOT-003"]
+acceptance = ["review checks the produced implementation rather than the baseline", "boot-critical findings are reproduced", "confirmed fixes are tested", "agent creates a focused commit when fixes are made"]
 
 [[tasks]]
 id = "RUNTIME-001"
@@ -40,6 +44,7 @@ agent = "harness"
 status = "pending"
 title = "Integrate luna-system-runtime, first-run and login"
 depends_on = ["REVIEW-001"]
+acceptance = ["system runtime starts after luna-init", "first-run creates a usable user state", "login reaches the expected session milestone", "agent creates a focused commit"]
 
 [[tasks]]
 id = "DESKTOP-001"
@@ -48,3 +53,4 @@ agent = "harness"
 status = "pending"
 title = "Bring up the niri and Noctalia desktop path"
 depends_on = ["RUNTIME-001"]
+acceptance = ["desktop root builds successfully", "niri and Noctalia launch in the target session", "desktop smoke test passes", "agent creates a focused commit"]

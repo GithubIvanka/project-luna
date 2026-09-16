@@ -41,6 +41,9 @@ python3 automation/luna-agent/runner.py --continuous
 
 Continuous mode is intended for long unattended development sessions. It
 sleeps between tasks and preserves task attempts and runner errors externally.
+Task acceptance criteria are stored in `tasks.toml` and injected into every AI
+turn so an agent has explicit completion conditions instead of only a title.
+The queue format is versioned and validated before work begins.
 
 ## Safety
 
@@ -85,3 +88,9 @@ Stop it with `systemctl --user disable --now project-luna-agent.service`.
 To pause a running service without editing the repository, create the external
 marker `~/.local/state/project-luna/luna-agent/PAUSE`. The runner will stop
 starting/resuming work; remove the marker to continue.
+
+## Runtime tuning
+
+The defaults are conservative, but unattended runs can override them without
+editing the repository: `LUNA_AGENT_MAX_ATTEMPTS`, `LUNA_AGENT_MAX_TURNS`,
+`LUNA_AGENT_HARNESS_TIMEOUT`, and `LUNA_AGENT_OPENCODE_TIMEOUT`.

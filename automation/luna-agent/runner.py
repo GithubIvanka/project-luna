@@ -30,8 +30,11 @@ LOCK_FILE = STATE_DIR / "runner.lock"
 HEARTBEAT_FILE = STATE_DIR / "heartbeat.json"
 PAUSE_FILE = STATE_DIR / "PAUSE"
 BRANCH = "alpha-development"
-MAX_ATTEMPTS = 3
-MAX_TURNS_PER_ATTEMPT = 6
+MAX_ATTEMPTS = int(os.environ.get("LUNA_AGENT_MAX_ATTEMPTS", "3"))
+MAX_TURNS_PER_ATTEMPT = int(os.environ.get("LUNA_AGENT_MAX_TURNS", "6"))
+HARNESS_TIMEOUT = int(os.environ.get("LUNA_AGENT_HARNESS_TIMEOUT", "3600"))
+OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "1800"))
+TASKS_VERSION = 2
 
 
 def run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
@@ -44,7 +47,26 @@ def now() -> str:
 
 def load_tasks() -> list[dict]:
     with TASKS_FILE.open("rb") as fh:
-        return tomllib.load(fh)["tasks"]
+        data = tomllib.load(fh)
+    queue = data.get("queue", {})
+    if queue.get("version") != TASKS_VERSION:
+        raise RuntimeError(f"unsupported task queue version: {queue.get('version')!r}")
+    if queue.get("branch") != BRANCH:
+        raise RuntimeError(f"task queue targets {queue.get('branch')!r}, expected {BRANCH!r}")
+    tasks = data.get("tasks", [])
+    if not tasks:
+        return []
+    seen: set[str] = set()
+    for task in tasks:
+        tid = task.get("id")
+        if not tid or tid in seen:
+            raise RuntimeError(f"invalid or duplicate task id: {tid!r}")
+        seen.add(tid)
+        if task.get("agent") not in {"harness", "opencode-review"}:
+            raise RuntimeError(f"unsupported agent for {tid}: {task.get('agent')!r}")
+        if not task.get("title"):
+            raise RuntimeError(f"task {tid} has no title")
+    return tasks
 
 
 def load_state() -> dict:
@@ -185,10 +207,15 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
     prompt += f"ID: {task['id']}\nTITLE: {task['title']}\nPRIORITY: {task['priority']}\n"
     prompt += f"ATTEMPT: {info.get('attempts', 1)}/{MAX_ATTEMPTS}\n"
     prompt += f"AI TURN: {info.get('turns', 0) + 1}/{MAX_TURNS_PER_ATTEMPT}\n"
+    acceptance = task.get("acceptance", [])
+    if acceptance:
+        prompt += "ACCEPTANCE CRITERIA\n"
+        for criterion in acceptance:
+            prompt += f"- {criterion}\n"
     if info.get("turns", 0):
         prompt += "This is a continuation of an earlier AI session. Preserve the existing work, inspect the current tree, and continue from where the previous session stopped. Do not restart or discard the implementation.\n"
     prompt += "Implement or review this task using the repository's current accepted architecture.\n"
-    return prompt, 3600 if kind == "harness" else 1800
+    return prompt, HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
 
 
 def verify() -> None:
