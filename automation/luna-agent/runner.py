@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -102,6 +103,32 @@ def write_heartbeat(state: dict) -> None:
 
 def git_status() -> list[str]:
     return run(["git", "status", "--short"]).stdout.splitlines()
+
+
+def git_head() -> str:
+    return run(["git", "rev-parse", "HEAD"]).stdout.strip()
+
+
+def git_tree_fingerprint() -> str:
+    parts = []
+    for args in (
+        ["git", "status", "--short", "--untracked-files=all"],
+        ["git", "diff", "--binary"],
+        ["git", "diff", "--cached", "--binary"],
+    ):
+        result = run(args)
+        if result.returncode != 0:
+            raise RuntimeError(f"git fingerprint command failed: {' '.join(args)}")
+        parts.append(result.stdout)
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def require_expected_tree(info: dict) -> None:
+    expected = info.get("expected_tree")
+    if expected is None:
+        return
+    if git_tree_fingerprint() != expected:
+        raise RuntimeError("working tree content changed outside the current AI turn; refusing autonomous resume")
 
 
 def require_branch() -> None:
@@ -216,6 +243,11 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
             prompt += f"- {criterion}\n"
     if info.get("turns", 0):
         prompt += "This is a continuation of an earlier AI session. Preserve the existing work, inspect the current tree, and continue from where the previous session stopped. Do not restart or discard the implementation.\n"
+    if info.get("verification_status") == "failed":
+        prompt += "PREVIOUS VERIFICATION FAILED. Inspect the persisted verification results below, reproduce the failure, fix the implementation, and rerun the relevant checks before committing again.\n"
+        for name, result in info.get("verification", {}).items():
+            if result.get("status") == "fail":
+                prompt += f"- {name}: {result.get('output_tail', '').strip()}\n"
     prompt += "Implement or review this task using the repository's current accepted architecture.\n"
     return prompt, HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
 
@@ -227,11 +259,19 @@ def verify_checks(task: dict, state: dict, info: dict, log: Path) -> bool:
     failed = False
     with log.open("a", encoding="utf-8") as fh:
         for name in names:
+            started = time.monotonic()
             ok, output = run_check(name)
-            info["verification"][name] = {"status": "pass" if ok else "fail", "checked_at": now()}
-            fh.write(f"\n=== VERIFY {name}: {PASS if ok else FAIL} ===\n")
+            elapsed = round(time.monotonic() - started, 3)
+            info["verification"][name] = {
+                "status": "pass" if ok else "fail",
+                "checked_at": now(),
+                "duration_seconds": elapsed,
+                "output_tail": output[-4000:],
+            }
+            fh.write(f"\n=== VERIFY {name}: {'PASS' if ok else 'FAIL'} ===\n")
             fh.write(output.rstrip() + "\n")
             failed = failed or not ok
+    info["verification_status"] = "passed" if not failed else "failed"
     save_state(state)
     return not failed
 
@@ -241,11 +281,15 @@ def find_task(tasks: list[dict], task_id: str) -> dict | None:
 
 
 def finalize_committed_task(state: dict, task: dict, info: dict) -> str:
-    after_head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+    after_head = git_head()
     before_head = info.get("before_head")
+    committed_head = info.get("committed_head")
     if before_head and after_head == before_head:
         return "pending"
-    verify()
+    if committed_head and after_head != committed_head:
+        raise RuntimeError("verified task commit no longer matches the repository HEAD")
+    if info.get("verification_status") != "passed":
+        return "pending"
     info["status"] = "done"
     info["phase"] = "complete"
     info["last_result"] = "committed_and_verified"
@@ -266,18 +310,50 @@ def run_once(state: dict) -> str:
     task = None
     if active is not None:
         info = state["tasks"].setdefault(active_id, {"status": "pending", "attempts": 1, "turns": 0})
-        if info.get("status") == "running":
-            state["runner_status"] = "recovering"
-            save_state(state)
+        require_expected_tree(info)
         if info.get("attempts", 0) > MAX_ATTEMPTS:
             info["status"] = "blocked"
             state["current_task"] = None
             save_state(state)
             active = None
+        elif info.get("phase") == "verification":
+            if git_status():
+                raise RuntimeError("committed task has an unexpected dirty tree before verification resume")
+            state["runner_status"] = "verifying"
+            save_state(state)
+            log = log_path(active_id, f"verification-resume-{info.get('attempts', 0)}")
+            if verify_checks(active, state, info, log):
+                return finalize_committed_task(state, active, info)
+            info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+            info["phase"] = "verification-failed"
+            info["last_result"] = "verification_failed_on_resume"
+            if info["status"] == "blocked":
+                state["current_task"] = None
+            save_state(state)
+            return "failed"
+        elif info.get("phase") == "verification-failed":
+            require_clean("before verification remediation")
+            task = active
         else:
-            if not git_status():
-                if info.get("before_head") and run(["git", "rev-parse", "HEAD"]).stdout.strip() != info["before_head"]:
+            current_tree = git_tree_fingerprint()
+            current_status = git_status()
+            current_head = git_head()
+            if not current_status and info.get("before_head") and current_head != info["before_head"]:
+                info["committed_head"] = current_head
+                info["expected_tree"] = current_tree
+                info["phase"] = "verification"
+                state["runner_status"] = "verifying"
+                save_state(state)
+                log = log_path(active_id, f"verification-recover-{info.get('attempts', 0)}")
+                if verify_checks(active, state, info, log):
                     return finalize_committed_task(state, active, info)
+                info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
+                info["phase"] = "verification-failed"
+                info["last_result"] = "verification_failed_after_recovery"
+                if info["status"] == "blocked":
+                    state["current_task"] = None
+                save_state(state)
+                return "failed"
             task = active
     else:
         task = None
@@ -297,7 +373,8 @@ def run_once(state: dict) -> str:
         info["phase"] = "implementation" if task["agent"] == "harness" else "review"
         info["status"] = "running"
         info["started_at"] = now()
-        info["before_head"] = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+        info["before_head"] = git_head()
+        info["expected_tree"] = git_tree_fingerprint()
         state["current_task"] = tid
         state["runner_status"] = "working"
         save_state(state)
@@ -324,7 +401,9 @@ def run_once(state: dict) -> str:
     try:
         rc = run_agent(task["agent"], prompt, timeout, log)
     except subprocess.TimeoutExpired:
-        dirty = bool(git_status())
+        status = git_status()
+        dirty = bool(status)
+        info["expected_tree"] = git_tree_fingerprint()
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "timeout-resume" if dirty else "timeout"
         info["last_result"] = "timeout_resume" if dirty else "timeout"
@@ -334,7 +413,9 @@ def run_once(state: dict) -> str:
         return "failed"
 
     if rc != 0:
-        dirty = bool(git_status())
+        status = git_status()
+        dirty = bool(status)
+        info["expected_tree"] = git_tree_fingerprint()
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "agent-exit-resume" if dirty else "agent-exit"
         info["last_result"] = f"exit_{rc}_resume" if dirty else f"exit_{rc}"
@@ -343,9 +424,11 @@ def run_once(state: dict) -> str:
         save_state(state)
         return "failed"
 
-    after_head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
+    after_head = git_head()
+    status = git_status()
     if after_head == info["before_head"]:
-        dirty = bool(git_status())
+        info["expected_tree"] = git_tree_fingerprint()
+        dirty = bool(status)
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "no-commit-resume" if dirty else "no-commit"
         info["last_result"] = "agent_needs_continuation" if dirty else "agent_created_no_commit"
@@ -354,7 +437,10 @@ def run_once(state: dict) -> str:
         save_state(state)
         return "failed"
 
+    info["committed_head"] = after_head
+    info["expected_tree"] = git_tree_fingerprint()
     info["phase"] = "verification"
+    state["runner_status"] = "verifying"
     save_state(state)
     if not verify_checks(task, state, info, log):
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
@@ -378,21 +464,85 @@ def acquire_lock():
     return fh
 
 
+def pid_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def effective_status(state: dict) -> str:
+    if PAUSE_FILE.exists():
+        return "paused"
+    raw = state.get("runner_status", "idle")
+    if raw in {"starting", "working", "recovering", "verifying"}:
+        heartbeat = {}
+        if HEARTBEAT_FILE.exists():
+            try:
+                heartbeat = json.loads(HEARTBEAT_FILE.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                heartbeat = {}
+        if not pid_alive(heartbeat.get("pid")):
+            return "stale"
+    return raw
+
+
+def doctor() -> int:
+    failures = []
+    warnings = []
+    try:
+        require_branch()
+    except RuntimeError as exc:
+        failures.append(str(exc))
+    try:
+        tasks = load_tasks()
+        print(f"queue: OK ({len(tasks)} tasks)")
+    except Exception as exc:
+        failures.append(f"queue: {exc}")
+    for label, resolver in (("dsh", resolve_dsh), ("opencode", resolve_opencode)):
+        try:
+            print(f"{label}: {resolver()}")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+    status = git_status()
+    if status:
+        warnings.append(f"working tree is dirty ({len(status)} status entries)")
+    else:
+        print("working tree: clean")
+    unit = Path.home() / ".config/systemd/user/project-luna-agent.service"
+    print(f"systemd unit: {'installed' if unit.exists() else 'not installed'}")
+    if PAUSE_FILE.exists():
+        warnings.append(f"manual pause marker exists: {PAUSE_FILE}")
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    for failure in failures:
+        print(f"error: {failure}", file=sys.stderr)
+    return 2 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Project Luna sequential agent runner")
     parser.add_argument("--once", action="store_true", help="process one AI turn")
     parser.add_argument("--continuous", action="store_true", help="process tasks continuously")
     parser.add_argument("--status", action="store_true", help="show durable runner/task state")
+    parser.add_argument("--doctor", action="store_true", help="check local agent prerequisites without starting work")
     args = parser.parse_args()
     if args.status:
         state = load_state()
-        print(json.dumps(state, indent=2, sort_keys=True))
+        payload = dict(state)
+        payload["effective_status"] = effective_status(state)
+        payload["pause_marker"] = str(PAUSE_FILE) if PAUSE_FILE.exists() else None
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    if args.doctor:
+        return doctor()
     if args.once == args.continuous:
         parser.error("choose exactly one of --once or --continuous")
 
     lock = acquire_lock()
-    del lock
     state = load_state()
     state["runner_status"] = "starting"
     save_state(state)

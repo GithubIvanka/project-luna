@@ -3,11 +3,21 @@ version = 2
 branch = "alpha-development"
 
 [[tasks]]
+id = "HANDOFF-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete luna-boot to Linux handoff and boot-progress diagnostics"
+acceptance = ["real Linux bzImage direct entry works in QEMU/OVMF", "64-bit entry state, CR3, stack and Linux boot_params are valid", "Luna setup_data chain contains handoff and RAM boot-progress record", "Linux accepts LunaBootHandoffV1 and validates luna-init bytes", "failure path records a diagnosable boot-progress state", "agent creates a focused commit"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
 id = "BOOT-001"
 priority = "P0"
 agent = "harness"
 status = "pending"
 title = "Complete luna-init PID1 bootstrap"
+depends_on = ["HANDOFF-001"]
 acceptance = ["luna-init is PID1 on the direct boot path", "focused Rust tests pass", "git diff --check passes", "agent creates a focused commit"]
 verification = ["git-diff-check", "luna-init-test", "luna-init-static"]
 

@@ -35,12 +35,16 @@ pauses rather than taking ownership of those changes.
 ## Commands
 
 ```bash
+python3 automation/luna-agent/runner.py --doctor
+python3 automation/luna-agent/runner.py --status
 python3 automation/luna-agent/runner.py --once
 python3 automation/luna-agent/runner.py --continuous
 ```
 
-Continuous mode is intended for long unattended development sessions. It
-sleeps between tasks and preserves task attempts and runner errors externally.
+`--doctor` checks the branch, task queue, agent CLIs, and local service setup
+without starting autonomous work. Continuous mode is intended for long
+unattended development sessions. It sleeps between tasks and preserves task
+attempts and runner errors externally.
 Task acceptance criteria are stored in `tasks.toml` and injected into every AI
 turn so an agent has explicit completion conditions instead of only a title.
 The queue format is versioned and validated before work begins.
@@ -64,7 +68,12 @@ A task is allowed to span several independent Harness/OpenCode sessions.
 The runner keeps `attempts` and `turns` in `~/.local/state/project-luna/luna-agent/state.json`.
 When an AI session exits, times out, or finishes without committing but leaves
 work in the tree, the next turn resumes the same task instead of restarting it.
-Each task attempt allows up to six AI turns and three full attempts.
+The runner records the expected working-tree status between turns; an external
+change pauses autonomous work instead of being mixed into an AI continuation.
+After a commit, verification is a durable phase. A runner restart repeats an
+interrupted verification, while a failed verification is passed to a fresh AI
+turn for remediation. Each task attempt allows up to six AI turns and three
+full attempts.
 
 ## Status and heartbeat
 
