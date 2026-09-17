@@ -4,6 +4,10 @@
 //! but applications and Luna services must depend on this contract rather than
 //! on a concrete audio server.
 
+mod service;
+
+pub use service::AudioService;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Volume(u8);
 
