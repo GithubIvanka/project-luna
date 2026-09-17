@@ -21,6 +21,7 @@ members = [
   "components/luna-login",
   "components/luna-cli",
   "components/luna-audio",
+  "components/luna-platform",
   "components/luna-network",
   "components/luna-bluetooth",
   "components/luna-files",
