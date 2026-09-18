@@ -1,0 +1,732 @@
+using existing source checkout for https://github.com/niri-wm/niri.git at 8ed0da44d974c32c6877d2f4630c314da0717ecb
+using existing source checkout for https://github.com/noctalia-dev/noctalia.git at 45e721ba0fb47d6efc00ca47e156237954037c99
+using existing source checkout for https://github.com/noctalia-dev/noctalia-greeter.git at b4e668d4f8aada549d5c990c3a18458fae8be6b9
+using existing source checkout for https://github.com/kennylevinsen/greetd.git at 08efe60feceea8c81f9571c666880ff1e1c2e3ff
+using existing source checkout for https://github.com/ghostty-org/ghostty.git at 332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28
+using existing source checkout for https://gitlab.freedesktop.org/wayland/wayland.git at 87cc8a8728a923fc57938faa81ba0e74f34ecdc7
+using existing source checkout for https://gitlab.freedesktop.org/wayland/wayland-protocols.git at ee78491a237eaff9389a0ccf8680521d074407d3
+using existing source checkout for https://gitlab.freedesktop.org/wlroots/wlroots.git at d783533489e1f75d6886c2ab5c5960090ef268f8
+using existing source checkout for https://gitlab.freedesktop.org/pipewire/wireplumber.git at 84429b47943d789389fbde17c06b82efb197d04e
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wayland/build-luna'
+ninja: no work to do.
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/wayland/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wayland/build-luna'
+ninja: no work to do.
+Installing src/wayland-scanner to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing src/wayland-server-protocol.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing src/wayland-client-protocol.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing src/libwayland-server.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing src/libwayland-client.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing cursor/libwayland-cursor.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing egl/libwayland-egl.so.1.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/src/wayland-util.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/src/wayland-server.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/src/wayland-server-core.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/src/wayland-client.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/src/wayland-client-core.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/cursor/wayland-cursor.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/egl/wayland-egl.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/egl/wayland-egl-core.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/egl/wayland-egl-backend.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/src/wayland-version.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-scanner.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-server.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-client.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-cursor.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-egl.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/build-luna/meson-private/wayland-egl-backend.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/wayland-scanner.mk to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/protocol/wayland.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/protocol/wayland.dtd to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland
+Installing /home/sibitti/source/project-luna/dist/sources/wayland/wayland-scanner.m4 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/aclocal
+Installing symlink pointing to libwayland-server.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-server.so.0
+Installing symlink pointing to libwayland-server.so.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-server.so
+Installing symlink pointing to libwayland-client.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-client.so.0
+Installing symlink pointing to libwayland-client.so.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-client.so
+Installing symlink pointing to libwayland-cursor.so.0.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0
+Installing symlink pointing to libwayland-cursor.so.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-cursor.so
+Installing symlink pointing to libwayland-egl.so.1.26.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-egl.so.1
+Installing symlink pointing to libwayland-egl.so.1 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwayland-egl.so
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wayland-protocols/build-luna'
+ninja: no work to do.
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/wayland-protocols/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wayland-protocols/build-luna'
+ninja: no work to do.
+Installing include/wayland-protocols/linux-dmabuf-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/presentation-time-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/tablet-v2-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/viewporter-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-shell-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/alpha-modifier-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/color-management-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/color-representation-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/commit-timing-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/content-type-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/cursor-shape-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/drm-lease-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-background-effect-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-data-control-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-foreign-toplevel-list-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-idle-notify-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-image-capture-source-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-image-copy-capture-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-session-lock-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-transient-seat-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/ext-workspace-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/fifo-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/fractional-scale-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/linux-drm-syncobj-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/pointer-warp-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/security-context-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/single-pixel-buffer-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/tearing-control-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-activation-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-dialog-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-session-management-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-system-bell-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-toplevel-drag-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-toplevel-icon-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-toplevel-tag-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xwayland-shell-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/fullscreen-shell-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/idle-inhibit-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/input-method-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/input-timestamps-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/keyboard-shortcuts-inhibit-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/linux-dmabuf-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/linux-explicit-synchronization-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/pointer-constraints-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/pointer-gestures-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/primary-selection-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/relative-pointer-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/tablet-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/tablet-unstable-v2-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/text-input-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/text-input-unstable-v3-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-decoration-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-foreign-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-foreign-unstable-v2-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-output-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-shell-unstable-v5-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xdg-shell-unstable-v6-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xwayland-keyboard-grab-unstable-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-cutouts-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-input-method-v2-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-keyboard-filter-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-session-management-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-text-input-v3-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing include/wayland-protocols/xx-zones-v1-enum.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wayland-protocols
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/stable/linux-dmabuf
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/stable/presentation-time/presentation-time.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/stable/presentation-time
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/stable/tablet/tablet-v2.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/stable/tablet
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/stable/viewporter/viewporter.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/stable/viewporter
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/stable/xdg-shell/xdg-shell.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/stable/xdg-shell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/alpha-modifier/alpha-modifier-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/alpha-modifier
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/color-management/color-management-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/color-management
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/color-representation/color-representation-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/color-representation
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/commit-timing/commit-timing-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/commit-timing
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/content-type/content-type-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/content-type
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/cursor-shape/cursor-shape-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/cursor-shape
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/drm-lease/drm-lease-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/drm-lease
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-background-effect/ext-background-effect-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-background-effect
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-data-control/ext-data-control-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-data-control
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-foreign-toplevel-list
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-idle-notify/ext-idle-notify-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-idle-notify
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-image-capture-source/ext-image-capture-source-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-image-capture-source
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-image-copy-capture
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-session-lock/ext-session-lock-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-session-lock
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-transient-seat/ext-transient-seat-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-transient-seat
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/ext-workspace/ext-workspace-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/ext-workspace
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/fifo/fifo-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/fifo
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/fractional-scale/fractional-scale-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/fractional-scale
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/linux-drm-syncobj/linux-drm-syncobj-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/linux-drm-syncobj
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/pointer-warp/pointer-warp-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/pointer-warp
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/security-context/security-context-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/security-context
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/single-pixel-buffer/single-pixel-buffer-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/single-pixel-buffer
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/tearing-control/tearing-control-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/tearing-control
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-activation/xdg-activation-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-activation
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-dialog/xdg-dialog-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-dialog
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-session-management/xdg-session-management-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-session-management
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-system-bell/xdg-system-bell-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-system-bell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-toplevel-drag/xdg-toplevel-drag-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-toplevel-drag
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-toplevel-icon
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xdg-toplevel-tag/xdg-toplevel-tag-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xdg-toplevel-tag
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/staging/xwayland-shell/xwayland-shell-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/staging/xwayland-shell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/fullscreen-shell/fullscreen-shell-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/fullscreen-shell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/idle-inhibit
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/input-method/input-method-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/input-method
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/input-timestamps/input-timestamps-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/input-timestamps
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/keyboard-shortcuts-inhibit
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/linux-dmabuf
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/linux-explicit-synchronization/linux-explicit-synchronization-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/linux-explicit-synchronization
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/pointer-constraints
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/pointer-gestures
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/primary-selection/primary-selection-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/primary-selection
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/relative-pointer
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/tablet/tablet-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/tablet
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/tablet/tablet-unstable-v2.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/tablet
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/text-input/text-input-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/text-input
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/text-input/text-input-unstable-v3.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/text-input
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-decoration
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-foreign/xdg-foreign-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-foreign
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-foreign/xdg-foreign-unstable-v2.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-foreign
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-output/xdg-output-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-output
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-shell/xdg-shell-unstable-v5.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-shell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xdg-shell/xdg-shell-unstable-v6.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xdg-shell
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/unstable/xwayland-keyboard-grab/xwayland-keyboard-grab-unstable-v1.xml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wayland-protocols/unstable/xwayland-keyboard-grab
+Installing /home/sibitti/source/project-luna/dist/sources/wayland-protocols/build-luna/meson-private/wayland-protocols.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/pkgconfig
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wlroots/build-luna'
+ninja: no work to do.
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/wlroots/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wlroots/build-luna'
+ninja: no work to do.
+Installing subdir /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/xcursor.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/interface.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/libinput.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/wayland.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/session.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/multi.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/backend/headless.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/backend
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_switch.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_output.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_pointer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_touch.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_buffer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_keyboard.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_tablet_pad.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_ext_image_capture_source_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/interfaces/wlr_tablet_tool.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/interfaces
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/color.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/wlr_renderer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/drm_syncobj.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/interface.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/pixman.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/gles2.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/allocator.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/egl.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/dmabuf.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/drm_format_set.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/pass.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/swapchain.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/render/wlr_texture.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/render
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_single_pixel_buffer_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_export_dmabuf_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_fractional_scale_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_transient_seat_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_shm.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_compositor.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_switch.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_primary_selection.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_session_lock_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_linux_dmabuf_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_viewporter.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_color_management_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output_power_management_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_foreign_v2.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output_layout.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_presentation_time.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_fixes.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_server_decoration.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_ext_image_copy_capture_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_pointer_constraints_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_output_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_alpha_modifier_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_system_bell_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_pointer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_ext_workspace_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_relative_pointer_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_ext_foreign_toplevel_list_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_virtual_keyboard_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_touch.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_buffer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_linux_drm_syncobj_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_text_input_v3.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_toplevel_icon_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_input_device.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_drm.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output_management_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_seat.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_color_representation_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_dialog_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_keyboard.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_input_method_v2.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_data_device.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output_swapchain_manager.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_output_layer.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_content_type_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_primary_selection_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_keyboard_shortcuts_inhibit_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_layer_shell_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_scene.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_subcompositor.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_screencopy_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_tablet_pad.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_tearing_control_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_pointer_gestures_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_ext_data_control_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xcursor_manager.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_foreign_toplevel_management_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_data_control_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_security_context_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_ext_image_capture_source_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_idle_inhibit_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_tablet_tool.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_foreign_registry.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_foreign_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_decoration_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_keyboard_group.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_gamma_control_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_cursor.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_shell.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_cursor_shape_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_idle_notify_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_virtual_pointer_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_tablet_v2.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_activation_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_xdg_toplevel_tag_v1.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/types/wlr_damage_ring.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/types
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/box.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/region.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/addon.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/edges.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/log.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/util/transform.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/util
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/xwayland/xwayland.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/xwayland
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/xwayland/server.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/xwayland
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/include/wlr/xwayland/shell.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr/xwayland
+Installing libwlroots-0.20.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/build-luna/include/wlr/config.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/build-luna/include/wlr/version.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wlroots-0.20/wlr
+Installing /home/sibitti/source/project-luna/dist/sources/wlroots/build-luna/meson-private/wlroots-0.20.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wireplumber/build-luna'
+ninja: no work to do.
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/wireplumber/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/wireplumber/build-luna'
+ninja: no work to do.
+Installing subdir /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d/alsa-vm.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/wireplumber.conf.d
+Installing subdir /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/device.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/alsa.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/stream.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/v4l2.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/smart-equalizer.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/media-role-nodes.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/filter-graph.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/profile.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/libcamera.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/linking.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/log.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/bluetooth.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf.d.examples/access.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/doc/wireplumber/examples/wireplumber.conf.d
+Installing subdir /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/session-services.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/sm-objects.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/metadata.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/fallback-sink.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/linking-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/audio-group-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/common-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/node-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/filter-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/monitor-utils.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/lib/device-info-cache.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/lib
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/bluez-midi.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/alsa.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/bluez.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/alsa-midi.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/v4l2/name-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/v4l2
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/v4l2/create-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/v4l2
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/v4l2/create-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/v4l2
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/v4l2/enumerate-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/v4l2
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/v4l2/name-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/v4l2
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/libcamera/name-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/libcamera
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/libcamera/create-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/libcamera
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/libcamera/create-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/libcamera
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/libcamera/enumerate-device.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/libcamera
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/monitors/libcamera/name-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/monitors/libcamera
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-default-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-media-role-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/rescan.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-best-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-media-role-sink-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/mpris-pause.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-user-target.lua.example to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/link-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/get-filter-from-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/rescan-media-role-links.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-defined-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-filter-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/prepare-link.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/linking/find-audio-group-target.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/linking
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/client/access-portal.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/client
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/client/access-snap.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/client
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/client/access-default.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/client
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/find-voice-call-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/apply-routes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/autoswitch-bluetooth-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/apply-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/find-best-routes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/select-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/state-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/find-best-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/select-routes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/state-routes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/find-preferred-profile.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/device/automute-alsa-routes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/device
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/state-stream.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/find-media-role-default-volume.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/create-item.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/filter-graph.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/software-dsp.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/suspend-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/filter-forward-format.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/node/audio-group.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/node
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/default-nodes/state-default-nodes.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/default-nodes
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/default-nodes/rescan.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/default-nodes
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/default-nodes/find-best-default-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/default-nodes
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/default-nodes/apply-default-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/default-nodes
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/scripts/default-nodes/find-selected-default-node.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber/scripts/default-nodes
+Installing lib/wp/wpenums.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing lib/wp/libwireplumber-0.5.so.0.513.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu
+Installing modules/libwireplumber-module-settings.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-dbus-connection.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-default-nodes-api.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-reserve-device.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-portal-permissionstore.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-notifications-api.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-si-audio-adapter.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-si-node.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-si-standard-link.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-lua-scripting.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-mixer-api.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-file-monitor-api.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-log-settings.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-logind.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-standard-event-source.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-mpris.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing modules/libwireplumber-module-modem-manager.so to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/wireplumber-0.5
+Installing src/tools/wpctl to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing src/tools/wpexec to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing src/wireplumber to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/base-dirs.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/client.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/component-loader.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/conf.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/core.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/defs.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/device.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/error.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/event.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/event-dispatcher.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/event-hook.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/global-proxy.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/iterator.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/json-utils.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/link.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/log.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/metadata.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/settings.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/module.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/node.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/object.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/object-interest.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/object-manager.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/plugin.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/port.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/proc-utils.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/properties.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/proxy.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/proxy-interfaces.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/session-item.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/si-factory.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/si-interfaces.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/spa-json.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/spa-pod.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/spa-type.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/state.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/transition.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/wp.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/lib/wp/factory.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/build-luna/lib/wp/wpversion.h to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/include/wireplumber-0.5/wp
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/build-luna/meson-private/wireplumber-0.5.pc to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/pkgconfig
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/tools/shell-completion/wpctl.bash to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/bash-completion/completions
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/tools/shell-completion/wpctl.zsh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/zsh/site-functions
+Installing /home/sibitti/source/project-luna/dist/sources/wireplumber/src/config/wireplumber.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/wireplumber
+Installing symlink pointing to libwireplumber-0.5.so.0.513.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwireplumber-0.5.so.0
+Installing symlink pointing to libwireplumber-0.5.so.0 to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/x86_64-linux-gnu/libwireplumber-0.5.so
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.22s
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/noctalia/build-luna'
+[1/5] Generating noctalia_git_revision.h with a custom command
+[2/4] Compiling C++ object libnoctalia_core.a.p/src_launcher_math_provider.cpp.o
+[3/4] Linking static target libnoctalia_core.a
+[4/4] Linking target noctalia
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/noctalia/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/noctalia/build-luna'
+[1/4] Generating noctalia_git_revision.h with a custom command
+Installing subdir /home/sibitti/source/project-luna/dist/sources/noctalia/assets to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/noctalia-wallpaper.png to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/noctalia.svg to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/emoji.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/builtin.toml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/mango/mango.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/mango
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/mango/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/mango
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/sway/sway to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/sway
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/sway/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/sway
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/niri/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/niri
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/niri/niri.kdl to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/niri
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/gtk/gtk3.css to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/gtk
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/gtk/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/gtk
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/gtk/gtk4.css to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/gtk
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/btop/btop.theme to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/btop
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/btop/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/btop
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/emacs/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/emacs
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/emacs/output-path.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/emacs
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/emacs/emacs.el to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/emacs
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/cava/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/cava
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/cava/cava.ini to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/cava
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/kitty/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/kitty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/kitty/kitty.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/kitty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/ghostty/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/ghostty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/ghostty/ghostty to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/ghostty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/alacritty/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/alacritty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/alacritty/alacritty.toml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/alacritty
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/qt/qtct.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/qt
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/kde/kcolorscheme.colors to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/kde
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/wezterm/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/wezterm
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/wezterm/wezterm.toml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/wezterm
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/starship/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/starship
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/starship/starship.toml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/starship
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/scroll/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/scroll
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/scroll/scroll to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/scroll
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/labwc/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/labwc
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/labwc/labwc.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/labwc
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/hyprland/hyprland.lua to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/hyprland
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/hyprland/hyprland.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/hyprland
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/hyprland/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/hyprland
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/foot/apply.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/foot
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/foot/foot to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/foot
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/templates/helix/helix.toml to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/templates/helix
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/sounds/volume-change.wav to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/sounds
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/sounds/notification.wav to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/sounds
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/firefox_theme/css/userChrome.css to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/firefox_theme/css
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/firefox_theme/css/userContent.css to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/firefox_theme/css
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/uk-UA.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/nl.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/nn.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/tr.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/ko.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/de.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/be-Latn.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/fr.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/ku.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/pt-BR.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/es.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/en.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/ru.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/gl-ES.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/ca.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/pl.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/hu.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/cs.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/zh-Hans.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/vi.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/it.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/be.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/translations/sv.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/translations
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/fonts/tabler.ttf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/fonts
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/fonts/tabler-icons-license.txt to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/fonts
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/fonts/tabler.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia/assets/fonts
+Installing noctalia to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/dev.noctalia.Noctalia.desktop to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/applications
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia/assets/noctalia.svg to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/icons/hicolor/scalable/apps
+Directory already configured.
+
+Just run your build command (e.g. ninja) and Meson will regenerate as necessary.
+Run "meson setup --reconfigure" to force Meson to regenerate.
+
+If build failures persist, run "meson setup --wipe" to rebuild from scratch
+using the same options as passed when configuring the build.
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/noctalia-greeter/build-luna'
+[0/1] Regenerating build files
+Cleaning... 0 files.
+The Meson build system
+Version: 1.10.1
+Source dir: /home/sibitti/source/project-luna/dist/sources/noctalia-greeter
+Build dir: /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/build-luna
+Build type: native build
+Project name: noctalia-greeter
+Project version: 1.2.1
+C compiler for the host machine: cc (gcc 15.2.0 "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0")
+C linker for the host machine: cc ld.bfd 2.46
+C++ compiler for the host machine: c++ (gcc 15.2.0 "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0")
+C++ linker for the host machine: c++ ld.bfd 2.46
+Host machine cpu family: x86_64
+Host machine cpu: x86_64
+Dependency wayland-client found: YES 1.26.0 (cached)
+Dependency wayland-protocols found: YES 1.49 (cached)
+Dependency xkbcommon found: YES 1.13.1 (cached)
+Dependency freetype2 found: YES 26.5.20 (cached)
+Dependency fontconfig found: YES 2.17.1 (cached)
+Dependency cairo found: YES 1.18.4 (cached)
+Dependency cairo-ft found: YES 1.18.4 (cached)
+Dependency pango found: YES 1.57.0 (cached)
+Dependency pangocairo found: YES 1.57.0 (cached)
+Dependency pangoft2 found: YES 1.57.0 (cached)
+Dependency librsvg-2.0 found: YES 2.61.3 (cached)
+Dependency glib-2.0 found: YES 2.88.0 (cached)
+Dependency gobject-2.0 found: YES 2.88.0 (cached)
+Dependency gio-2.0 found: YES 2.88.0 (cached)
+Dependency wayland-server found: YES 1.26.0 (cached)
+Dependency tomlplusplus found: YES 3.4.0 (cached)
+Dependency nlohmann_json found: YES 3.11.3 (cached)
+Dependency wlroots-0.20 found: YES 0.20.2 (cached)
+Dependency libinput found: YES 1.31.1 (cached)
+Dependency egl found: YES 1.5 (cached)
+Dependency glesv2 found: YES 3.2 (cached)
+Dependency wayland-egl found: YES 18.1.0 (cached)
+Has header "stb/stb_image_resize2.h" : YES (cached)
+Dependency libwebp found: YES 1.5.0 (cached)
+Program wayland-scanner found: YES (/usr/bin/wayland-scanner)
+Configuring org.noctalia.greeter.apply-appearance.policy using configuration
+Build targets in project: 11
+
+noctalia-greeter 1.2.1
+
+  User defined options
+    b_lto    : true
+    buildtype: release
+    prefix   : /usr
+
+Found ninja-1.13.2 at /usr/bin/ninja
+[1/2] Linking target noctalia-greeter-compositor
+INFO: autodetecting backend as ninja
+INFO: calculating backend command to run: /usr/bin/ninja -C /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/build-luna -j 8
+ninja: Entering directory `/home/sibitti/source/project-luna/dist/sources/noctalia-greeter/build-luna'
+ninja: no work to do.
+Installing subdir /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/assets to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/assets/noctalia.svg to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter/assets
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/assets/fonts/tabler.ttf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter/assets/fonts
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/assets/fonts/tabler-icons-license.txt to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter/assets/fonts
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/assets/fonts/tabler.json to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter/assets/fonts
+Installing noctalia-greeter to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing noctalia-greeter-apply-appearance to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing noctalia-greeter-compositor to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/noctalia-greeter-session to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/noctalia-greeter-print-greetd-config to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/bin
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/greetd_setup_lib.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/print_greetd_config.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/setup_greetd_pam.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/scripts/setup_greeter_system.sh to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/noctalia-greeter
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/build-luna/org.noctalia.greeter.apply-appearance.policy to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/share/polkit-1/actions
+Installing /home/sibitti/source/project-luna/dist/sources/noctalia-greeter/data/tmpfiles.d/noctalia-greeter.conf to /home/sibitti/source/project-luna/dist/desktop-root-alpha/usr/lib/tmpfiles.d
+warning: unreachable expression
+   --> greetd/src/session/interface.rs:123:30
+    |
+113 | /                 execv(
+114 | |                     &bin,
+115 | |                     &[
+116 | |                         &bin,
+...   |
+121 | |                 .expect("unable to exec");
+    | |_________________________________________- any code following this expression is unreachable
+122 |
+123 |                   unreachable!("after exec");
+    |                                ^^^^^^^^^^^^ unreachable expression
+    |
+note: this expression has type `Infallible`, which is uninhabited
+   --> greetd/src/session/interface.rs:113:17
+    |
+113 | /                 execv(
+114 | |                     &bin,
+115 | |                     &[
+116 | |                         &bin,
+...   |
+121 | |                 .expect("unable to exec");
+    | |_________________________________________^
+    = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable expression
+   --> greetd/src/session/worker.rs:279:26
+    |
+268 | /             execve(
+269 | |                 &cpath,
+270 | |                 &[
+271 | |                     &cpath,
+...   |
+277 | |             .expect("unable to exec");
+    | |_____________________________________- any code following this expression is unreachable
+278 |
+279 |               unreachable!("after exec");
+    |                            ^^^^^^^^^^^^ unreachable expression
+    |
+note: this expression has type `Infallible`, which is uninhabited
+   --> greetd/src/session/worker.rs:268:13
+    |
+268 | /             execve(
+269 | |                 &cpath,
+270 | |                 &[
+271 | |                     &cpath,
+...   |
+277 | |             .expect("unable to exec");
+    | |_____________________________________^
+
+warning: hiding a lifetime that's named elsewhere is confusing
+  --> greetd/src/session/conv.rs:31:63
+   |
+31 |     pub fn new(sock: &'a std::os::unix::net::UnixDatagram) -> SessionConv {
+   |                       -- the lifetime is named here           ^^^^^^^^^^^ the same lifetime is hidden here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: consistently use `'a`
+   |
+31 |     pub fn new(sock: &'a std::os::unix::net::UnixDatagram) -> SessionConv<'a> {
+   |                                                                          ++++
+
+warning: `greetd` (bin "greetd") generated 3 warnings (run `cargo fix --bin "greetd" -p greetd` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 0.03s
+    Finished `release` profile [optimized] target(s) in 0.03s
