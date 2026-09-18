@@ -490,8 +490,9 @@ def run_once(state: dict) -> str:
         info["status"] = "pending" if int(info.get("attempts", 0)) < MAX_ATTEMPTS else "blocked"
         info["phase"] = "turn-limit"
         info["last_result"] = "max_ai_turns_reached"
-        if info["status"] == "blocked":
-            state["current_task"] = None
+        # A turn limit ends the current durable attempt. Clear current_task so
+        # the next loop selects the pending task again and increments attempts.
+        state["current_task"] = None
         save_state(state)
         return "failed"
 
