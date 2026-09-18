@@ -1,12 +1,14 @@
 //! UserSession domain boundary for Project Luna.
 //!
 //! A UserSession represents one interactive user context. It owns user/session
-//! identity and lifecycle. The graphical login surface is part of this
-//! lifecycle; it is not a separate `luna-session` component.
+//! identity and lifecycle, including the authentication boundary.
 
 use std::fmt;
 
 use luna_common::UserId;
+
+mod login;
+pub use login::{LoginError, handoff_current_identity};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u128);
@@ -68,6 +70,31 @@ impl UserSession {
     }
     pub const fn login_state(&self) -> LoginState {
         self.login_state
+    }
+
+    pub fn authenticate(&mut self) -> Result<(), LoginError> {
+        if self.state != SessionState::Starting {
+            return Err(LoginError::Session(SessionError::InvalidTransition {
+                from: self.state,
+                to: SessionState::Authenticating,
+            }));
+        }
+
+        self.transition(SessionState::Authenticating)
+            .map_err(LoginError::Session)?;
+
+        match login::authenticate() {
+            Ok(user) => {
+                self.user = user.username.into();
+                self.login_state = LoginState::Succeeded;
+                self.transition(SessionState::Active)
+                    .map_err(LoginError::Session)
+            }
+            Err(error) => {
+                self.login_state = LoginState::Failed;
+                Err(error)
+            }
+        }
     }
 
     pub fn login_succeeded(&mut self) -> Result<(), SessionError> {

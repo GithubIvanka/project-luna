@@ -217,6 +217,7 @@ pub enum RuntimeError {
     Process(ProcessError),
     UnknownSession(SessionId),
     Session(String),
+    Authentication(String),
     State(String),
 }
 impl fmt::Display for RuntimeError {
@@ -225,6 +226,7 @@ impl fmt::Display for RuntimeError {
             Self::Process(e) => write!(f, "process supervision failed: {e}"),
             Self::UnknownSession(id) => write!(f, "unknown session {}", id.get()),
             Self::Session(e) => write!(f, "session transition failed: {e}"),
+            Self::Authentication(e) => write!(f, "session authentication failed: {e}"),
             Self::State(e) => write!(f, "system state failed: {e}"),
         }
     }
@@ -282,10 +284,7 @@ impl SystemRuntimeService {
     ) -> Result<SessionId, RuntimeError> {
         let id = SessionId::new(self.next_session_id);
         self.next_session_id = self.next_session_id.saturating_add(1);
-        let mut session = UserSession::new(id, user);
-        session
-            .transition(SessionState::Authenticating)
-            .map_err(|e| RuntimeError::Session(e.to_string()))?;
+        let session = UserSession::new(id, user);
         self.sessions.insert(id, session);
         Ok(id)
     }
@@ -295,8 +294,8 @@ impl SystemRuntimeService {
             .get_mut(&id)
             .ok_or(RuntimeError::UnknownSession(id))?;
         session
-            .transition(SessionState::Active)
-            .map_err(|e| RuntimeError::Session(e.to_string()))
+            .authenticate()
+            .map_err(|e| RuntimeError::Authentication(e.to_string()))
     }
     pub fn cancel_login(&mut self, id: SessionId) -> Result<(), RuntimeError> {
         let session = self
@@ -567,15 +566,15 @@ mod tests {
         assert!(exited);
     }
     #[test]
-    fn login_session_requires_authentication() {
+    fn login_session_starts_before_authentication() {
         let mut rt = SystemRuntimeService::new();
         rt.start();
         let id = rt.create_login_session(UserId::from("alice")).unwrap();
+        let session = rt.session(id).unwrap();
+        assert_eq!(session.state(), SessionState::Starting);
         assert_eq!(
-            rt.session(id).unwrap().state(),
-            SessionState::Authenticating
+            session.login_state(),
+            luna_user_session::LoginState::Visible
         );
-        rt.authenticate_session(id).unwrap();
-        assert_eq!(rt.session(id).unwrap().state(), SessionState::Active);
     }
 }

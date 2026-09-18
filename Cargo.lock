@@ -766,13 +766,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "luna-login"
-version = "0.1.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "luna-namespace"
 version = "0.1.0"
 dependencies = [
@@ -841,6 +834,7 @@ dependencies = [
 name = "luna-user-session"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "luna-common",
 ]
 

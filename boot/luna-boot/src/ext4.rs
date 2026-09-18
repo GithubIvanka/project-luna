@@ -304,6 +304,10 @@ impl<D: BlockDevice> Ext4<D> {
             return Ok(());
         }
 
+        if inode.flags & EXT4_EXTENTS_FL != 0 {
+            return self.read_extent_range(&inode.blocks, offset, out);
+        }
+
         let bs = self.geometry.block_size as u64;
         let mut written = 0usize;
         while written < out.len() {
@@ -318,6 +322,103 @@ impl<D: BlockDevice> Ext4<D> {
                 &mut out[written..written + chunk],
             )?;
             written += chunk;
+        }
+        Ok(())
+    }
+
+    fn read_extent_range(
+        &mut self,
+        node: &[u8],
+        offset: u64,
+        out: &mut [u8],
+    ) -> BootResult<()> {
+        if u16_at(node, 0) != 0xf30a {
+            return Err(BootError::InvalidFilesystem);
+        }
+        let entries = u16_at(node, 2) as usize;
+        let depth = u16_at(node, 6);
+        if entries > 4 || 12 + entries * 12 > node.len() {
+            return Err(BootError::InvalidFilesystem);
+        }
+
+        if depth != 0 {
+            let bs = self.geometry.block_size as u64;
+            let mut written = 0usize;
+            while written < out.len() {
+                let file_offset = offset + written as u64;
+                let block_index = file_offset / bs;
+                let in_block = (file_offset % bs) as usize;
+                let chunk = (out.len() - written).min(self.geometry.block_size as usize - in_block);
+                self.read_extent_block_range(node, block_index, in_block, &mut out[written..written + chunk])?;
+                written += chunk;
+            }
+            return Ok(());
+        }
+
+        let bs = self.geometry.block_size as u64;
+        let end = offset
+            .checked_add(out.len() as u64)
+            .ok_or(BootError::FilesystemError)?;
+        let mut cursor = offset;
+
+        while cursor < end {
+            let block = cursor / bs;
+            let in_block = cursor % bs;
+            let mut found = None;
+            for i in 0..entries {
+                let p = 12 + i * 12;
+                let logical = u32_at(node, p) as u64;
+                let raw_len = u16_at(node, p + 4);
+                let len = (raw_len & 0x7fff) as u64;
+                let extent_end = logical
+                    .checked_add(len)
+                    .ok_or(BootError::InvalidFilesystem)?;
+                if block >= logical && block < extent_end {
+                    found = Some((p, logical, extent_end, raw_len));
+                    break;
+                }
+            }
+
+            let write_offset = (cursor - offset) as usize;
+            let extent_end = match found {
+                Some((p, logical, extent_end, raw_len)) => {
+                    if raw_len & 0x8000 != 0 {
+                        let bytes = ((extent_end * bs).saturating_sub(cursor))
+                            .min(end - cursor) as usize;
+                        out[write_offset..write_offset + bytes].fill(0);
+                        cursor += bytes as u64;
+                        continue;
+                    }
+                    let physical = (u32_at(node, p + 8) as u64)
+                        | ((u16_at(node, p + 6) as u64) << 32);
+                    let delta = block.checked_sub(logical).ok_or(BootError::FilesystemError)?;
+                    let physical = physical
+                        .checked_add(delta)
+                        .ok_or(BootError::FilesystemError)?;
+                    let available = (extent_end * bs)
+                        .checked_sub(cursor)
+                        .ok_or(BootError::FilesystemError)?;
+                    let bytes = available.min(end - cursor) as usize;
+                    let physical_offset = physical
+                        .checked_mul(bs)
+                        .and_then(|base| base.checked_add(in_block))
+                        .ok_or(BootError::FilesystemError)?;
+                    self.device.read_at(
+                        physical_offset,
+                        &mut out[write_offset..write_offset + bytes],
+                    )?;
+                    cursor += bytes as u64;
+                    extent_end
+                }
+                None => {
+                    let next_boundary = ((block + 1) * bs).min(end);
+                    let bytes = (next_boundary - cursor) as usize;
+                    out[write_offset..write_offset + bytes].fill(0);
+                    cursor += bytes as u64;
+                    continue;
+                }
+            };
+            let _ = extent_end;
         }
         Ok(())
     }

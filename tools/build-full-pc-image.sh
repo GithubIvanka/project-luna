@@ -6,32 +6,18 @@ DIST="${LUNA_OUT_DIR:-${REPO_ROOT}/dist}"
 DESKTOP_ROOT="${LUNA_DESKTOP_ROOT:-${DIST}/desktop-root}"
 KERNEL_ROOT="${LUNA_KERNEL_OUT:-${DIST}/kernel}"
 KERNEL="${LUNA_TEST_KERNEL:-${KERNEL_ROOT}/current/bzImage}"
-BUSYBOX="${BUSYBOX:-}"
-
 cd "$REPO_ROOT"
 
-find_busybox() {
-    for candidate in /usr/bin/busybox /bin/busybox; do
-        if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-if [ -z "$BUSYBOX" ]; then
-    BUSYBOX="$(find_busybox || true)"
-fi
-
-: "${BUSYBOX:?Ошибка: не найден статический BusyBox. Укажите BUSYBOX=/path/to/busybox.}"
-
-for command_name in cargo rustup curl git make meson ninja zig cmake pkg-config ldd sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd mksquashfs cpio gzip file; do
+for command_name in cargo rustup curl git make meson ninja zig cmake pkg-config ldd sgdisk mkfs.ext4 mkfs.fat mcopy mmd dd mksquashfs file; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "Ошибка: не найден обязательный инструмент: $command_name" >&2
         exit 1
     }
 done
+
+MKFS_BTRFS="${LUNA_MKFS_BTRFS:-$(command -v mkfs.btrfs || true)}"
+: "${MKFS_BTRFS:?Ошибка: не найден mkfs.btrfs; установите btrfs-progs или задайте LUNA_MKFS_BTRFS=/path/to/mkfs.btrfs.}"
+[ -x "$MKFS_BTRFS" ] || { echo "Ошибка: LUNA_MKFS_BTRFS не исполняемый: $MKFS_BTRFS" >&2; exit 1; }
 
 printf '%s\n' '=== 1/6: Linux kernel ==='
 bash tools/build-luna-kernel.sh
@@ -59,7 +45,7 @@ LUNA_DESKTOP_ROOT="$DESKTOP_ROOT" bash tools/patch-niri-session.sh
 
 printf '%s\n' '=== 6/6: EFI + SYSTEM + DATA PC image ==='
 LUNA_TEST_KERNEL="$KERNEL" \
-BUSYBOX="$BUSYBOX" \
+LUNA_MKFS_BTRFS="$MKFS_BTRFS" \
 LUNA_DESKTOP_ROOT="$DESKTOP_ROOT" \
 bash tools/build-pc-image.sh
 

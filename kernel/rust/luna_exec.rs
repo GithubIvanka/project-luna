@@ -19,12 +19,18 @@ const EINVAL: i32 = 22;
 const EFAULT: i32 = 14;
 const EIO: i32 = 5;
 const ENOENT: i32 = 2;
+const ENOMEM: i32 = 12;
 const MAX_ERRNO: isize = 4095;
 
 type KernelFile = c_void;
 
 unsafe extern "C" {
     fn shmem_kernel_file_setup(
+        name: *const c_char,
+        size: bindings::loff_t,
+        vma_flags: u64,
+    ) -> *mut KernelFile;
+    fn shmem_file_setup(
         name: *const c_char,
         size: bindings::loff_t,
         vma_flags: u64,
@@ -38,13 +44,20 @@ unsafe extern "C" {
     fn fput(file: *mut KernelFile);
     fn kernel_execve_file(
         file: *mut KernelFile,
+        handoff: *mut KernelFile,
         argv: *const *const c_char,
         envp: *const *const c_char,
     ) -> i32;
 
     fn x86_luna_boot_available() -> bool;
+    fn x86_luna_boot_progress(stage: u8, failure_code: u32);
+    fn x86_luna_init_verify() -> bool;
     fn x86_luna_init_phys() -> u64;
     fn x86_luna_init_size() -> u64;
+    fn x86_luna_handoff_phys() -> u64;
+    fn x86_luna_handoff_size() -> u32;
+    fn memremap(phys: bindings::phys_addr_t, size: usize, flags: u64) -> *mut c_void;
+    fn memunmap(addr: *mut c_void);
 }
 
 #[inline]
@@ -67,7 +80,8 @@ unsafe fn copy_phys_to_file(
         return Err(-EINVAL);
     }
 
-    let mapped = bindings::early_memremap(phys as bindings::phys_addr_t, size) as *mut u8;
+    const MEMREMAP_WB: u64 = 1;
+    let mapped = memremap(phys as bindings::phys_addr_t, size, MEMREMAP_WB) as *mut u8;
     if mapped.is_null() {
         return Err(-EFAULT);
     }
@@ -96,8 +110,34 @@ unsafe fn copy_phys_to_file(
         offset += chunk;
     };
 
-    bindings::early_memunmap(mapped.cast::<c_void>(), size);
+    memunmap(mapped.cast::<c_void>());
     result
+}
+
+unsafe fn build_handoff_object() -> Result<*mut KernelFile, i32> {
+    let phys = x86_luna_handoff_phys();
+    let size = x86_luna_handoff_size() as u64;
+
+    if phys == 0 || size == 0 || size > isize::MAX as u64 {
+        return Err(-EINVAL);
+    }
+
+    let name = b"luna-handoff\0";
+    let file = shmem_file_setup(
+        name.as_ptr().cast::<c_char>(),
+        size as bindings::loff_t,
+        0,
+    );
+    if file.is_null() || is_err_ptr(file) {
+        return Err(if file.is_null() { -ENOMEM } else { ptr_err(file) });
+    }
+
+    if let Err(error) = copy_phys_to_file(file, phys, size as usize) {
+        fput(file);
+        return Err(error);
+    }
+
+    Ok(file)
 }
 
 unsafe fn build_executable_object() -> Result<*mut KernelFile, i32> {
@@ -131,19 +171,37 @@ unsafe fn build_executable_object() -> Result<*mut KernelFile, i32> {
 /// The ELF is never staged into a filesystem pathname. The kernel execution
 /// adapter consumes the anonymous memory-backed file and reuses Linux's normal
 /// binfmt/ELF process construction.
-#[unsafe(link_section = ".init.text")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     if !x86_luna_boot_available() {
+        x86_luna_boot_progress(255, ENOENT as u32);
         return -ENOENT;
     }
 
+    if !x86_luna_init_verify() {
+        x86_luna_boot_progress(255, EIO as u32);
+        kernel::pr_err!("Luna: luna-init integrity verification failed\n");
+        return -EIO;
+    }
+
+    x86_luna_boot_progress(5, 0);
     kernel::pr_info!("Luna: preparing memory-resident luna-init for direct PID 1\n");
 
     let file = match build_executable_object() {
         Ok(file) => file,
         Err(error) => {
+            x86_luna_boot_progress(255, (-error) as u32);
             kernel::pr_err!("Luna: failed to prepare luna-init executable object: error {}\n", error);
+            return error;
+        }
+    };
+
+    let handoff = match build_handoff_object() {
+        Ok(file) => file,
+        Err(error) => {
+            fput(file);
+            x86_luna_boot_progress(255, (-error) as u32);
+            kernel::pr_err!("Luna: failed to prepare luna handoff object: error {}\n", error);
             return error;
         }
     };
@@ -160,9 +218,16 @@ pub unsafe extern "C" fn x86_luna_exec_init() -> i32 {
     ];
 
     kernel::pr_info!("Luna: executing memory-resident luna-init as PID 1\n");
-    let ret = kernel_execve_file(file, argv.as_ptr(), envp.as_ptr());
+    let ret = kernel_execve_file(file, handoff, argv.as_ptr(), envp.as_ptr());
 
     fput(file);
-    kernel::pr_err!("Luna: direct luna-init execution failed: error {}\n", ret);
+    fput(handoff);
+    if ret == 0 {
+        x86_luna_boot_progress(6, 0);
+        kernel::pr_info!("Luna: luna-init exec transition accepted\n");
+    } else {
+        x86_luna_boot_progress(255, (-ret).max(0) as u32);
+        kernel::pr_err!("Luna: direct luna-init execution failed: error {}\n", ret);
+    }
     ret
 }

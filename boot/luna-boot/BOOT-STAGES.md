@@ -11,10 +11,11 @@ This file describes the current bootloader stages only.
 6. optional B → Boot Menu
 7. prepare Linux kernel and init memory
 8. build LunaBootHandoffV1
-9. write LunaBootAttempt
-10. ExitBootServices
-11. Linux kernel
-12. luna-init
+9. allocate LunaBootProgress
+10. write LunaBootAttempt
+11. ExitBootServices
+12. Linux kernel updates LunaBootProgress
+13. luna-init
 ```
 
 The loader must not add a userspace initialization layer between Linux and `luna-init`.

@@ -9,13 +9,11 @@ use std::path::{Path, PathBuf};
 
 const EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
 const VARIABLE_NAME: &str = "LunaBootAttempt";
-const GLOBAL_VARIABLE_VENDOR_GUID: &str = "8be4df61-93ca-11d2-aa0d-00e098032b8c";
+const LUNA_VARIABLE_VENDOR_GUID: &str = "9f6c5d8a-5f3b-4e24-8a3c-1d3f6e2b7c91";
 
 /// Returns the Linux `efivarfs` path used by the bootloader's NVRAM marker.
 pub fn marker_path() -> PathBuf {
-    Path::new(EFIVARS_DIR).join(format!(
-        "{VARIABLE_NAME}-{GLOBAL_VARIABLE_VENDOR_GUID}"
-    ))
+    Path::new(EFIVARS_DIR).join(format!("{VARIABLE_NAME}-{LUNA_VARIABLE_VENDOR_GUID}"))
 }
 
 /// Confirms that the system runtime reached its success boundary.
@@ -40,10 +38,10 @@ mod tests {
     use super::marker_path;
 
     #[test]
-    fn marker_path_uses_global_variable_namespace() {
+    fn marker_path_uses_luna_variable_namespace() {
         assert_eq!(
             marker_path().to_str(),
-            Some("/sys/firmware/efi/efivars/LunaBootAttempt-8be4df61-93ca-11d2-aa0d-00e098032b8c")
+            Some("/sys/firmware/efi/efivars/LunaBootAttempt-9f6c5d8a-5f3b-4e24-8a3c-1d3f6e2b7c91")
         );
     }
 }

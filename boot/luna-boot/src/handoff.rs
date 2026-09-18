@@ -17,7 +17,21 @@ const HEADER_ALIGNED_SIZE: usize = 88;
 const SETUP_DATA_NODE_SIZE: usize = 16;
 const RECORD_ALIGN: usize = 8;
 const SETUP_DATA_TYPE: u32 = 0x4c55_4e41;
+const SETUP_PROGRESS_TYPE: u32 = 0x4c55_4e50; // "LUNP"
 const MAX_HANDOFF_SIZE: usize = 64 * 1024;
+const PROGRESS_PAYLOAD_SIZE: usize = 32;
+
+#[repr(u8)]
+#[derive(Clone, Copy)]
+pub enum BootProgressStage {
+    KernelHandoff = 3,
+    KernelStarted = 4,
+    InitStarted = 5,
+    InitReady = 6,
+    SystemRuntimeStarted = 7,
+    Success = 8,
+    Failed = 255,
+}
 
 pub const RECORD_SYSTEM_PARTITION: u16 = 1;
 pub const RECORD_DATA_PARTITION: u16 = 2;
@@ -96,6 +110,7 @@ impl LunaHandoff {
         boot_state.extend_from_slice(&state.previous_attempt_id.to_le_bytes());
         boot_state.extend_from_slice(&state.failure_code.to_le_bytes());
         boot_state.extend_from_slice(&0u32.to_le_bytes());
+        boot_state.extend_from_slice(&0u32.to_le_bytes());
         push_record(&mut bytes, RECORD_BOOT_STATE, 0, &boot_state)?;
 
         if bytes.len() > MAX_HANDOFF_SIZE || bytes.len() > u32::MAX as usize {
@@ -114,7 +129,9 @@ impl LunaHandoff {
         bytes[36..44].copy_from_slice(&(payload_offset as u64).to_le_bytes());
         bytes[44..52].copy_from_slice(&((total_size - payload_offset) as u64).to_le_bytes());
         bytes[52..84].fill(0);
-        let checksum = *blake3::hash(&bytes).as_bytes();
+        let mut checksum_bytes = bytes.clone();
+        checksum_bytes[52..84].fill(0);
+        let checksum = *blake3::hash(&checksum_bytes).as_bytes();
         bytes[52..84].copy_from_slice(&checksum);
 
         let total_node_size = SETUP_DATA_NODE_SIZE
@@ -143,6 +160,49 @@ impl LunaHandoff {
         Ok(Self {
             address,
             size: bytes.len(),
+            allocation_pages: pages,
+        })
+    }
+
+    pub fn link_next(&mut self, next: u64) {
+        unsafe {
+            (self.address as *mut u8 as *mut u64).write(next);
+        }
+    }
+}
+
+pub struct LunaBootProgress {
+    pub address: u64,
+    pub allocation_pages: usize,
+}
+
+impl LunaBootProgress {
+    pub fn allocate(attempt_id: u64) -> BootResult<Self> {
+        let pages = div_ceil(SETUP_DATA_NODE_SIZE + PROGRESS_PAYLOAD_SIZE, PAGE_SIZE).max(1);
+        let allocation = boot::allocate_pages(
+            AllocateType::MaxAddress(0xffff_ffff),
+            MemoryType::LOADER_DATA,
+            pages,
+        )
+        .map_err(|_| BootError::MemoryAllocationFailed)?;
+        let address = allocation.as_ptr() as u64;
+        unsafe {
+            core::ptr::write_bytes(address as *mut u8, 0, pages * PAGE_SIZE);
+            let node = address as *mut u8;
+            (node.add(0) as *mut u64).write(0);
+            (node.add(8) as *mut u32).write(SETUP_PROGRESS_TYPE);
+            (node.add(12) as *mut u32).write(PROGRESS_PAYLOAD_SIZE as u32);
+            core::ptr::copy_nonoverlapping(
+                b"LUNAPR01".as_ptr(),
+                node.add(SETUP_DATA_NODE_SIZE),
+                8,
+            );
+            node.add(SETUP_DATA_NODE_SIZE + 8).write(1);
+            node.add(SETUP_DATA_NODE_SIZE + 9).write(BootProgressStage::KernelHandoff as u8);
+            (node.add(SETUP_DATA_NODE_SIZE + 12) as *mut u64).write(attempt_id);
+        }
+        Ok(Self {
+            address,
             allocation_pages: pages,
         })
     }

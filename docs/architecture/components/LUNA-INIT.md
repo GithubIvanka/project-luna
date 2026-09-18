@@ -51,7 +51,7 @@ spawn luna-system-runtime
 
 ## Direct initial userspace
 
-Нормальная архитектура не использует production initramfs, `switch_root`, `pivot_root`, временный `/init` или второй `/sbin/init`. Kernel запускает memory-resident `.init` через существующий Linux ELF/binfmt путь.
+Kernel запускает memory-resident `.init` через существующий Linux ELF/binfmt путь.
 
 ## Ошибки
 

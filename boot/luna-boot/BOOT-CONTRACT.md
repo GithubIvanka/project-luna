@@ -18,7 +18,7 @@ The loader reads image/core manifests and kernel artifacts from those locations.
 
 ## Direct init
 
-The selected `luna-init` core is loaded as exact bytes into boot-reserved memory and is a mandatory member of the complete `System Image + luna-init + kernel` boot target. It is not transported as an initramfs and is not embedded inside the System Image.
+The selected `luna-init` core is loaded as exact bytes into boot-reserved memory and is a mandatory member of the complete `System Image + luna-init + kernel` boot target. It remains a standalone versioned ELF artifact in `LUNA-SYS/cores/`.
 
 ## Handoff
 

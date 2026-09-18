@@ -7,9 +7,10 @@
 ## Владеет
 
 - identity пользователя и сессии;
-- состоянием аутентификации;
+- `LoginState` и переходами authentication flow;
 - lifecycle сессии;
-- связью аутентифицированного пользователя с пользовательским execution context.
+- связь аутентифицированного пользователя с пользовательским execution context;
+- внутреннюю реализацию login flow через внешний greetd/Noctalia Greeter.
 
 ## Не владеет
 
@@ -25,7 +26,7 @@ RESTRICTED
 TERMINATED
 ```
 
-Перед переходом в активное состояние login flow проходит аутентификацию. После logout/session termination сессия становится `TERMINATED`. Когда пользователь покидает активный desktop session без завершения самой сессии, состояние по умолчанию становится `RESTRICTED`.
+До перехода в `ACTIVE` UserSession переводит `LoginState` из `VISIBLE` в `AUTHENTICATING` и выполняет login flow. После успешной аутентификации `LoginState` становится `SUCCEEDED`, а `SessionState` — `ACTIVE`. Ошибка аутентификации оставляет сессию неактивной и фиксируется в `LoginState::FAILED`.
 
 `RESTRICTED` означает, что сессия сохраняется как управляемый контекст, но доступ и выполнение приложений ограничиваются согласно policy. Конкретная session policy может вместо этого разрешить продолжение или потребовать завершение приложений.
 
@@ -67,4 +68,4 @@ TERMINATED
 
 ## Статус
 
-State model и session identity реализованы как доменная модель. Полная интеграция графического login flow ещё продолжается.
+State model, session identity и графический login flow объединены в одном компоненте. Handoff entry point поставляется тем же crate и не образует отдельного архитектурного компонента. greetd и Noctalia Greeter остаются внешними механизмами аутентификации и отображения login UI.

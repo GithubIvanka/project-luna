@@ -52,38 +52,4 @@ exec /usr/bin/niri --session
 EOF
 chmod 0755 "$ROOT/usr/bin/niri-session"
 
-install -Dm0755 /dev/null "$ROOT/usr/bin/luna-run-session"
-cat > "$ROOT/usr/bin/luna-run-session" <<'EOF'
-#!/bin/sh
-set -eu
-
-user="${LUNA_SESSION_USER:-luna}"
-uid="$(id -u "$user")"
-gid="$(id -g "$user")"
-
-runtime="/run/user/$uid"
-mkdir -p "$runtime"
-chown "$uid:$gid" "$runtime"
-chmod 0700 "$runtime"
-
-home="$(awk -F: -v wanted="$user" '$1 == wanted { print $6; exit }' /etc/passwd)"
-[ -n "$home" ] || { echo "cannot resolve home directory for $user" >&2; exit 1; }
-
-export HOME="$home"
-export USER="$user"
-export LOGNAME="$user"
-export XDG_RUNTIME_DIR="$runtime"
-
-exec /usr/bin/setpriv \
-    --reuid="$uid" \
-    --regid="$gid" \
-    --init-groups \
-    --env=HOME="$HOME" \
-    --env=USER="$USER" \
-    --env=LOGNAME="$LOGNAME" \
-    --env=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    -- /usr/bin/niri-session
-EOF
-chmod 0755 "$ROOT/usr/bin/luna-run-session"
-
-printf '%s\n' '/usr/bin/luna-run-session' > "$ROOT/etc/luna/graphical-session"
+printf '%s\n' '/usr/bin/niri-session' > "$ROOT/etc/luna/graphical-session"

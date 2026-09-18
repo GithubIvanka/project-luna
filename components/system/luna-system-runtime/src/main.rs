@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::fs;
-use std::process::ExitStatus;
 use std::time::Duration;
 
 use luna_common::{UserId, Version};
@@ -84,25 +83,6 @@ fn default_development_system_state() -> SystemState {
     )
 }
 
-fn graphical_login_command() -> String {
-    if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_LOGIN_COMMAND")
-        && !command.is_empty()
-    {
-        return command.to_string_lossy().into_owned();
-    }
-
-    fs::read_to_string("/etc/luna/graphical-login")
-        .ok()
-        .and_then(|value| {
-            value
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "/usr/bin/luna-login".to_owned())
-}
-
 fn graphical_session_command() -> String {
     if let Some(command) = std::env::var_os("LUNA_GRAPHICAL_SESSION_COMMAND")
         && !command.is_empty()
@@ -122,10 +102,6 @@ fn graphical_session_command() -> String {
         .unwrap_or_else(|| "/usr/bin/niri-session".to_owned())
 }
 
-fn login_succeeded(status: &ExitStatus) -> bool {
-    status.success()
-}
-
 fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
     if std::env::var_os("LUNA_SKIP_SYSTEM_SERVICES").is_some() || !nix_like_root() {
         return Vec::new();
@@ -134,9 +110,9 @@ fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
     let mut services = Vec::new();
     let definitions: [(&str, &[&str]); 4] = [
         ("/usr/bin/dbus-daemon", &["--system", "--nofork"]),
-        ("/usr/sbin/NetworkManager", &["--no-daemon"]),
-        ("/usr/libexec/bluetooth/bluetoothd", &["--nodetach"]),
-        ("/usr/libexec/udisks2/udisksd", &[]),
+        ("/usr/bin/NetworkManager", &["--no-daemon"]),
+        ("/usr/bin/bluetoothd", &["--nodetach"]),
+        ("/usr/bin/udisksd", &[]),
     ];
 
     for (program, args) in definitions {
@@ -198,7 +174,6 @@ fn main() {
         std::process::exit(1);
     }
 
-    let login_command = graphical_login_command();
     let session_command = graphical_session_command();
     let respawn = std::env::var_os("LUNA_NO_RESPAWN").is_none();
     let mut runtime = SystemRuntimeService::new();
@@ -241,44 +216,13 @@ fn main() {
             }
         };
 
-        let login_process = match runtime.spawn_process(&login_command, std::iter::empty::<&str>())
-        {
-            Ok(id) => id,
-            Err(error) => {
-                eprintln!(
-                    "luna-system-runtime: failed to launch graphical login {login_command}: {error}"
-                );
-                std::process::exit(1);
-            }
-        };
-
-        let login_status = loop {
-            match runtime.poll_process(login_process) {
-                Ok(ProcessState::Running) => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Ok(ProcessState::Exited(status)) => break status,
-                Err(error) => {
-                    eprintln!("luna-system-runtime: graphical login supervision failed: {error}");
-                    std::process::exit(1);
-                }
-            }
-        };
-
-        if !login_succeeded(&login_status) {
-            eprintln!(
-                "luna-system-runtime: graphical authentication failed; returning to login screen"
-            );
+        if let Err(error) = runtime.authenticate_session(session) {
+            eprintln!("luna-system-runtime: graphical authentication failed: {error}");
             let _ = runtime.cancel_login(session);
             if !respawn {
                 break;
             }
             continue;
-        }
-
-        if let Err(error) = runtime.authenticate_session(session) {
-            eprintln!("luna-system-runtime: authentication transition failed: {error}");
-            std::process::exit(1);
         }
 
         if let Err(error) = launch_graphical_user_session(&mut runtime, session, &session_command) {

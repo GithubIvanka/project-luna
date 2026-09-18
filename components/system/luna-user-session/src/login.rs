@@ -1,83 +1,120 @@
-use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const RUN_DIR: &str = "/run/luna-login";
-const RESULT: &str = "/run/luna-login/result";
-const GREETD_CONFIG: &str = "/run/luna-login/greetd.toml";
+use crate::SessionError;
+
+const RUN_DIR: &str = "/run/luna-session";
+const RESULT: &str = "/run/luna-session/result";
+const GREETD_CONFIG: &str = "/run/luna-session/greetd.toml";
 const GREETD: &str = "/usr/bin/greetd";
 const GREETER_SESSION: &str = "/usr/bin/noctalia-greeter-session";
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
-fn main() {
-    if env::args().nth(1).as_deref() == Some("--handoff") {
-        if let Err(error) = write_handoff() {
-            eprintln!("luna-login-handoff: {error}");
-            std::process::exit(1);
+#[derive(Debug)]
+pub enum LoginError {
+    Io(io::Error),
+    Authentication(String),
+    Timeout,
+    Session(SessionError),
+}
+
+impl std::fmt::Display for LoginError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "login I/O failed: {error}"),
+            Self::Authentication(error) => write!(f, "authentication failed: {error}"),
+            Self::Timeout => write!(f, "graphical login timed out"),
+            Self::Session(error) => write!(f, "session transition failed: {error}"),
         }
-        return;
-    }
-
-    if let Err(error) = run_login() {
-        eprintln!("luna-login: {error}");
-        std::process::exit(1);
     }
 }
 
-fn run_login() -> io::Result<()> {
+impl std::error::Error for LoginError {}
+
+impl From<io::Error> for LoginError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedUser {
+    pub uid: u32,
+    pub username: String,
+}
+
+pub(crate) fn authenticate() -> Result<AuthenticatedUser, LoginError> {
     if !Path::new(GREETD).is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "embedded greetd backend is missing",
+        return Err(LoginError::Authentication(
+            "greetd backend is missing".to_owned(),
         ));
     }
     if !Path::new(GREETER_SESSION).is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Noctalia Greeter session is missing",
+        return Err(LoginError::Authentication(
+            "Noctalia Greeter session is missing".to_owned(),
         ));
     }
+
     fs::create_dir_all(RUN_DIR)?;
     set_mode(RUN_DIR, 0o733)?;
     let _ = fs::remove_file(RESULT);
     write_greetd_config()?;
 
-    let mut greetd = Command::new(GREETD)
-        .arg("--config")
-        .arg(GREETD_CONFIG)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let deadline = Instant::now() + Duration::from_secs(600);
+    let mut greetd = LoginRunner::spawn()?;
+    let deadline = Instant::now() + DEFAULT_TIMEOUT;
     let result = loop {
-        if let Some(status) = greetd.try_wait()? {
-            return Err(io::Error::other(format!(
-                "embedded greetd exited before authentication: {status}"
+        if let Some(status) = greetd.child.try_wait()? {
+            return Err(LoginError::Authentication(format!(
+                "greetd exited before authentication: {status}"
             )));
         }
         if let Some(value) = read_authenticated_result()? {
             break value;
         }
         if Instant::now() >= deadline {
-            let _ = greetd.kill();
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "graphical login timed out",
-            ));
+            greetd.stop();
+            return Err(LoginError::Timeout);
         }
         thread::sleep(Duration::from_millis(50));
     };
 
-    let _ = greetd.kill();
-    let _ = greetd.wait();
-    println!("uid={} user={}", result.uid, result.username);
-    Ok(())
+    greetd.stop();
+    Ok(result)
+}
+
+struct LoginRunner {
+    child: Child,
+}
+
+impl LoginRunner {
+    fn spawn() -> Result<Self, io::Error> {
+        let child = Command::new(GREETD)
+            .arg("--config")
+            .arg(GREETD_CONFIG)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+        Ok(Self { child })
+    }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for LoginRunner {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            self.stop();
+        }
+    }
 }
 
 fn write_greetd_config() -> io::Result<()> {
@@ -97,19 +134,20 @@ fn write_greetd_config() -> io::Result<()> {
 }
 
 #[derive(Debug)]
-struct AuthenticatedUser {
+struct RawAuthenticatedUser {
     uid: u32,
     username: String,
 }
 
 fn read_authenticated_result() -> io::Result<Option<AuthenticatedUser>> {
-    let path = PathBuf::from(RESULT);
-    let metadata = match fs::metadata(&path) {
+    let path = Path::new(RESULT);
+    let metadata = match fs::metadata(path) {
         Ok(value) => value,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let contents = fs::read_to_string(&path)?;
+
+    let contents = fs::read_to_string(path)?;
     let mut parts = contents.lines();
     let uid = parts
         .next()
@@ -123,14 +161,15 @@ fn read_authenticated_result() -> io::Result<Option<AuthenticatedUser>> {
         })?
         .to_owned();
 
-    if metadata.uid() != uid {
+    if metadata.uid() != uid || username_for_uid(uid)?.as_deref() != Some(username.as_str()) {
         return Ok(None);
     }
-    let passwd_name = username_for_uid(uid)?;
-    if passwd_name.as_deref() != Some(username.as_str()) {
-        return Ok(None);
-    }
-    Ok(Some(AuthenticatedUser { uid, username }))
+
+    let user = RawAuthenticatedUser { uid, username };
+    Ok(Some(AuthenticatedUser {
+        uid: user.uid,
+        username: user.username,
+    }))
 }
 
 fn username_for_uid(uid: u32) -> io::Result<Option<String>> {
@@ -144,9 +183,9 @@ fn username_for_uid(uid: u32) -> io::Result<Option<String>> {
     }))
 }
 
-fn write_handoff() -> io::Result<()> {
-    let username = env::var("USER")
-        .or_else(|_| env::var("LOGNAME"))
+pub fn handoff_current_identity() -> io::Result<()> {
+    let username = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
         .map_err(|_| {
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -166,6 +205,9 @@ fn write_handoff() -> io::Result<()> {
             "authenticated identity mismatch",
         ));
     }
+
+    fs::create_dir_all(RUN_DIR)?;
+    set_mode(RUN_DIR, 0o733)?;
     let temp = format!("{RUN_DIR}/result.{uid}.{}", std::process::id());
     let mut file = OpenOptions::new()
         .create_new(true)
@@ -180,15 +222,12 @@ fn write_handoff() -> io::Result<()> {
 }
 
 fn set_mode(path: &str, mode: u32) -> io::Result<()> {
-    let status = Command::new("/bin/chmod")
-        .arg(format!("{mode:o}"))
-        .arg(path)
-        .status()?;
-    if status.success() {
+    let path = std::ffi::CString::new(path)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))?;
+    let status = unsafe { libc::chmod(path.as_ptr(), mode) };
+    if status == 0 {
         Ok(())
     } else {
-        Err(io::Error::other(
-            "failed to set Luna login runtime permissions",
-        ))
+        Err(io::Error::last_os_error())
     }
 }

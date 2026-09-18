@@ -124,7 +124,6 @@ ApplicationInstance
 - `luna-init` остаётся PID 1 на протяжении нормальной работы системы.
 - `luna-system-runtime` является дочерним процессом `luna-init`, но никогда не является PID 1.
 - `luna-system-runtime` не должен заменять `luna-init` и не должен делать `exec` поверх него.
-- Нормальная загрузка не содержит userspace-этапа initramfs, `switch_root`, `pivot_root`, временного `/init`, второго `/sbin/init` или альтернативного shell bootstrap.
 - TTY/serial shell предназначен только для диагностики, Recovery и разработки, а не для обычного входа пользователя.
 
 ## 6. Прямой запуск initial userspace

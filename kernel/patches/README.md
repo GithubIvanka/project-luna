@@ -52,5 +52,3 @@ luna-init (PID 1)
   ↓
 luna-system-runtime
 ```
-
-No separate initramfs userspace layer is introduced by this integration.

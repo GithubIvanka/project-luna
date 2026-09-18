@@ -17,7 +17,7 @@ Kernel не выбирает System Images, не разрешает полити
 
 ## Граница direct-init
 
-`luna-boot.efi` помещает точные байты `.init` в зарезервированную память. Kernel проверяет их и передаёт выполнение в обычный путь загрузки Linux executable. Production initramfs userspace stage не вводится.
+`luna-boot.efi` помещает точные байты `.init` в зарезервированную память. Kernel проверяет их и передаёт выполнение в обычный путь загрузки Linux executable.
 
 ## Сборка
 

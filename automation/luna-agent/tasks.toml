@@ -3,6 +3,15 @@ version = 2
 branch = "alpha-development"
 
 [[tasks]]
+id = "DESKTOP-000"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Finish the carried-forward Alpha desktop build and QEMU smoke path"
+acceptance = ["desktop-root-alpha builds successfully with the existing staging strategy", "Noctalia dependency closure is complete, including the current gmp.h failure, without leaking host-only dependencies into the image", "greetd, greetd-greeter/PAM configuration and luna-user-session are present in the produced desktop root", "luna-pc image rebuild completes from the resulting desktop root", "fresh QEMU/OVMF evidence covers PAM to greetd to Noctalia Greeter to UserSession to niri", "failure diagnostics are preserved", "agent creates a focused commit"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
 id = "HANDOFF-001"
 priority = "P0"
 agent = "harness"

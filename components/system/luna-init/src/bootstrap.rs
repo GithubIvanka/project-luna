@@ -99,14 +99,11 @@ mod tests {
 format = "squashfs"
 
 [bootstrap]
-critical = ["/sbin/luna-system-runtime", "/usr/bin/luna-login"]
+critical = ["/sbin/luna-system-runtime"]
 "#,
         )
         .unwrap();
-        assert_eq!(
-            manifest.critical,
-            vec!["/sbin/luna-system-runtime", "/usr/bin/luna-login"]
-        );
+        assert_eq!(manifest.critical, vec!["/sbin/luna-system-runtime"]);
     }
 
     #[test]

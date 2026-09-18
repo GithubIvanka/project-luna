@@ -13,7 +13,7 @@ use uefi::proto::{Protocol, ProtocolPointer};
 use crate::error::{BootError, BootResult};
 use crate::ext4::BlockDevice;
 
-const IO_CHUNK: usize = 4096;
+const IO_CHUNK: usize = 64 * 1024;
 
 struct BorrowedProtocol<P: Protocol + ?Sized>(NonNull<P>);
 
@@ -200,9 +200,11 @@ impl BlockDevice for UefiBlockDevice {
 pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     use uefi::proto::device_path::DevicePath;
 
-    let loaded = open_shared::<uefi::proto::loaded_image::LoadedImage>(image_handle)?;
+    let loaded = open_shared::<uefi::proto::loaded_image::LoadedImage>(image_handle)
+        .map_err(|_| BootError::Unsupported("open LoadedImage protocol"))?;
     let device = loaded.device().ok_or(BootError::FilesystemError)?;
-    let path = open_device_path(device)?;
+    let path = open_device_path(device)
+        .map_err(|_| BootError::Unsupported("open device path protocol"))?;
     let bytes = path.as_bytes();
 
     let mut cut = None;
@@ -223,5 +225,6 @@ pub fn parent_disk_handle(image_handle: Handle) -> BootResult<Handle> {
     let parent_path =
         <&DevicePath>::try_from(parent.as_slice()).map_err(|_| BootError::FilesystemError)?;
     let mut remaining = parent_path;
-    boot::locate_device_path::<BlockIO>(&mut remaining).map_err(|_| BootError::FilesystemError)
+    boot::locate_device_path::<BlockIO>(&mut remaining)
+        .map_err(|_| BootError::Unsupported("locate parent BlockIO device path"))
 }

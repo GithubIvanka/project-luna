@@ -18,7 +18,6 @@ members = [
   "components/system/luna-system-runtime",
   "components/system/luna-user-session",
   "components/system/luna-app-runtime",
-  "components/system/luna-login",
   "components/system/luna-cli",
   "components/system/luna-audio",
   "components/system/luna-network",

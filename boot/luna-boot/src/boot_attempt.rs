@@ -5,13 +5,15 @@
 //! Detailed progress remains in memory and is not persisted at every stage.
 
 use blake3::Hasher;
-use uefi::cstr16;
-use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::Status;
+use uefi::runtime::{self, VariableAttributes, VariableVendor};
+use uefi::{cstr16, guid};
 
 use crate::error::{BootError, BootResult};
 
 const VARIABLE_NAME: &uefi::CStr16 = cstr16!("LunaBootAttempt");
+const LUNA_VARIABLE_VENDOR: VariableVendor =
+    VariableVendor(guid!("9f6c5d8a-5f3b-4e24-8a3c-1d3f6e2b7c91"));
 const MAGIC: &[u8; 8] = b"LUNABT01";
 const FORMAT: u8 = 1;
 const STATUS_IN_PROGRESS: u8 = 1;
@@ -83,7 +85,7 @@ pub struct BootAttemptMarker {
 
 impl BootAttemptMarker {
     pub fn read() -> BootResult<Option<Self>> {
-        let vendor = VariableVendor::GLOBAL_VARIABLE;
+        let vendor = LUNA_VARIABLE_VENDOR;
         let value = match runtime::get_variable_boxed(VARIABLE_NAME, &vendor) {
             Ok((value, _)) => value,
             Err(error) if error.status() == Status::NOT_FOUND => return Ok(None),
@@ -121,19 +123,13 @@ impl BootAttemptMarker {
         let checksum = *blake3::hash(&payload).as_bytes();
         payload[24..56].copy_from_slice(&checksum);
 
-        runtime::set_variable(
-            VARIABLE_NAME,
-            &VariableVendor::GLOBAL_VARIABLE,
-            ATTRIBUTES,
-            &payload,
-        )
-        .map_err(BootError::from)?;
+        runtime::set_variable(VARIABLE_NAME, &LUNA_VARIABLE_VENDOR, ATTRIBUTES, &payload)
+            .map_err(BootError::from)?;
         Ok(Self { attempt_id })
     }
 
     pub fn clear() -> BootResult<()> {
-        runtime::delete_variable(VARIABLE_NAME, &VariableVendor::GLOBAL_VARIABLE)
-            .map_err(BootError::from)
+        runtime::delete_variable(VARIABLE_NAME, &LUNA_VARIABLE_VENDOR).map_err(BootError::from)
     }
 
     pub fn next_attempt_id(

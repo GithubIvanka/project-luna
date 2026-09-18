@@ -21,5 +21,3 @@ FD 3 = read-only LunaBootHandoffV1
 - запустить `luna-system-runtime` как дочерний процесс и сохранить за собой PID 1.
 
 `luna-init` остаётся PID 1. Он запускает `luna-system-runtime` как дочерний system-wide runtime/supervisor; `luna-system-runtime` никогда не является PID 1.
-
-В production-архитектуре нет userspace-этапа initramfs, `switch_root`, `pivot_root`, `luna-app-init` или generic `luna-runtime` layer.

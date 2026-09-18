@@ -28,7 +28,7 @@ copy_exec /usr/bin/pipewire usr/bin/pipewire
 copy_exec /usr/bin/pipewire-pulse usr/bin/pipewire-pulse
 copy_exec /usr/bin/wireplumber usr/bin/wireplumber
 copy_exec /usr/bin/pw-cli usr/bin/pw-cli
-copy_exec /usr/bin/pactl usr/bin/pactl
+if [ -x /usr/bin/pactl ]; then copy_exec /usr/bin/pactl usr/bin/pactl; fi
 copy_exec /usr/sbin/rfkill usr/sbin/rfkill
 
 # D-Bus is the system/session control plane used by NetworkManager, BlueZ,
@@ -122,7 +122,8 @@ bundle_elf_deps() {
         case "$dep" in
           /lib/*|/lib64/*|/usr/lib/*)
             [ -e "$dep" ] || continue
-            local rel="${dep#/}" dst="$root/$rel"
+            local rel="${dep#/}"
+            local dst="$root/$rel"
             if [ ! -e "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
             ;;
         esac

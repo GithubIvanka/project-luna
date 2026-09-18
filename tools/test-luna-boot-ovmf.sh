@@ -11,7 +11,6 @@ done
 : "${OVMF_CODE:?Укажите OVMF_CODE, например /usr/share/OVMF/OVMF_CODE_4M.fd}"
 : "${OVMF_VARS:?Укажите OVMF_VARS, например /usr/share/OVMF/OVMF_VARS_4M.fd}"
 : "${LUNA_TEST_KERNEL:?Укажите LUNA_TEST_KERNEL, путь к bzImage}"
-: "${LUNA_TEST_INITRD:?Укажите LUNA_TEST_INITRD, путь к initramfs.img}"
 : "${LUNA_TEST_SQUASHFS:?Укажите LUNA_TEST_SQUASHFS, путь к тестовому SquashFS System Image}"
 
 cd "$REPO_ROOT"

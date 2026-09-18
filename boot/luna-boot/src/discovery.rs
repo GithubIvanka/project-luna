@@ -375,7 +375,7 @@ impl BootCatalog {
                 kernel.kernel_path,
                 kernel.version.clone(),
             );
-            target = target.with_cmdline("quiet loglevel=3");
+            target = target.with_cmdline("console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug");
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
                 ImageRole::Factory => factory_candidates.push(target.factory()),
@@ -403,7 +403,10 @@ impl BootCatalog {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if manifest.version != version || manifest.format != "squashfs" || manifest.arch != "x86_64" {
+            if manifest.version != version
+                || manifest.format != "squashfs"
+                || manifest.arch != "x86_64"
+            {
                 continue;
             }
 

@@ -32,12 +32,25 @@ Success
 
 Стадия назад не переходит. Этот progress не является историческим журналом.
 
+После `ExitBootServices` подробный progress продолжает жить в выделенном RAM-объекте `LunaBootProgress`, переданном через Linux `setup_data` рядом с `LunaBootHandoffV1`. Он использует тот же `attempt_id` и позволяет kernel/Rust/userspace отмечать стадии одной и той же попытки без дополнительных NVRAM-записей.
+
+```text
+KernelStarted
+InitStarted
+InitReady
+SystemRuntimeStarted
+Success
+```
+
+Ошибку раннего kernel/userspace этапа `LunaBootProgress` может пометить как `Failed` с числовым `failure_code`. Это диагностическое RAM-состояние, а не источник durable fallback policy.
+
 ## Persistent marker
 
 Marker хранится в UEFI NVRAM, отдельно от `LUNA-SYS/config/boot-state.toml`.
 
 ```text
 Variable name: LunaBootAttempt
+Vendor GUID: `9f6c5d8a-5f3b-4e24-8a3c-1d3f6e2b7c91`
 State: in_progress
 ```
 

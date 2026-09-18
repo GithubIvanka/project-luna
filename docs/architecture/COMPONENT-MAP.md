@@ -39,7 +39,6 @@ luna-network
 luna-audio
 luna-bluetooth
 luna-files
-luna-login
 luna-cli
 ```
 

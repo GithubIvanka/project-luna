@@ -82,7 +82,6 @@ System Image + luna-init + kernel + Recovery DATA Image
 
 Kernel получает стандартный x86 boot protocol и `LunaBootHandoffV1`, проверяет структуру handoff, диапазон `.init`, digest и ELF constraints, создаёт внутренний memory-backed executable object и использует существующий Linux ELF/binfmt путь.
 
-Никакого production initramfs не требуется.
 
 ## 9. luna-init — PID 1
 
@@ -90,7 +89,7 @@ Kernel получает стандартный x86 boot protocol и `LunaBootHan
 
 `luna-init` получает read-only boot context через FD 3, выполняет ранний bootstrap, открывает выбранный System Image как immutable source, разрешает normal или Recovery DATA provider, создаёт RAM-backed logical `/`, материализует boot-critical resources и запускает `luna-system-runtime` как дочерний процесс.
 
-`luna-init` остаётся PID 1. `switch_root`, `pivot_root`, временный `/init` и второй `/sbin/init` отсутствуют.
+`luna-init` остаётся PID 1.
 
 ## 10. luna-system-runtime
 
