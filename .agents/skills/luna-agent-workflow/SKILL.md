@@ -22,6 +22,12 @@ Use this skill for non-trivial coding, architecture, debugging, and research tas
 - Prefer small, reversible changes.
 - Treat compiler output, tests, QEMU, and hardware runs as evidence.
 
+## Minimality (Ponytail)
+- Before adding code, look for an existing implementation or primitive that already satisfies the need.
+- Prefer the simplest accepted path: existing component -> standard library -> platform primitive -> existing dependency -> new code.
+- Do not add abstractions, compatibility layers, or helpers without a concrete need.
+- Keep the patch focused on the requested behavior.
+
 ## Context provenance
 - Treat current accepted Luna documentation, contracts, source code, and explicit repository state as authoritative project context.
 - Treat user-provided context and current session discussion as useful working context, but verify it when it affects architecture or factual claims.

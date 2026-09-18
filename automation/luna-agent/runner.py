@@ -37,8 +37,8 @@ BRANCH = "alpha-development"
 MAX_ATTEMPTS = int(os.environ.get("LUNA_AGENT_MAX_ATTEMPTS", "3"))
 MAX_TURNS_PER_ATTEMPT = int(os.environ.get("LUNA_AGENT_MAX_TURNS", "6"))
 HARNESS_TIMEOUT = int(os.environ.get("LUNA_AGENT_HARNESS_TIMEOUT", "3600"))
-OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "1800"))
-OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepseek/deepseek-v4-flash-latest")
+OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "180"))
+OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepseek/deepseek-v4-flash-0731#high")
 OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
 BACKEND = os.environ.get("LUNA_AGENT_BACKEND", "online")
 OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
@@ -256,6 +256,9 @@ def resolve_dsh() -> str:
 
 
 def resolve_opencode() -> str:
+    wrapper = HERE / "opencode-direct.sh"
+    if wrapper.exists() and os.access(wrapper, os.X_OK):
+        return str(wrapper)
     candidate = shutil.which("opencode")
     if candidate:
         return candidate
@@ -303,9 +306,12 @@ def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | Non
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        timed_out = False
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            timed_out = True
+            rc = -signal.SIGTERM
             fh.write(f"\n=== TIMEOUT {timeout}s; terminating process group ===\n")
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
@@ -319,7 +325,44 @@ def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | Non
                 except ProcessLookupError:
                     pass
                 proc.wait()
-            raise
+
+        if agent == "opencode-review" and (timed_out or rc != 0):
+            reason = "timeout" if timed_out else f"exit {rc}"
+            fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
+            fallback_prompt = (
+                prompt
+                + "\n\nOpenCode review worker was unavailable. "
+                "Perform this review as a fresh independent pass with the Harness worker. "
+                "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
+            )
+            fallback_cmd = [resolve_dsh(), "--profile", "headless", fallback_prompt]
+            fh.write(f"=== FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
+            fallback = subprocess.Popen(
+                fallback_cmd,
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                rc = fallback.wait(timeout=HARNESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                fh.write(f"\n=== FALLBACK TIMEOUT {HARNESS_TIMEOUT}s; terminating process group ===\n")
+                try:
+                    os.killpg(fallback.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    fallback.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(fallback.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    fallback.wait()
+
         fh.write(f"\n=== EXIT {rc} ===\n")
     return rc
 

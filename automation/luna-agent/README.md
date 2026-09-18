@@ -109,3 +109,9 @@ starting/resuming work; remove the marker to continue.
 The defaults are conservative, but unattended runs can override them without
 editing the repository: `LUNA_AGENT_MAX_ATTEMPTS`, `LUNA_AGENT_MAX_TURNS`,
 `LUNA_AGENT_HARNESS_TIMEOUT`, and `LUNA_AGENT_OPENCODE_TIMEOUT`.
+
+The OpenCode review worker uses `opencode-direct.sh`, which reads the existing
+OpenRouter credential from OpenCode's local auth store without writing the key
+to the repository or logs. If OpenCode exits unsuccessfully or times out, the
+runner terminates it and continues the review with a fresh Harness turn instead
+of idling the queue.
