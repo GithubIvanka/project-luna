@@ -44,19 +44,9 @@ OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepsee
 OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
 BACKEND = os.environ.get("LUNA_AGENT_BACKEND", "online")
 OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
-FREE_MODEL = os.environ.get("LUNA_AGENT_FREE_MODEL", "openrouter/deepseek/deepseek-v4-flash:free")
-FREE_MODELS = tuple(dict.fromkeys(
-    [FREE_MODEL]
-    + [item.strip() for item in os.environ.get(
-        "LUNA_AGENT_FREE_MODELS",
-        "openrouter/nvidia/nemotron-3.5-lightning:free,"
-        "openrouter/deepseek/deepseek-v4-flash-0731:free,"
-        "openrouter/inclusionai/ling-3.0-flash-fin:free,"
-        "openrouter/google/gemma-4-31b-it:free,"
-        "openrouter/cohere/north-mini-code:free",
-    ).split(",") if item.strip()]
-))
+FREE_MODEL = os.environ.get("LUNA_AGENT_FREE_MODEL", "openrouter/deepseek/deepseek-v4-flash-0731:free")
 LOCAL_MODEL = os.environ.get("LUNA_AGENT_LOCAL_MODEL", "local/ornith-1.5:9b")
+DSH_FREE_HOME = STATE_DIR / "dsh-free"
 TASKS_VERSION = 2
 
 
@@ -281,16 +271,32 @@ def resolve_opencode() -> str:
     raise RuntimeError("opencode CLI not found")
 
 
-def free_model_at(index: int) -> str:
-    if not FREE_MODELS:
-        raise RuntimeError("free backend has no configured models")
-    return FREE_MODELS[index % len(FREE_MODELS)]
-
-
 def is_free_model(model: str | None) -> bool:
-    if not model:
-        return False
-    return model.endswith(":free") or model in FREE_MODELS
+    return bool(model and model.endswith(":free"))
+
+
+def prepare_free_harness(env: dict[str, str], model: str) -> None:
+    if not model.startswith("openrouter/") or not is_free_model(model):
+        raise RuntimeError(f"free Harness backend requires an OpenRouter :free model, got {model!r}")
+    model_id = model.removeprefix("openrouter/")
+    auth_file = Path.home() / ".local/share/opencode/auth.json"
+    if not auth_file.is_file():
+        raise RuntimeError(f"OpenCode OpenRouter credentials not found: {auth_file}")
+    try:
+        auth = json.loads(auth_file.read_text(encoding="utf-8"))
+        api_key = auth["openrouter"]["key"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise RuntimeError("failed to read the existing OpenRouter credential") from exc
+    if not isinstance(api_key, str) or not api_key:
+        raise RuntimeError("existing OpenRouter credential is empty")
+
+    DSH_FREE_HOME.mkdir(parents=True, exist_ok=True)
+    settings = """llm-pi-ai:\n  providers:\n    openrouter:\n      displayName: OpenRouter\n      api: openai-completions\n      baseURL: https://openrouter.ai/api/v1\n      apiKeyEnv: OPENROUTER_API_KEY\n      models:\n        - id: {model}\n          name: {model}\n          contextWindow: 1310720\n          maxTokens: 65536\nagent-default-model:\n  provider: openrouter\n  model: {model}\n  reasoningEffort: high\n""".format(model=model_id)
+    tmp = DSH_FREE_HOME / "settings.yaml.tmp"
+    tmp.write_text(settings, encoding="utf-8")
+    tmp.replace(DSH_FREE_HOME / "settings.yaml")
+    env["DSH_HOME"] = str(DSH_FREE_HOME)
+    env["OPENROUTER_API_KEY"] = api_key
 
 
 def defer_free_backend_retry(state: dict, info: dict, reason: str) -> bool:
@@ -312,7 +318,6 @@ def run_agent(
     timeout: int,
     log: Path,
     model: str | None = None,
-    free_model_index: int = 0,
 ) -> int:
     env = os.environ.copy()
     # Let DSH Agent Skills discover the project's canonical .agents/skills tree.
@@ -325,20 +330,25 @@ def run_agent(
         env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     if OPENCODE_CONFIG:
         env["OPENCODE_CONFIG"] = OPENCODE_CONFIG
-    use_opencode = local_mode or free_mode or agent == "opencode-review"
-    if use_opencode:
-        if local_mode:
-            selected_model = model if model and model.startswith("local/") else LOCAL_MODEL
-        elif free_mode:
-            if model and is_free_model(model):
-                selected_model = model
-            else:
-                selected_model = free_model_at(free_model_index)
+    if local_mode:
+        selected_model = model if model and model.startswith("local/") else LOCAL_MODEL
+        cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
+    elif agent == "opencode-review":
+        selected_model = model or (FREE_MODEL if free_mode else OPENCODE_MODEL)
+        if free_mode and not is_free_model(selected_model):
+            selected_model = FREE_MODEL
+        cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
+        if free_mode:
+            timeout = min(timeout, FREE_TIMEOUT)
+    elif agent == "harness":
+        selected_model = model or FREE_MODEL if free_mode else model
+        if free_mode:
+            if not selected_model or not is_free_model(selected_model):
+                selected_model = FREE_MODEL
+            prepare_free_harness(env, selected_model)
             timeout = min(timeout, FREE_TIMEOUT)
         else:
-            selected_model = model or OPENCODE_MODEL
-        cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
-    elif agent == "harness":
+            selected_model = selected_model or OPENCODE_MODEL
         cmd = [resolve_dsh(), "--profile", "headless", prompt]
     else:
         raise RuntimeError(f"unknown agent: {agent}")
@@ -378,49 +388,8 @@ def run_agent(
         if agent == "opencode-review" and (timed_out or rc != 0):
             reason = "timeout" if timed_out else f"exit {rc}"
             if free_mode:
-                fallback_model = free_model_at(free_model_index + 1)
-                fh.write(f"\n=== FREE FALLBACK ({reason}) -> {fallback_model} ===\n")
-                fallback_prompt = (
-                    prompt
-                    + "\n\nThe previous free review worker was unavailable. "
-                    "Perform a fresh independent review with this next free model. "
-                    "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
-                )
-                fallback_cmd = [
-                    resolve_opencode(),
-                    "run",
-                    "--standalone",
-                    "--auto",
-                    "--model",
-                    fallback_model,
-                    fallback_prompt,
-                ]
-                fh.write(f"=== FREE FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
-                fallback = subprocess.Popen(
-                    fallback_cmd,
-                    cwd=ROOT,
-                    env=env,
-                    text=True,
-                    stdout=fh,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-                try:
-                    rc = fallback.wait(timeout=FREE_TIMEOUT)
-                except subprocess.TimeoutExpired:
-                    fh.write(f"\n=== FREE FALLBACK TIMEOUT {FREE_TIMEOUT}s; terminating process group ===\n")
-                    try:
-                        os.killpg(fallback.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        fallback.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(fallback.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                        fallback.wait()
+                fh.write(f"\n=== FREE REVIEW RETRY ({reason}) -> same model later ===\n")
+                fh.write("Automatic free-model rotation is disabled; the runner will retry this model after the backend wait interval.\n")
             else:
                 fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
                 fallback_prompt = (
@@ -628,6 +597,9 @@ def run_once(state: dict) -> str:
         info["phase"] = "implementation" if task["agent"] == "harness" else "review"
         info["status"] = "running"
         info["started_at"] = now()
+        if BACKEND == "free":
+            requested_model = task.get("model")
+            info["selected_model"] = requested_model if is_free_model(requested_model) else FREE_MODEL
         info["before_head"] = git_head()
         info["expected_tree"] = git_tree_fingerprint()
         state["current_task"] = tid
@@ -653,20 +625,14 @@ def run_once(state: dict) -> str:
     info["turns"] = int(info.get("turns", 0)) + 1
     save_state(state)
     prompt, timeout = prompt_for(task, info)
-    free_model_index = (
-        max(0, int(info.get("attempts", 1)) - 1) * MAX_TURNS_PER_ATTEMPT
-        + max(0, int(info.get("turns", 1)) - 1)
-    )
+    selected_model = info.get("selected_model") if BACKEND == "free" else task.get("model")
+    if BACKEND == "free" and not selected_model:
+        selected_model = FREE_MODEL
+        info["selected_model"] = selected_model
+        save_state(state)
     log = log_path(tid, task["agent"])
     try:
-        rc = run_agent(
-            task["agent"],
-            prompt,
-            timeout,
-            log,
-            task.get("model"),
-            free_model_index,
-        )
+        rc = run_agent(task["agent"], prompt, timeout, log, selected_model)
     except subprocess.TimeoutExpired:
         status = git_status()
         dirty = bool(status)
