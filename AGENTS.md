@@ -102,3 +102,5 @@ Prefer the smallest implementation that satisfies the accepted architecture and 
 Reuse existing Luna components when they already provide the needed boundary.
 Treat compilation, tests, QEMU output and hardware tests as evidence, not assumptions.
 When implementation and current accepted documentation disagree, reconcile them explicitly.
+For non-trivial work, use `.agents/skills/luna-agent-workflow/SKILL.md`: research first when needed, decompose large tasks, verify meaningful changes, and review the resulting diff.
+After context compaction or session recovery, reload this file and the relevant current architecture/contracts before continuing.

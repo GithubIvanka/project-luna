@@ -4,6 +4,7 @@ dist
 out
 target/
 docs/archive/
+graphify-out/
 
 .idea/
 .vscode/

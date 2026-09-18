@@ -267,6 +267,8 @@ def resolve_opencode() -> str:
 
 def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | None = None) -> int:
     env = os.environ.copy()
+    # Let DSH Agent Skills discover the project's canonical .agents/skills tree.
+    env["DSH_AGENTS_HOME"] = str(ROOT / ".agents")
     if BACKEND not in {"online", "free", "local"}:
         raise RuntimeError(f"unsupported Luna Agent backend: {BACKEND}")
     local_mode = OFFLINE_MODE or BACKEND == "local"
@@ -283,7 +285,7 @@ def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | Non
             selected_model = model if model and model.endswith(":free") else FREE_MODEL
         else:
             selected_model = model or OPENCODE_MODEL
-        cmd = [resolve_opencode(), "run", "--auto", "--model", selected_model, prompt]
+        cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
     elif agent == "harness":
         cmd = [resolve_dsh(), "--profile", "headless", prompt]
     else:
