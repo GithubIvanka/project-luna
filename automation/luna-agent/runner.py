@@ -21,7 +21,7 @@ import sys
 import time
 import tomllib
 
-from verification import run_check
+from verification import VERIFICATION_CHECKS, run_check
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -37,6 +37,9 @@ MAX_ATTEMPTS = int(os.environ.get("LUNA_AGENT_MAX_ATTEMPTS", "3"))
 MAX_TURNS_PER_ATTEMPT = int(os.environ.get("LUNA_AGENT_MAX_TURNS", "6"))
 HARNESS_TIMEOUT = int(os.environ.get("LUNA_AGENT_HARNESS_TIMEOUT", "3600"))
 OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "1800"))
+OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepseek/deepseek-v4-flash-latest")
+OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
+OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
 TASKS_VERSION = 2
 
 
@@ -60,15 +63,48 @@ def load_tasks() -> list[dict]:
     if not tasks:
         return []
     seen: set[str] = set()
+    allowed_agents = {"harness", "opencode-review"}
+    allowed_priorities = {"P0", "P1", "P2"}
     for task in tasks:
         tid = task.get("id")
         if not tid or tid in seen:
             raise RuntimeError(f"invalid or duplicate task id: {tid!r}")
         seen.add(tid)
-        if task.get("agent") not in {"harness", "opencode-review"}:
+        if task.get("agent") not in allowed_agents:
             raise RuntimeError(f"unsupported agent for {tid}: {task.get('agent')!r}")
+        if task.get("priority") not in allowed_priorities:
+            raise RuntimeError(f"invalid priority for {tid}: {task.get('priority')!r}")
+        model = task.get("model")
+        if model is not None and (not isinstance(model, str) or not model.strip()):
+            raise RuntimeError(f"invalid model override for {tid}")
         if not task.get("title"):
             raise RuntimeError(f"task {tid} has no title")
+        for check in task.get("verification", ["git-diff-check"]):
+            if check not in VERIFICATION_CHECKS:
+                raise RuntimeError(f"unknown verification check for {tid}: {check!r}")
+    for task in tasks:
+        tid = task["id"]
+        deps = task.get("depends_on", [])
+        if not isinstance(deps, list) or any(dep == tid or dep not in seen for dep in deps):
+            raise RuntimeError(f"invalid dependency list for {tid}")
+
+    graph = {task["id"]: task.get("depends_on", []) for task in tasks}
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(tid: str) -> None:
+        if tid in visiting:
+            raise RuntimeError(f"task dependency cycle detected at {tid}")
+        if tid in visited:
+            return
+        visiting.add(tid)
+        for dep in graph[tid]:
+            visit(dep)
+        visiting.remove(tid)
+        visited.add(tid)
+
+    for tid in graph:
+        visit(tid)
     return tasks
 
 
@@ -110,18 +146,25 @@ def git_head() -> str:
 
 
 def git_tree_fingerprint() -> str:
-    parts = []
-    for args in (
-        ["git", "status", "--short", "--untracked-files=all"],
-        ["git", "diff", "--binary"],
-        ["git", "diff", "--cached", "--binary"],
-    ):
+    parts: list[bytes] = []
+    for args in (["git", "status", "--short", "--untracked-files=all"], ["git", "diff", "--binary"], ["git", "diff", "--cached", "--binary"]):
         result = run(args)
         if result.returncode != 0:
             raise RuntimeError(f"git fingerprint command failed: {' '.join(args)}")
-        parts.append(result.stdout)
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
-
+        parts.append(result.stdout.encode("utf-8"))
+    untracked = run(["git", "ls-files", "--others", "--exclude-standard", "-z"])
+    if untracked.returncode != 0:
+        raise RuntimeError("git fingerprint command failed: git ls-files --others")
+    for raw in untracked.stdout.split(chr(0)):
+        if not raw:
+            continue
+        path = ROOT / raw
+        try:
+            payload = os.readlink(path).encode("utf-8") if path.is_symlink() else path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(f"cannot fingerprint untracked path: {raw}") from exc
+        parts.append(raw.encode("utf-8") + bytes([0]) + hashlib.sha256(payload).digest())
+    return hashlib.sha256(bytes([0]).join(parts)).hexdigest()
 
 def require_expected_tree(info: dict) -> None:
     expected = info.get("expected_tree")
@@ -193,18 +236,31 @@ def resolve_opencode() -> str:
     raise RuntimeError("opencode CLI not found")
 
 
-def run_agent(agent: str, prompt: str, timeout: int, log: Path) -> int:
-    if agent == "harness":
+def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | None = None) -> int:
+    env = os.environ.copy()
+    if OFFLINE_MODE:
+        env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    if OPENCODE_CONFIG:
+        env["OPENCODE_CONFIG"] = OPENCODE_CONFIG
+    use_opencode = OFFLINE_MODE or agent == "opencode-review"
+    if use_opencode:
+        selected_model = model or OPENCODE_MODEL
+        cmd = [resolve_opencode(), "run", "--auto", "--model", selected_model, prompt]
+    elif agent == "harness":
         cmd = [resolve_dsh(), "--profile", "headless", prompt]
-    elif agent == "opencode-review":
-        cmd = [resolve_opencode(), "run", "--auto", "--model",
-               "openrouter/deepseek/deepseek-v4-flash-latest", prompt]
     else:
         raise RuntimeError(f"unknown agent: {agent}")
     with log.open("a", encoding="utf-8") as fh:
         fh.write(f"\n=== {now()} COMMAND ===\n{' '.join(cmd)}\n")
+        if OPENCODE_CONFIG:
+            fh.write(f"OPENCODE_CONFIG={OPENCODE_CONFIG}\n")
         proc = subprocess.Popen(
-            cmd, cwd=ROOT, text=True, stdout=fh, stderr=subprocess.STDOUT,
+            cmd,
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         try:
@@ -248,6 +304,8 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
         for name, result in info.get("verification", {}).items():
             if result.get("status") == "fail":
                 prompt += f"- {name}: {result.get('output_tail', '').strip()}\n"
+    if info.get("phase") == "post-commit-dirty":
+        prompt += "PREVIOUS SESSION CREATED A COMMIT BUT LEFT UNCOMMITTED CHANGES. Inspect those changes, decide whether they belong to this task, complete or revert them safely without destructive reset/clean operations, then create a focused follow-up commit before verification.\n"
     prompt += "Implement or review this task using the repository's current accepted architecture.\n"
     return prompt, HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
 
@@ -288,6 +346,8 @@ def finalize_committed_task(state: dict, task: dict, info: dict) -> str:
         return "pending"
     if committed_head and after_head != committed_head:
         raise RuntimeError("verified task commit no longer matches the repository HEAD")
+    if git_status():
+        raise RuntimeError("verified task has uncommitted changes in the working tree")
     if info.get("verification_status") != "passed":
         return "pending"
     info["status"] = "done"
@@ -399,7 +459,7 @@ def run_once(state: dict) -> str:
     prompt, timeout = prompt_for(task, info)
     log = log_path(tid, task["agent"])
     try:
-        rc = run_agent(task["agent"], prompt, timeout, log)
+        rc = run_agent(task["agent"], prompt, timeout, log, task.get("model"))
     except subprocess.TimeoutExpired:
         status = git_status()
         dirty = bool(status)
@@ -437,8 +497,15 @@ def run_once(state: dict) -> str:
         save_state(state)
         return "failed"
 
+    status = git_status()
     info["committed_head"] = after_head
     info["expected_tree"] = git_tree_fingerprint()
+    if status:
+        info["phase"] = "post-commit-dirty"
+        info["status"] = "pending"
+        info["last_result"] = "commit_left_uncommitted_changes"
+        save_state(state)
+        return "failed"
     info["phase"] = "verification"
     state["runner_status"] = "verifying"
     save_state(state)
@@ -502,11 +569,23 @@ def doctor() -> int:
         print(f"queue: OK ({len(tasks)} tasks)")
     except Exception as exc:
         failures.append(f"queue: {exc}")
-    for label, resolver in (("dsh", resolve_dsh), ("opencode", resolve_opencode)):
+    if OFFLINE_MODE:
+        print("mode: offline/local")
+        print(f"local model: {OPENCODE_MODEL}")
+        if not OPENCODE_CONFIG:
+            warnings.append("offline mode is using the normal OpenCode config; set LUNA_AGENT_OPENCODE_CONFIG for a dedicated local profile")
+        elif not Path(OPENCODE_CONFIG).is_file():
+            failures.append(f"local OpenCode config not found: {OPENCODE_CONFIG}")
         try:
-            print(f"{label}: {resolver()}")
+            print(f"opencode: {resolve_opencode()}")
         except RuntimeError as exc:
             failures.append(str(exc))
+    else:
+        for label, resolver in (("dsh", resolve_dsh), ("opencode", resolve_opencode)):
+            try:
+                print(f"{label}: {resolver()}")
+            except RuntimeError as exc:
+                failures.append(str(exc))
     status = git_status()
     if status:
         warnings.append(f"working tree is dirty ({len(status)} status entries)")

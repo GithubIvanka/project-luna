@@ -7,6 +7,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+VERIFICATION_CHECKS = {
+    "git-diff-check": (["git", "diff", "--check"], 120),
+    "luna-init-test": (["cargo", "test", "--manifest-path", "components/system/luna-init/Cargo.toml"], 900),
+    "luna-init-static": (["bash", "tools/check-luna-init-static.sh"], 120),
+    "luna-static": (["bash", "tools/check-luna-static.sh"], 120),
+    "boot-ovmf": (["bash", "tools/test-luna-boot-ovmf.sh"], 1200),
+}
+
 
 def command(argv: list[str], timeout: int = 900) -> tuple[int, str]:
     try:
@@ -19,17 +27,9 @@ def command(argv: list[str], timeout: int = 900) -> tuple[int, str]:
 
 
 def run_check(name: str) -> tuple[bool, str]:
-    checks: dict[str, tuple[list[str], int]] = {
-        "git-diff-check": (["git", "diff", "--check"], 120),
-        "luna-init-test": (["cargo", "test", "--manifest-path",
-                             "components/system/luna-init/Cargo.toml"], 900),
-        "luna-init-static": (["bash", "tools/check-luna-init-static.sh"], 120),
-        "luna-static": (["bash", "tools/check-luna-static.sh"], 120),
-        "boot-ovmf": (["bash", "tools/test-luna-boot-ovmf.sh"], 1200),
-    }
-    if name not in checks:
+    if name not in VERIFICATION_CHECKS:
         return False, f"unknown verification check: {name}"
-    rc, output = command(*checks[name])
+    rc, output = command(*VERIFICATION_CHECKS[name])
     return rc == 0, output
 
 
