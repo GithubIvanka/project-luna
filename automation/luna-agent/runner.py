@@ -38,11 +38,24 @@ MAX_ATTEMPTS = int(os.environ.get("LUNA_AGENT_MAX_ATTEMPTS", "3"))
 MAX_TURNS_PER_ATTEMPT = int(os.environ.get("LUNA_AGENT_MAX_TURNS", "6"))
 HARNESS_TIMEOUT = int(os.environ.get("LUNA_AGENT_HARNESS_TIMEOUT", "3600"))
 OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "180"))
+FREE_TIMEOUT = int(os.environ.get("LUNA_AGENT_FREE_TIMEOUT", "120"))
+FREE_RETRY_SECONDS = int(os.environ.get("LUNA_AGENT_FREE_RETRY_SECONDS", "300"))
 OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepseek/deepseek-v4-flash-0731#high")
 OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
 BACKEND = os.environ.get("LUNA_AGENT_BACKEND", "online")
 OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
 FREE_MODEL = os.environ.get("LUNA_AGENT_FREE_MODEL", "openrouter/deepseek/deepseek-v4-flash:free")
+FREE_MODELS = tuple(dict.fromkeys(
+    [FREE_MODEL]
+    + [item.strip() for item in os.environ.get(
+        "LUNA_AGENT_FREE_MODELS",
+        "openrouter/nvidia/nemotron-3.5-lightning:free,"
+        "openrouter/deepseek/deepseek-v4-flash-0731:free,"
+        "openrouter/inclusionai/ling-3.0-flash-fin:free,"
+        "openrouter/google/gemma-4-31b-it:free,"
+        "openrouter/cohere/north-mini-code:free",
+    ).split(",") if item.strip()]
+))
 LOCAL_MODEL = os.environ.get("LUNA_AGENT_LOCAL_MODEL", "local/ornith-1.5:9b")
 TASKS_VERSION = 2
 
@@ -268,7 +281,39 @@ def resolve_opencode() -> str:
     raise RuntimeError("opencode CLI not found")
 
 
-def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | None = None) -> int:
+def free_model_at(index: int) -> str:
+    if not FREE_MODELS:
+        raise RuntimeError("free backend has no configured models")
+    return FREE_MODELS[index % len(FREE_MODELS)]
+
+
+def is_free_model(model: str | None) -> bool:
+    if not model:
+        return False
+    return model.endswith(":free") or model in FREE_MODELS
+
+
+def defer_free_backend_retry(state: dict, info: dict, reason: str) -> bool:
+    if BACKEND != "free" or git_status():
+        return False
+    info["turns"] = max(0, int(info.get("turns", 0)) - 1)
+    info["status"] = "pending"
+    info["phase"] = "backend-wait"
+    info["last_result"] = reason
+    state["backend_wait_until"] = time.time() + FREE_RETRY_SECONDS
+    state["runner_status"] = "waiting-backend"
+    save_state(state)
+    return True
+
+
+def run_agent(
+    agent: str,
+    prompt: str,
+    timeout: int,
+    log: Path,
+    model: str | None = None,
+    free_model_index: int = 0,
+) -> int:
     env = os.environ.copy()
     # Let DSH Agent Skills discover the project's canonical .agents/skills tree.
     env["DSH_AGENTS_HOME"] = str(ROOT / ".agents")
@@ -285,7 +330,11 @@ def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | Non
         if local_mode:
             selected_model = model if model and model.startswith("local/") else LOCAL_MODEL
         elif free_mode:
-            selected_model = model if model and model.endswith(":free") else FREE_MODEL
+            if model and is_free_model(model):
+                selected_model = model
+            else:
+                selected_model = free_model_at(free_model_index)
+            timeout = min(timeout, FREE_TIMEOUT)
         else:
             selected_model = model or OPENCODE_MODEL
         cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
@@ -328,40 +377,85 @@ def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | Non
 
         if agent == "opencode-review" and (timed_out or rc != 0):
             reason = "timeout" if timed_out else f"exit {rc}"
-            fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
-            fallback_prompt = (
-                prompt
-                + "\n\nOpenCode review worker was unavailable. "
-                "Perform this review as a fresh independent pass with the Harness worker. "
-                "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
-            )
-            fallback_cmd = [resolve_dsh(), "--profile", "headless", fallback_prompt]
-            fh.write(f"=== FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
-            fallback = subprocess.Popen(
-                fallback_cmd,
-                cwd=ROOT,
-                env=env,
-                text=True,
-                stdout=fh,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            try:
-                rc = fallback.wait(timeout=HARNESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                fh.write(f"\n=== FALLBACK TIMEOUT {HARNESS_TIMEOUT}s; terminating process group ===\n")
+            if free_mode:
+                fallback_model = free_model_at(free_model_index + 1)
+                fh.write(f"\n=== FREE FALLBACK ({reason}) -> {fallback_model} ===\n")
+                fallback_prompt = (
+                    prompt
+                    + "\n\nThe previous free review worker was unavailable. "
+                    "Perform a fresh independent review with this next free model. "
+                    "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
+                )
+                fallback_cmd = [
+                    resolve_opencode(),
+                    "run",
+                    "--standalone",
+                    "--auto",
+                    "--model",
+                    fallback_model,
+                    fallback_prompt,
+                ]
+                fh.write(f"=== FREE FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
+                fallback = subprocess.Popen(
+                    fallback_cmd,
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
                 try:
-                    os.killpg(fallback.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    fallback.wait(timeout=15)
+                    rc = fallback.wait(timeout=FREE_TIMEOUT)
                 except subprocess.TimeoutExpired:
+                    fh.write(f"\n=== FREE FALLBACK TIMEOUT {FREE_TIMEOUT}s; terminating process group ===\n")
                     try:
-                        os.killpg(fallback.pid, signal.SIGKILL)
+                        os.killpg(fallback.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
-                    fallback.wait()
+                    try:
+                        fallback.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(fallback.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        fallback.wait()
+            else:
+                fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
+                fallback_prompt = (
+                    prompt
+                    + "\n\nOpenCode review worker was unavailable. "
+                    "Perform this review as a fresh independent pass with the Harness worker. "
+                    "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
+                )
+                fallback_cmd = [resolve_dsh(), "--profile", "headless", fallback_prompt]
+                fh.write(f"=== FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
+                fallback = subprocess.Popen(
+                    fallback_cmd,
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                try:
+                    rc = fallback.wait(timeout=HARNESS_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    fh.write(f"\n=== FALLBACK TIMEOUT {HARNESS_TIMEOUT}s; terminating process group ===\n")
+                    try:
+                        os.killpg(fallback.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        fallback.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(fallback.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        fallback.wait()
 
         fh.write(f"\n=== EXIT {rc} ===\n")
     return rc
@@ -390,7 +484,13 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
     if info.get("phase") == "post-commit-dirty":
         prompt += "PREVIOUS SESSION CREATED A COMMIT BUT LEFT UNCOMMITTED CHANGES. Inspect those changes, decide whether they belong to this task, complete or revert them safely without destructive reset/clean operations, then create a focused follow-up commit before verification.\n"
     prompt += "Implement or review this task using the repository's current accepted architecture.\n"
-    return prompt, HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
+    if BACKEND == "free":
+        timeout = FREE_TIMEOUT
+    elif BACKEND == "local" or OFFLINE_MODE:
+        timeout = OPENCODE_TIMEOUT
+    else:
+        timeout = HARNESS_TIMEOUT if kind == "harness" else OPENCODE_TIMEOUT
+    return prompt, timeout
 
 
 def verify_checks(task: dict, state: dict, info: dict, log: Path) -> bool:
@@ -447,6 +547,15 @@ def finalize_committed_task(state: dict, task: dict, info: dict) -> str:
 def run_once(state: dict) -> str:
     require_branch()
     tasks = load_tasks()
+
+    if BACKEND == "free":
+        wait_until = float(state.get("backend_wait_until", 0))
+        if wait_until and time.time() < wait_until:
+            state["runner_status"] = "waiting-backend"
+            save_state(state)
+            return "backend-wait"
+        if wait_until:
+            state.pop("backend_wait_until", None)
 
     active_id = state.get("current_task")
     active = find_task(tasks, active_id) if active_id else None
@@ -544,13 +653,26 @@ def run_once(state: dict) -> str:
     info["turns"] = int(info.get("turns", 0)) + 1
     save_state(state)
     prompt, timeout = prompt_for(task, info)
+    free_model_index = (
+        max(0, int(info.get("attempts", 1)) - 1) * MAX_TURNS_PER_ATTEMPT
+        + max(0, int(info.get("turns", 1)) - 1)
+    )
     log = log_path(tid, task["agent"])
     try:
-        rc = run_agent(task["agent"], prompt, timeout, log, task.get("model"))
+        rc = run_agent(
+            task["agent"],
+            prompt,
+            timeout,
+            log,
+            task.get("model"),
+            free_model_index,
+        )
     except subprocess.TimeoutExpired:
         status = git_status()
         dirty = bool(status)
         info["expected_tree"] = git_tree_fingerprint()
+        if defer_free_backend_retry(state, info, "free_backend_timeout"):
+            return "backend-wait"
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "timeout-resume" if dirty else "timeout"
         info["last_result"] = "timeout_resume" if dirty else "timeout"
@@ -563,6 +685,8 @@ def run_once(state: dict) -> str:
         status = git_status()
         dirty = bool(status)
         info["expected_tree"] = git_tree_fingerprint()
+        if defer_free_backend_retry(state, info, f"free_backend_exit_{rc}"):
+            return "backend-wait"
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
         info["phase"] = "agent-exit-resume" if dirty else "agent-exit"
         info["last_result"] = f"exit_{rc}_resume" if dirty else f"exit_{rc}"
@@ -756,6 +880,8 @@ def main() -> int:
                 time.sleep(60)
             elif result == "done":
                 time.sleep(5)
+            elif result == "backend-wait":
+                time.sleep(60)
             else:
                 time.sleep(30)
         except KeyboardInterrupt:
