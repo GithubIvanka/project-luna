@@ -32,6 +32,7 @@ STATE_FILE = STATE_DIR / "state.json"
 LOCK_FILE = STATE_DIR / "runner.lock"
 HEARTBEAT_FILE = STATE_DIR / "heartbeat.json"
 PAUSE_FILE = STATE_DIR / "PAUSE"
+HANDOFF_FILE = STATE_DIR / "HANDOFF_READY.json"
 BRANCH = "alpha-development"
 MAX_ATTEMPTS = int(os.environ.get("LUNA_AGENT_MAX_ATTEMPTS", "3"))
 MAX_TURNS_PER_ATTEMPT = int(os.environ.get("LUNA_AGENT_MAX_TURNS", "6"))
@@ -114,8 +115,10 @@ def load_tasks() -> list[dict]:
 def load_state() -> dict:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     if not STATE_FILE.exists():
-        return {"version": 2, "tasks": {}, "updated_at": now()}
-    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return {"version": 2, "tasks": {}, "autonomy_authorized": False, "updated_at": now()}
+    state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    state.setdefault("autonomy_authorized", False)
+    return state
 
 
 def save_state(state: dict) -> None:
@@ -187,6 +190,28 @@ def require_branch() -> None:
 def check_not_paused() -> None:
     if PAUSE_FILE.exists():
         raise RuntimeError(f"manual pause requested: remove {PAUSE_FILE}")
+
+
+def create_handoff() -> None:
+    require_branch()
+    require_clean("creating autonomous handoff")
+    payload = {"branch": BRANCH, "head": git_head(), "created_at": now()}
+    tmp = HANDOFF_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(HANDOFF_FILE)
+
+
+def require_handoff() -> None:
+    if not HANDOFF_FILE.exists():
+        raise RuntimeError(f"waiting for development handoff: create {HANDOFF_FILE}")
+    try:
+        payload = json.loads(HANDOFF_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("autonomous handoff marker is invalid") from exc
+    if payload.get("branch") != BRANCH or payload.get("head") != git_head():
+        raise RuntimeError("autonomous handoff marker does not match the current repository HEAD")
+    require_clean("after autonomous handoff")
+    HANDOFF_FILE.unlink()
 
 
 def require_clean(reason: str) -> None:
@@ -433,6 +458,9 @@ def run_once(state: dict) -> str:
 
     if task is None:
         require_clean("before new task start")
+        if not state.get("autonomy_authorized", False):
+            require_handoff()
+            state["autonomy_authorized"] = True
         task = next_task(tasks, state)
         save_state(state)
         if task is None:
@@ -629,6 +657,7 @@ def main() -> int:
     parser.add_argument("--continuous", action="store_true", help="process tasks continuously")
     parser.add_argument("--status", action="store_true", help="show durable runner/task state")
     parser.add_argument("--doctor", action="store_true", help="check local agent prerequisites without starting work")
+    parser.add_argument("--handoff", action="store_true", help="authorize autonomous work from the current clean HEAD")
     args = parser.parse_args()
     if args.status:
         state = load_state()
@@ -645,6 +674,14 @@ def main() -> int:
         return 0
     if args.doctor:
         return doctor()
+    if args.handoff:
+        try:
+            create_handoff()
+        except Exception as exc:
+            print(f"Luna Agent handoff refused: {exc}", file=sys.stderr)
+            return 2
+        print(HANDOFF_FILE)
+        return 0
     if args.once == args.continuous:
         parser.error("choose exactly one of --once or --continuous")
 
