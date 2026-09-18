@@ -8,6 +8,7 @@ Type=simple
 WorkingDirectory=/home/sibitti/source/project-luna
 Environment=PATH=/home/sibitti/.local/bin:/home/sibitti/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/.config/project-luna/luna-agent.env
 ExecStart=/usr/bin/python3 /home/sibitti/source/project-luna/automation/luna-agent/runner.py --continuous
 Restart=always
 RestartSec=30

@@ -39,7 +39,10 @@ HARNESS_TIMEOUT = int(os.environ.get("LUNA_AGENT_HARNESS_TIMEOUT", "3600"))
 OPENCODE_TIMEOUT = int(os.environ.get("LUNA_AGENT_OPENCODE_TIMEOUT", "1800"))
 OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepseek/deepseek-v4-flash-latest")
 OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
+BACKEND = os.environ.get("LUNA_AGENT_BACKEND", "online")
 OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
+FREE_MODEL = os.environ.get("LUNA_AGENT_FREE_MODEL", "openrouter/deepseek/deepseek-v4-flash:free")
+LOCAL_MODEL = os.environ.get("LUNA_AGENT_LOCAL_MODEL", "local/ornith-1.5:9b")
 TASKS_VERSION = 2
 
 
@@ -129,6 +132,7 @@ def write_heartbeat(state: dict) -> None:
         "pid": os.getpid(),
         "updated_at": now(),
         "branch": BRANCH,
+        "backend": BACKEND,
         "current_task": state.get("current_task"),
         "status": state.get("runner_status", "idle"),
     }
@@ -238,13 +242,22 @@ def resolve_opencode() -> str:
 
 def run_agent(agent: str, prompt: str, timeout: int, log: Path, model: str | None = None) -> int:
     env = os.environ.copy()
-    if OFFLINE_MODE:
+    if BACKEND not in {"online", "free", "local"}:
+        raise RuntimeError(f"unsupported Luna Agent backend: {BACKEND}")
+    local_mode = OFFLINE_MODE or BACKEND == "local"
+    free_mode = BACKEND == "free"
+    if local_mode:
         env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     if OPENCODE_CONFIG:
         env["OPENCODE_CONFIG"] = OPENCODE_CONFIG
-    use_opencode = OFFLINE_MODE or agent == "opencode-review"
+    use_opencode = local_mode or free_mode or agent == "opencode-review"
     if use_opencode:
-        selected_model = model or OPENCODE_MODEL
+        if local_mode:
+            selected_model = model if model and model.startswith("local/") else LOCAL_MODEL
+        elif free_mode:
+            selected_model = model if model and model.endswith(":free") else FREE_MODEL
+        else:
+            selected_model = model or OPENCODE_MODEL
         cmd = [resolve_opencode(), "run", "--auto", "--model", selected_model, prompt]
     elif agent == "harness":
         cmd = [resolve_dsh(), "--profile", "headless", prompt]
@@ -569,13 +582,21 @@ def doctor() -> int:
         print(f"queue: OK ({len(tasks)} tasks)")
     except Exception as exc:
         failures.append(f"queue: {exc}")
-    if OFFLINE_MODE:
-        print("mode: offline/local")
-        print(f"local model: {OPENCODE_MODEL}")
+    print(f"backend: {BACKEND}")
+    if BACKEND == "local" or OFFLINE_MODE:
+        print(f"local model: {LOCAL_MODEL}")
         if not OPENCODE_CONFIG:
-            warnings.append("offline mode is using the normal OpenCode config; set LUNA_AGENT_OPENCODE_CONFIG for a dedicated local profile")
+            warnings.append("local mode is using the normal OpenCode config; set LUNA_AGENT_OPENCODE_CONFIG for a dedicated local profile")
         elif not Path(OPENCODE_CONFIG).is_file():
             failures.append(f"local OpenCode config not found: {OPENCODE_CONFIG}")
+    elif BACKEND == "free":
+        print(f"free model: {FREE_MODEL}")
+    if BACKEND == "free":
+        try:
+            print(f"opencode: {resolve_opencode()}")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+    elif BACKEND == "local" or OFFLINE_MODE:
         try:
             print(f"opencode: {resolve_opencode()}")
         except RuntimeError as exc:
@@ -613,6 +634,12 @@ def main() -> int:
         state = load_state()
         payload = dict(state)
         payload["effective_status"] = effective_status(state)
+        payload["backend"] = BACKEND
+        payload["model"] = (
+            LOCAL_MODEL if BACKEND == "local"
+            else FREE_MODEL if BACKEND == "free"
+            else OPENCODE_MODEL
+        )
         payload["pause_marker"] = str(PAUSE_FILE) if PAUSE_FILE.exists() else None
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0

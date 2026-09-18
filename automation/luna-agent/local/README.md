@@ -7,15 +7,16 @@ override. A custom OpenCode config can be supplied with
 
 ## Offline mode
 
-Set `LUNA_AGENT_OFFLINE=1` when the runner must not invoke DeepSeek Harness.
-OpenCode is then expected to use a local provider. The runner also disables
-OpenCode automatic update checks for that process.
+Set `LUNA_AGENT_BACKEND=local` when the runner must not invoke DeepSeek
+Harness. OpenCode is then expected to use a local provider. The runner also
+disables OpenCode automatic update checks for that process.
 
 Example environment:
 
 ```text
-LUNA_AGENT_OFFLINE=1
-LUNA_AGENT_OPENCODE_MODEL=local/ornith
+LUNA_AGENT_BACKEND=local
+LUNA_AGENT_LOCAL_MODEL=local/ornith-1.5:9b
+LUNA_LOCAL_LLM_URL=http://127.0.0.1:11434/v1
 LUNA_AGENT_OPENCODE_CONFIG=/home/user/.config/project-luna/opencode-local.jsonc
 ```
 
