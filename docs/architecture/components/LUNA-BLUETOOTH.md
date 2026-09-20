@@ -1,31 +1,21 @@
 # `luna-bluetooth`
 
-**Статус:** domain boundary реализована; provider integration неполная.
-
 ## Назначение
 
-Предоставляет Luna Bluetooth domain и lifecycle без связывания архитектуры с конкретным daemon.
+Luna-owned доменная граница Bluetooth-устройств.
 
 ## Владеет
 
-- моделью Bluetooth device;
-- discovery state;
-- pairing/trust state на границе Luna;
-- операциями подключения и отключения;
-- provider abstraction.
+Идентичностью устройства, именем, состоянием подключения и backend interface.
 
 ## Не владеет
 
-Внутренностями BlueZ, общим device manager, authorization policy, GUI widgets или UserSession lifecycle.
+GUI сопряжения, network policy или process supervision.
 
-## Provider
+## Внешний provider
 
-BlueZ является допустимым Linux provider. Его наличие в image не считается полной реализацией Luna boundary.
+Для реализации может использоваться BlueZ. BlueZ остаётся внешней зависимостью.
 
-## Зависимости
+## Статус
 
-`luna-device-manager`, security/session context и выбранный Linux Bluetooth stack в пределах соответствующих контрактов.
-
-## Открыто
-
-D-Bus integration, pairing/trust persistence, device authorization и desktop controls.
+Доменные типы и backend interface существуют. Полная интеграция с BlueZ ещё не завершена.

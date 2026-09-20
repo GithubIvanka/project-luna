@@ -737,6 +737,7 @@ dependencies = [
 name = "luna-device-manager"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "luna-common",
 ]
 
@@ -763,13 +764,6 @@ name = "luna-kernel-manager"
 version = "0.1.0"
 dependencies = [
  "luna-common",
-]
-
-[[package]]
-name = "luna-login"
-version = "0.1.0"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -841,6 +835,7 @@ dependencies = [
 name = "luna-user-session"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "luna-common",
 ]
 

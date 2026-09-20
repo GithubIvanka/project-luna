@@ -1,32 +1,21 @@
 # `luna-audio`
 
-**Статус:** domain boundary реализована; provider integration неполная.
-
 ## Назначение
 
-Предоставляет Luna audio domain независимо от конкретного desktop implementation.
+Luna-owned граница аудиоподсистемы.
 
 ## Владеет
 
-- audio state;
-- моделью endpoint/device;
-- операциями volume и routing на границе Luna;
-- provider abstraction.
-
-Ключевые domain concepts: `Volume`, `AudioState`, `AudioEndpoint`.
+Представлением аудиоконечных точек, громкости, mute state и backend interface.
 
 ## Не владеет
 
-Внутренностями PipeWire, authorization policy, GUI widgets, lifecycle UserSession или общим device discovery.
+рабочей сессией, процессом загрузки и общей policy безопасности.
 
-## Provider
+## Внешний provider
 
-Текущий PC image содержит PipeWire, PipeWire-Pulse и WirePlumber как infrastructure. Сам факт их упаковки не доказывает полной integration Luna audio provider.
+Конкретный аудиостек может использовать PipeWire/WirePlumber. Это внешний provider, а не архитектурный компонент Luna.
 
-## Зависимости
+## Статус
 
-Общие domain values, security/session context при необходимости и выбранный Linux audio stack.
-
-## Открыто
-
-D-Bus/provider integration, per-user routing, session lifecycle и управление из Noctalia.
+Доменные типы и backend interface существуют. Полная интеграция аудиостека ещё не завершена.

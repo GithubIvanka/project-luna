@@ -1,46 +1,65 @@
 # `luna-event`
 
-**Статус:** domain boundary реализована; транспортная и durable integration продолжаются.
-
 ## Назначение
 
-Типизированный домен событий Luna и контракты подписки/доставки.
+Типизированная модель событий и операций, используемая системными, device, session и application доменами.
 
-## Владеет
+## События
 
-- event identities/types;
-- subscriptions;
-- delivery contracts;
-- правилами lifecycle подписки.
+События имеют identity, источник, тип, payload и при необходимости относятся к `Operation`.
 
-## Правило
-
-Событие описывает факт, а не скрытую команду. Нельзя помещать в event payload произвольный mutable global state.
-
-Примеры:
+Поддерживаются три класса:
 
 ```text
-DeviceAdded
-DeviceRemoved
-VolumeMounted
-UserLoggedIn
-UserLoggedOut
-ApplicationStarted
-ApplicationExited
-SystemUpdated
-KernelChanged
+Ephemeral
+Persistent
+Audit
 ```
 
-Разные domain events должны иметь отдельные типизированные payloads, а не один универсальный JSON/string payload.
+`Ephemeral` предназначены для текущего runtime и не требуют долговременного хранения. `Persistent` могут использоваться для истории и восстановления. `Audit` предназначены для аудита и не должны молча теряться.
+
+Порядок событий внутри одной `Operation` определяется монотонной последовательностью. Timestamp является метаданными и не используется как источник порядка.
+
+## Доставка
+
+Доставка ограничена по объёму и должна учитывать backpressure. Потеря `Audit` события без явной обработки недопустима.
+
+Production transport ещё не является частью зафиксированного backend; базовый in-memory bus используется для тестов.
+
+## Operation
+
+`Operation` — отдельная сущность от `Event`. Операция представляет длительную backend-работу, которая не зависит от жизни GUI или CLI процесса.
+
+Операция явно указывает, допускает ли она:
+
+```text
+возобновление
+необходимость reconciliation
+невозобновляемое выполнение
+```
+
+После перезапуска компонента незавершённая операция должна быть обнаружена и либо продолжена, либо безопасно приведена к согласованному состоянию.
+
+## Отмена
+
+Кооперативная отмена и принудительная остановка различаются:
+
+```text
+cancel
+  ≠
+force stop
+```
+
+`force stop` сильнее, предупреждает пользователя и должен быть отражён в audit trail там, где применимо.
+
+## Взаимодействие
+
+`luna-system-runtime` является основным координатором системного event flow. Device, session, application и update domains публикуют события через явные интерфейсы.
 
 ## Не владеет
 
-IPC transport, durable state storage, authorization, device discovery или process supervision.
+Компонент не становится глобальной базой состояния, не заменяет `luna-state`, не владеет всеми system services и не принимает security decisions.
 
-## Зависимости
+## Статус
 
-Минимальные shared identifiers и выбранный transport layer.
-
-## Открыто
-
-IPC backend, durability/replay semantics и интеграция с desktop/system runtime.
+Типизированная модель событий и in-memory transport существуют. Production transport, полный operation recovery и durable audit pipeline ещё требуют интеграции.

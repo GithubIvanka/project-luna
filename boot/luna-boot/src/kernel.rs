@@ -1,5 +1,6 @@
 //! Linux bzImage loader and physical-memory preparation.
 
+use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ptr;
@@ -12,6 +13,17 @@ use crate::error::{BootError, BootResult};
 use crate::filesystem::SystemFilesystem;
 use crate::linux::LinuxSetupHeader;
 use crate::target::BootTarget;
+
+fn debug_stage(message: &str) {
+    use uefi::boot::{self, open_protocol_exclusive};
+    use uefi::proto::console::text::Output;
+    if let Ok(handle) = boot::get_handle_for_protocol::<Output>()
+        && let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle)
+        && let Ok(encoded) = uefi::CString16::try_from(message)
+    {
+        let _ = stdout.output_string(&encoded);
+    }
+}
 
 pub struct PreparedKernel {
     #[allow(dead_code)]
@@ -39,9 +51,13 @@ impl<'a> KernelLoader<'a> {
     }
 
     pub fn prepare(&mut self, target: &BootTarget) -> BootResult<PreparedKernel> {
+        debug_stage("Luna: kernel 1 read start\r\n");
         let kernel = self.filesystem.read_file(&target.kernel_path)?;
+        debug_stage("Luna: kernel 2 read done\r\n");
         let kernel_digest = *blake3::hash(&kernel).as_bytes();
+        debug_stage("Luna: kernel 3 digest done\r\n");
         let setup = LinuxSetupHeader::parse(&kernel)?;
+        debug_stage("Luna: kernel 4 header done\r\n");
         if setup.xloadflags & 1 == 0 {
             return Err(BootError::Unsupported(
                 "kernel does not advertise XLF_KERNEL_64",
@@ -59,11 +75,13 @@ impl<'a> KernelLoader<'a> {
             return Err(BootError::InvalidKernel);
         }
 
+        debug_stage("Luna: kernel 5 alloc start\r\n");
         let kernel_address = allocate_kernel(
             setup.pref_address,
             kernel_size,
             setup.kernel_alignment as u64,
         )?;
+        debug_stage("Luna: kernel 6 alloc done\r\n");
         unsafe {
             ptr::write_bytes(kernel_address as *mut u8, 0, kernel_size);
             ptr::copy_nonoverlapping(
@@ -72,29 +90,44 @@ impl<'a> KernelLoader<'a> {
                 protected.len(),
             );
         }
+        debug_stage("Luna: kernel 7 kernel copy done\r\n");
 
+        debug_stage("Luna: kernel 8 init read start\r\n");
         let init = self.filesystem.read_file(&target.init_path)?;
+        debug_stage("Luna: kernel 9 init read done\r\n");
         validate_luna_init(&init)?;
+        debug_stage("Luna: kernel 10 init validate done\r\n");
         let init_digest = *blake3::hash(&init).as_bytes();
+        debug_stage("Luna: kernel 11 init digest done\r\n");
         let init_size = init.len();
         let init_pages = div_ceil(init_size, PAGE_SIZE);
+        debug_stage("Luna: kernel 12 init alloc start\r\n");
         let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
+        debug_stage("Luna: kernel 13 init alloc done\r\n");
+        debug_stage(&format!(
+            "Luna: init phys=0x{init_address:x} size={init_size}\r\n"
+        ));
         unsafe {
             ptr::write_bytes(init_address as *mut u8, 0, init_pages * PAGE_SIZE);
             ptr::copy_nonoverlapping(init.as_ptr(), init_address as *mut u8, init_size);
         }
 
         let mut boot_params = BootParams::zeroed();
+        debug_stage("Luna: kernel 14 boot params zeroed\r\n");
         boot_params.copy_setup_header(&kernel)?;
+        debug_stage("Luna: kernel 15 setup copied\r\n");
         boot_params.set_loader_type(0xff);
         boot_params.set_loadflags(setup.loadflags | 0x01);
         boot_params.enable_setup_heap();
 
+        debug_stage("Luna: kernel 16 bp alloc start\r\n");
         let bp_addr = allocate_pages(1, 0xffff_ffff)?;
+        debug_stage("Luna: kernel 17 bp alloc done\r\n");
         unsafe {
             ptr::write_bytes(bp_addr as *mut u8, 0, PAGE_SIZE);
         }
 
+        debug_stage("Luna: kernel 18 cmdline start\r\n");
         let cmdline = target.kernel_cmdline.as_bytes();
         let max_cmdline = setup.cmdline_size as usize;
         if cmdline.len() + 1 > max_cmdline {
@@ -102,15 +135,20 @@ impl<'a> KernelLoader<'a> {
                 "kernel command line exceeds Linux cmdline_size",
             ));
         }
+        debug_stage("Luna: kernel 19 cmdline alloc start\r\n");
         let cmdline_addr = allocate_low_cmdline_page()?;
+        debug_stage("Luna: kernel 20 cmdline alloc done\r\n");
         unsafe {
             ptr::write_bytes(cmdline_addr as *mut u8, 0, PAGE_SIZE);
             ptr::copy_nonoverlapping(cmdline.as_ptr(), cmdline_addr as *mut u8, cmdline.len());
         }
         boot_params.set_cmdline(cmdline_addr)?;
+        debug_stage("Luna: kernel 21 cmdline set\r\n");
 
         let e820 = Vec::<E820Entry>::new();
+        debug_stage("Luna: kernel 22 e820 start\r\n");
         boot_params.set_e820(&e820)?;
+        debug_stage("Luna: kernel 23 e820 done\r\n");
         unsafe {
             ptr::copy_nonoverlapping(
                 boot_params.as_bytes().as_ptr(),
@@ -119,6 +157,7 @@ impl<'a> KernelLoader<'a> {
             );
         }
 
+        debug_stage("Luna: kernel 24 boot params copy\r\n");
         let allocations = vec![
             (kernel_address, div_ceil(kernel_size, PAGE_SIZE)),
             (init_address, init_pages),
@@ -298,21 +337,15 @@ fn read_u64(bytes: &[u8], offset: usize) -> BootResult<u64> {
     ]))
 }
 
-fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u64> {
-    let pages = div_ceil(size + alignment as usize, PAGE_SIZE);
-    if preferred != 0 {
-        let aligned = (preferred + alignment - 1) & !(alignment - 1);
-        if aligned < 0x1_0000_0000
-            && aligned + size as u64 <= 0x1_0000_0000
-            && let Ok(ptr) = boot::allocate_pages(
-                AllocateType::Address(aligned),
-                MemoryType::LOADER_DATA,
-                pages,
-            )
-        {
-            return Ok(ptr.as_ptr() as u64 + (aligned - ptr.as_ptr() as u64));
-        }
+fn allocate_kernel(_preferred: u64, size: usize, alignment: u64) -> BootResult<u64> {
+    if alignment == 0 || !alignment.is_power_of_two() {
+        return Err(BootError::InvalidKernel);
     }
+    let extra = alignment.checked_sub(1).ok_or(BootError::InvalidKernel)? as usize;
+    let request_size = size
+        .checked_add(extra)
+        .ok_or(BootError::MemoryAllocationFailed)?;
+    let pages = div_ceil(request_size, PAGE_SIZE);
     let ptr = boot::allocate_pages(
         AllocateType::MaxAddress(0xffff_ffff),
         MemoryType::LOADER_DATA,
@@ -320,7 +353,14 @@ fn allocate_kernel(preferred: u64, size: usize, alignment: u64) -> BootResult<u6
     )
     .map_err(|_| BootError::MemoryAllocationFailed)?;
     let raw = ptr.as_ptr() as u64;
-    Ok((raw + alignment - 1) & !(alignment - 1))
+    let aligned = (raw + alignment - 1) & !(alignment - 1);
+    let end = aligned
+        .checked_add(size as u64)
+        .ok_or(BootError::MemoryAllocationFailed)?;
+    if end > 0x1_0000_0000 {
+        return Err(BootError::MemoryAllocationFailed);
+    }
+    Ok(aligned)
 }
 
 fn allocate_pages(pages: usize, max_address: u64) -> BootResult<u64> {

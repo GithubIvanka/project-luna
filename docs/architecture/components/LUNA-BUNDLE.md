@@ -1,46 +1,48 @@
 # `luna-bundle`
 
-**Статус:** domain и RFC-0002/LBP1 codec реализованы; дальнейшая интеграция продолжается.
-
 ## Назначение
 
-Представляет, валидирует, читает и записывает Luna Bundles и их принятую транспортную форму `.lbp`.
+Доменная модель Bundle и реализация кодека LBP1.
 
 ## Владеет
 
-- Bundle identity и metadata;
-- manifest model и validation;
-- Bundle resource representation;
-- LBP1 reader/writer;
-- детерминированным payload encoding;
-- BLAKE3 content identity;
-- codec/verification boundary для Ed25519;
-- hardening и path validation.
-
-## Форматный инвариант
-
-`.lbp` — транспортное/archive представление Bundle. Это не System Image и не установленная runtime representation.
-
-System Image остаётся `luna-X.Y.Z.squashfs` плюс соседний manifest.
-
-## Manifest
-
-Mappings являются логическими Bundle-relative declarations. Manifest не должен кодировать физические пути `DATA/system/apps/...` или `DATA/users/...` как mapping targets.
-
-Capabilities и access fields являются запросами. Grant выдаёт `luna-security`.
+- metadata, resources и capabilities Bundle;
+- проверкой manifest;
+- чтением и записью RFC-0002 `.lbp`;
+- вычислением `ContentIdentity`;
+- проверкой поддерживаемых подписей;
+- извлечением payload для `luna-app-manager`.
 
 ## Не владеет
 
-Install/update/removal policy, trust policy, namespace creation, process lifecycle или UEFI boot.
+Компонент не выбирает место установки, не публикует физические пути DATA, не запускает процессы и не участвует в выборе boot target.
 
-## Зависимости
+## Trust и подпись
 
-Только необходимые shared identifiers/version types и format/serialization primitives. `luna-bundle` не должен зависеть вверх от manager/runtime компонентов.
+Подпись проверяет криптографическую подлинность содержимого. Она не является разрешением на установку или запуск. Trust и authorization определяются `luna-security`.
 
-## Интеграция
+```text
+.lbр
+ ↓
+проверка формата и целостности
+ ↓
+Bundle
+ ↓
+trust / authorization
+```
 
-`luna-app-manager` отвечает за install transaction. Runtime потребляет валидированные Bundle semantics. Внешний Bundle должен быть проверен до install/launch.
+## Граница
 
-## Открыто
+```text
+байты .lbp
+   ↕
+кодек LBP1
+   ↕
+BundleManifest / resources
+```
 
-Supply-chain/repository trust и delta update механизмы находятся вне RFC-0002.
+Manifest использует логические resource paths. Физическая установка выполняется за пределами этого crate.
+
+## Статус
+
+Кодек и round-trip/integration tests существуют. Полное соответствие RFC и интеграция trust policy ещё дорабатываются.

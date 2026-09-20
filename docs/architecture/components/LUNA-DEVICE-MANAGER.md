@@ -1,52 +1,25 @@
 # `luna-device-manager`
 
-**Статус:** архитектурная граница/scaffold; реальное discovery и automount ещё в разработке.
-
 ## Назначение
 
-Управляет обнаружением и жизненным циклом аппаратных устройств и томов, которые должны быть представлены системе и desktop.
+Владеет доменной моделью и lifecycle устройств и внешних томов.
 
 ## Владеет
 
-- discovery устройств;
-- device identity/state;
-- volume lifecycle;
-- hotplug/hot-unplug;
-- safe mount/unmount/eject orchestration на системной границе;
-- публикацией device/volume events.
+- идентичностью и состоянием устройств/томов;
+- обнаружением и lifecycle томов через явный backend;
+- публикацией состояния устройств и томов в вышестоящие компоненты.
 
 ## Не владеет
 
-Низкоуровневым filesystem API, Bundle mapping, application authorization, desktop widgets или UEFI boot.
+Authorization приложения, создание mount namespace или выбор EFI/LUNA-SYS при загрузке.
 
-## Внешние носители
+## Поведение томов
 
-Целевой сценарий:
+Внешние тома должны получать понятную пользовательскую идентичность вместо отображения сырых `/dev/...` путей. Автоматическое подключение допустимо согласно policy; USB media не должны молча запускать приложения.
 
-```text
-USB inserted
- ↓
-discovery
- ↓
-filesystem detection
- ↓
-volume mount
- ↓
-event
- ↓
-file manager
-```
+Состояние управляемых томов относится к `LUNA-DATA/system/volumes`.
 
-Ручной `mount` не должен быть обязательным пользовательским сценарием.
+## Статус
 
-## Безопасность
-
-Доступ приложения к volume не следует считать разрешённым только из факта его монтирования. Policy для конкретного приложения проходит через `luna-security`.
-
-## Зависимости
-
-`luna-fs`, `luna-event`, `luna-security` и Linux device/filesystem mechanisms.
-
-## Открыто
-
-Реальный discovery backend, automount/eject lifecycle, removable-media policy и полная интеграция с desktop.
+Базовые device/volume types и query boundary существуют. Полный hotplug, mount/eject и production backend ещё не завершены.

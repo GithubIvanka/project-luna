@@ -33,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            busybox-static build-essential clang cpio cmake curl dbus \
+            build-essential clang cmake curl dbus \
             dosfstools e2fsprogs file fonts-dejavu-core gdisk graphviz gzip \
             libadwaita-1-dev libcairo2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
             libelf-dev libfontconfig1-dev libfreetype6-dev libgbm-dev libgles2-mesa-dev \
@@ -88,7 +88,7 @@ jobs:
 
       - name: Verify desktop payload
         run: |
-          test -x dist/desktop-root/usr/bin/luna-login
+          test -x dist/desktop-root/usr/bin/luna-user-session
           test -x dist/desktop-root/usr/bin/niri
           test -x dist/desktop-root/usr/bin/niri-session
           sh -n dist/desktop-root/usr/bin/niri-session
@@ -147,7 +147,6 @@ jobs:
           test -f dist/luna-system.img
           test -f dist/luna-data.img
           test -f dist/luna-pc.img
-          test ! -e dist/luna-initramfs.img
           mdir -i dist/luna-efi.img ::/EFI/LUNA
 
       - name: Inspect generated image

@@ -1,52 +1,42 @@
 # `luna-app-manager`
 
-**Статус:** принятая граница; интеграция и hardening продолжаются.
-
 ## Назначение
 
-Управляет жизненным циклом установленных Luna Bundles и связанной с ними изменяемой application data. Компонент отвечает за состояние установленного приложения, но не за выполнение его процессов.
+Управляет жизненным циклом установленных Bundle приложений.
 
 ## Владеет
 
-- install/import Bundle;
-- verification и registration;
-- update/removal;
-- migration;
-- policy очистки application data;
-- импорт поддерживаемых `.deb`/`.rpm` в Luna Bundle form.
+- планированием установки, обновления, удаления и импорта Bundle;
+- проверкой входных Bundle;
+- координацией integrity и trust checks;
+- регистрацией установленных приложений;
+- lifecycle пользовательских данных приложения и поиском orphaned data.
 
 ## Не владеет
 
-`UserSession`, запуском `ApplicationInstance`, созданием namespace, authorization policy, низкоуровневым filesystem backend или транзакциями обновления System Image.
-
-## Установка
-
-Безопасный поток:
-
-```text
-inspect
-  ↓
-validate
-  ↓
-integrity / trust checks
-  ↓
-security decision
-  ↓
-stage
-  ↓
-atomic commit
-```
-
-Ошибка должна приводить к откату незавершённой операции: частично зарегистрированный Bundle недопустим.
-
-## Хранилище
-
-Установленные immutable Bundles находятся в `DATA/system/apps`. Пользовательские данные и настройки хранятся в соответствующем `DATA/users/<user>/`.
+`luna-app-manager` не запускает процессы и не заменяет `luna-app-runtime`.
 
 ## Зависимости
 
-Использует `luna-bundle`, `luna-fs`, `luna-config`, `luna-security`, `luna-state` и update contracts при необходимости.
+`luna-common`; интеграция с `luna-bundle`, `luna-security`, слоями хранения и обновления выполняется через явные контракты.
 
-## Открыто
+## Жизненный цикл
 
-Полная dependency resolution, reconciliation транзакций, миграции данных и hardening импорта сторонних пакетов.
+```text
+inspect → validate → stage → commit → registered
+                     ↘ failure / cleanup
+```
+
+## Хранение
+
+Установленные Bundle находятся в `LUNA-DATA/system/apps`. Этот физический путь не является частью семантики manifest Bundle.
+
+Bundle разделяется между пользователями, разные версии могут сосуществовать. Пользовательские данные и конфигурация остаются вне immutable Bundle.
+
+## Зависимости приложения
+
+Отсутствующие зависимости не скачиваются молча: менеджер определяет требование, ищет подходящий источник, объясняет операцию и получает необходимое подтверждение/разрешение.
+
+## Статус
+
+Базовый domain/API crate существует. Полный backend установки и интеграция с runtime ещё разрабатываются.

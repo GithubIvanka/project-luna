@@ -76,6 +76,7 @@ if ! grep -Fq 'extern int x86_luna_exec_init(void);' "$INIT_C"; then
     cat > "$init_include_snippet" <<'EOF'
 #ifdef CONFIG_RUST
 extern int x86_luna_exec_init(void);
+static bool luna_init_started;
 #endif
 EOF
     awk -v snippet="$init_include_snippet" '
@@ -97,13 +98,37 @@ if ! grep -Fq 'x86_luna_exec_init();' "$INIT_C"; then
 #ifdef CONFIG_RUST
 	if (IS_ENABLED(CONFIG_RUST)) {
 		int luna_ret = x86_luna_exec_init();
-		if (luna_ret)
-			panic("Luna: direct luna-init execution failed (error %d).", luna_ret);
+		if (!luna_ret) {
+			luna_init_started = true;
+			return;
+		}
+		panic("Luna: direct luna-init execution failed (error %d).", luna_ret);
 	}
 #endif
 EOF
     awk -v snippet="$init_call_snippet" '
         /^[[:space:]]*console_on_rootfs\(\);[[:space:]]*$/ {
+            print
+            while ((getline line < snippet) > 0) print line
+            close(snippet)
+            next
+        }
+        { print }
+    ' "$INIT_C" > "$INIT_C.tmp"
+    mv "$INIT_C.tmp" "$INIT_C"
+fi
+
+if ! grep -Fq 'luna_init_started)' "$INIT_C"; then
+    init_return_snippet="$(mktemp)"
+    cat > "$init_return_snippet" <<'EOF'
+
+#ifdef CONFIG_RUST
+	if (IS_ENABLED(CONFIG_RUST) && luna_init_started)
+		return 0;
+#endif
+EOF
+    awk -v snippet="$init_return_snippet" '
+        /^[[:space:]]*do_sysctl_args\(\);[[:space:]]*$/ {
             print
             while ((getline line < snippet) > 0) print line
             close(snippet)
@@ -130,13 +155,27 @@ if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$EXEC_C"; then
  * pathname.
  */
 int kernel_execve_file(struct file *file,
+			       struct file *handoff,
 			       const char *const *argv,
 			       const char *const *envp)
 {
 	int fd, retval;
 
-	if (!file)
+	if (!file || !handoff)
 		return -EINVAL;
+
+	/* FD 3 is the stable Luna PID 1 handoff channel. Standard descriptors
+	 * 0..2 are installed by console_on_rootfs() before this hook runs. */
+	fd = get_unused_fd_flags(0);
+	if (fd < 0)
+		return fd;
+	if (fd != 3) {
+		put_unused_fd(fd);
+		return -EBUSY;
+	}
+
+	get_file(handoff);
+	fd_install(fd, handoff);
 
 	/* The anonymous shmem object is kernel-created and trusted by Luna.
 	 * Give the VFS execute permission required by do_open_execat(). */
@@ -144,9 +183,11 @@ int kernel_execve_file(struct file *file,
 	file_inode(file)->i_mode = (file_inode(file)->i_mode & S_IFMT) | 0700;
 	inode_unlock(file_inode(file));
 
-	fd = get_unused_fd_flags(O_CLOEXEC);
-	if (fd < 0)
+	fd = get_unused_fd_flags(0);
+	if (fd < 0) {
+		close_fd(3);
 		return fd;
+	}
 
 	get_file(file);
 	fd_install(fd, file);
@@ -158,16 +199,19 @@ int kernel_execve_file(struct file *file,
 		if (IS_ERR(bprm)) {
 			retval = PTR_ERR(bprm);
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 
 		retval = count_strings_kernel(argv);
 		if (WARN_ON_ONCE(retval == 0)) {
 			close_fd(fd);
+			close_fd(3);
 			return -EINVAL;
 		}
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 		bprm->argc = retval;
@@ -175,6 +219,7 @@ int kernel_execve_file(struct file *file,
 		retval = count_strings_kernel(envp);
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 		bprm->envc = retval;
@@ -182,12 +227,14 @@ int kernel_execve_file(struct file *file,
 		retval = bprm_stack_limits(bprm);
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 
 		retval = copy_string_kernel(bprm->filename, bprm);
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 		bprm->exec = bprm->p;
@@ -195,19 +242,25 @@ int kernel_execve_file(struct file *file,
 		retval = copy_strings_kernel(bprm->envc, envp, bprm);
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 
 		retval = copy_strings_kernel(bprm->argc, argv, bprm);
 		if (retval < 0) {
 			close_fd(fd);
+			close_fd(3);
 			return retval;
 		}
 
 		retval = bprm_execve(bprm);
 	}
 
+	/* Keep FD 3 alive across a successful exec; only the temporary exec fd
+	 * is closed here. On failure the handoff fd is closed as well. */
 	close_fd(fd);
+	if (retval)
+		close_fd(3);
 	return retval;
 }
 EXPORT_SYMBOL_GPL(kernel_execve_file);
@@ -228,6 +281,7 @@ if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$BINFMT_H"; then
 
 /* Project Luna: execute a kernel-created memory-backed file. */
 int kernel_execve_file(struct file *file,
+			       struct file *handoff,
 			       const char *const *argv,
 			       const char *const *envp);
 EOF

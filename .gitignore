@@ -3,9 +3,17 @@
 dist
 out
 target/
+docs/archive/
+graphify-out/
+automation/luna-agent/providers.env
 
+.tmp/
 .idea/
 .vscode/
 
 *.swp
 .DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]

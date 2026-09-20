@@ -1,0 +1,191 @@
+[queue]
+version = 2
+branch = "alpha-development"
+
+[[tasks]]
+id = "DESKTOP-000"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Finish the carried-forward Alpha desktop build and QEMU smoke path"
+acceptance = ["desktop-root-alpha builds successfully with the existing staging strategy", "Noctalia dependency closure is complete, including the current gmp.h failure, without leaking host-only dependencies into the image", "greetd, greetd-greeter/PAM configuration and luna-user-session are present in the produced desktop root", "luna-pc image rebuild completes from the resulting desktop root", "fresh QEMU/OVMF evidence covers PAM to greetd to Noctalia Greeter to UserSession to niri", "failure diagnostics are preserved", "agent creates a focused commit"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
+id = "HANDOFF-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete luna-boot to Linux handoff and boot-progress diagnostics"
+acceptance = ["real Linux bzImage direct entry works in QEMU/OVMF", "64-bit entry state, CR3, stack and Linux boot_params are valid", "Luna setup_data chain contains handoff and RAM boot-progress record", "Linux accepts LunaBootHandoffV1 and validates luna-init bytes", "failure path records a diagnosable boot-progress state", "agent creates a focused commit"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
+id = "BOOT-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete luna-init PID1 bootstrap"
+depends_on = ["HANDOFF-001"]
+acceptance = ["luna-init is PID1 on the direct boot path", "focused Rust tests pass", "git diff --check passes", "agent creates a focused commit"]
+verification = ["git-diff-check", "luna-init-test", "luna-init-static"]
+
+[[tasks]]
+id = "BOOT-002"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete logical root and persistent DATA integration"
+depends_on = ["BOOT-001"]
+acceptance = ["logical root follows the accepted Luna mapping contract", "persistent LUNA-DATA integration is exercised by tests", "no initramfs staging is introduced", "agent creates a focused commit"]
+verification = ["git-diff-check", "luna-init-test"]
+
+[[tasks]]
+id = "BOOT-003"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Make the QEMU direct-boot path end-to-end"
+depends_on = ["BOOT-002"]
+acceptance = ["UEFI to luna-init direct boot is exercised in QEMU/OVMF", "boot reaches the intended userspace milestone", "failure diagnostics are preserved", "agent creates a focused commit"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
+id = "REVIEW-001"
+priority = "P0"
+agent = "opencode-review"
+model = "openrouter/openai/gpt-6-astra#high"
+status = "pending"
+title = "Independently audit the completed boot slice"
+depends_on = ["BOOT-003"]
+acceptance = ["review checks the produced implementation rather than the baseline", "boot-critical findings are reproduced", "confirmed fixes are tested", "agent creates a focused commit when fixes are made"]
+verification = ["git-diff-check", "boot-ovmf"]
+
+[[tasks]]
+id = "RUNTIME-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Integrate luna-system-runtime, first-run and login"
+depends_on = ["REVIEW-001"]
+acceptance = ["system runtime starts after luna-init", "first-run creates a usable user state", "login reaches the expected session milestone", "agent creates a focused commit"]
+verification = ["git-diff-check", "luna-static"]
+
+[[tasks]]
+id = "DESKTOP-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Bring up the niri and Noctalia desktop path"
+depends_on = ["RUNTIME-001"]
+acceptance = ["desktop root builds successfully", "niri and Noctalia launch in the target session", "desktop smoke test passes", "agent creates a focused commit"]
+verification = ["git-diff-check"]
+
+[[tasks]]
+id = "NETWORK-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Integrate Alpha network services"
+depends_on = ["DESKTOP-001"]
+acceptance = ["luna-network integrates with system runtime", "Intel AX200 Wi-Fi path is exercised on supported test environment", "network failure is diagnosed without blocking unrelated boot", "agent creates a focused commit"]
+
+[[tasks]]
+id = "AUDIO-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Integrate Alpha audio services"
+depends_on = ["DESKTOP-001"]
+acceptance = ["luna-audio integrates with the session/runtime contract", "PipeWire audio path is exercised", "Cannon Lake PCH audio path is documented and tested where available", "agent creates a focused commit"]
+
+[[tasks]]
+id = "BLUETOOTH-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Integrate Alpha Bluetooth services"
+depends_on = ["NETWORK-001"]
+acceptance = ["luna-bluetooth integrates with system services", "Intel AX200 Bluetooth path is exercised where available", "service failure remains diagnosable", "agent creates a focused commit"]
+
+[[tasks]]
+id = "STORAGE-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete Alpha filesystem and storage integration"
+depends_on = ["BOOT-003"]
+acceptance = ["LUNA-SYS ext4 handling is exercised", "LUNA-DATA Btrfs handling is exercised", "logical root mapping is tested against the accepted layout", "no destructive host disk operation is introduced", "agent creates a focused commit"]
+
+[[tasks]]
+id = "FALLBACK-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Implement boot fallback and failure-state validation"
+depends_on = ["BOOT-003"]
+acceptance = ["soft fallback preserves a viable loaded kernel", "kernel panic path selects a compatible previous target after reboot", "boot attempt state is updated only on meaningful events", "failure diagnostics are retained", "agent creates a focused commit"]
+
+[[tasks]]
+id = "RECOVERY-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Complete recovery environment"
+depends_on = ["FALLBACK-001", "STORAGE-001"]
+acceptance = ["recovery uses a normal compatible System Image", "recovery DATA image provides virtual writable data", "physical LUNA-DATA is treated as repair/diagnosis input", "recovery boot and exit paths are tested", "agent creates a focused commit"]
+
+[[tasks]]
+id = "POWER-001"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Implement shutdown and reboot lifecycle"
+depends_on = ["RUNTIME-001", "DESKTOP-001"]
+acceptance = ["normal shutdown reaches a clean terminal state", "reboot path is exercised in QEMU", "runtime services receive orderly termination", "boot-state recording is consistent across power transitions", "agent creates a focused commit"]
+
+[[tasks]]
+id = "APP-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Complete Alpha application runtime launch"
+depends_on = ["RUNTIME-001", "STORAGE-001"]
+acceptance = ["ApplicationInstance launch path uses accepted mapping/runtime contracts", "namespace isolation is exercised", "native musl runtime is used by default", "explicit glibc compatibility remains opt-in", "agent creates a focused commit"]
+
+[[tasks]]
+id = "BUNDLE-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Complete Alpha bundle installation and management"
+depends_on = ["APP-001"]
+acceptance = [".lbp bundle install/inspection path works", "application payload is kept self-contained", "bundle state is stored in LUNA-DATA system-managed paths", "agent creates a focused commit"]
+
+[[tasks]]
+id = "UPDATE-001"
+priority = "P1"
+agent = "harness"
+status = "pending"
+title = "Complete Alpha system image update flow"
+depends_on = ["RECOVERY-001", "BUNDLE-001"]
+acceptance = ["new System Image is installed without mutating existing image content", "manifest and image pairing is validated", "current/factory boot targets remain coherent", "failed update can recover to a compatible prior target", "agent creates a focused commit"]
+
+[[tasks]]
+id = "E2E-001"
+priority = "P0"
+agent = "opencode-review"
+model = "openrouter/openai/gpt-6-astra#high"
+status = "pending"
+title = "Independent full Alpha end-to-end audit"
+depends_on = ["NETWORK-001", "AUDIO-001", "BLUETOOTH-001", "RECOVERY-001", "POWER-001", "UPDATE-001"]
+acceptance = ["full boot path is independently reviewed", "QEMU/OVMF end-to-end path is exercised", "desktop, login, application launch and power lifecycle are checked", "remaining blockers are concrete and reproducible", "agent creates a focused commit when fixes are made"]
+
+[[tasks]]
+id = "E2E-002"
+priority = "P0"
+agent = "harness"
+status = "pending"
+title = "Close remaining Alpha end-to-end blockers"
+depends_on = ["E2E-001"]
+acceptance = ["all blockers identified by the audit are resolved or explicitly blocked with evidence", "full QEMU/OVMF regression passes", "desktop smoke path passes", "repository has no known stale forbidden architecture references", "agent creates a focused commit"]

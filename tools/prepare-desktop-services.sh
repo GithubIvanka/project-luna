@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT="${LUNA_DESKTOP_ROOT:-${REPO_ROOT}/dist/desktop-root}"
+ROOT="${LUNA_DESKTOP_ROOT:-${REPO_ROOT}/dist/.build/desktop-payload}"
 mkdir -p "$ROOT/usr/bin" "$ROOT/usr/sbin" "$ROOT/usr/lib" "$ROOT/etc/luna/services" "$ROOT/etc/pipewire" "$ROOT/etc/wireplumber" "$ROOT/etc/NetworkManager/system-connections" "$ROOT/etc/bluetooth" "$ROOT/etc/dbus-1/system.d" "$ROOT/usr/share/dbus-1"
 
 copy_exec() {
@@ -28,17 +28,19 @@ copy_exec /usr/bin/pipewire usr/bin/pipewire
 copy_exec /usr/bin/pipewire-pulse usr/bin/pipewire-pulse
 copy_exec /usr/bin/wireplumber usr/bin/wireplumber
 copy_exec /usr/bin/pw-cli usr/bin/pw-cli
-copy_exec /usr/bin/pactl usr/bin/pactl
+if [ -x /usr/bin/pactl ]; then copy_exec /usr/bin/pactl usr/bin/pactl; fi
 copy_exec /usr/sbin/rfkill usr/sbin/rfkill
 
 # D-Bus is the system/session control plane used by NetworkManager, BlueZ,
 # UDisks2 and the desktop audio stack.
 copy_exec /usr/bin/dbus-daemon usr/bin/dbus-daemon
 copy_exec /usr/bin/dbus-send usr/bin/dbus-send
-copy_exec /usr/bin/dbus-run-session usr/bin/dbus-run-session
 if [ -x /usr/bin/gdbus ]; then copy_exec /usr/bin/gdbus usr/bin/gdbus; fi
 
 copy_optional /usr/share/dbus-1/system.conf /usr/share/dbus-1/system.conf
+copy_optional /usr/share/dbus-1/session.conf /usr/share/dbus-1/session.conf
+rm -f "$ROOT/etc/dbus-1/session.conf"
+mkdir -p "$ROOT/usr/share/dbus-1/session.d"
 if [ -d /etc/dbus-1/system.d ]; then
   while IFS= read -r -d '' conf; do
     install -Dm0644 "$conf" "$ROOT/etc/dbus-1/system.d/$(basename "$conf")"
@@ -114,7 +116,7 @@ EOF
 # desktop root. This keeps the image independent from the CI host runtime libs.
 bundle_elf_deps() {
   local root="$1" pass=0
-  while [ "$pass" -lt 8 ]; do
+  while [ "$pass" -lt 32 ]; do
     pass=$((pass + 1)); local changed=0
     while IFS= read -r -d '' elf; do
       file "$elf" | grep -q 'ELF' || continue
@@ -122,14 +124,19 @@ bundle_elf_deps() {
         case "$dep" in
           /lib/*|/lib64/*|/usr/lib/*)
             [ -e "$dep" ] || continue
-            local rel="${dep#/}" dst="$root/$rel"
-            if [ ! -e "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
+            local rel="${dep#/}"
+            local dst="$root/$rel"
+            if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
             ;;
         esac
       done < <(ldd "$elf" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib|usr\/lib)/ {print $1}')
     done < <(find "$root" -type f -perm -0100 -print0)
-    [ "$changed" -eq 0 ] && break
+    if [ "$changed" -eq 0 ]; then
+      return 0
+    fi
   done
+  echo "dependency closure did not converge after $pass passes" >&2
+  return 1
 }
 
 command -v ldd >/dev/null

@@ -1,30 +1,21 @@
 # Контракт System Image
 
-**Статус:** принят; структура и базовая модель разрешения ресурсов зафиксированы.  
-**Scope:** versioned immutable System Image → `luna-init` → running Luna system
+## Определение
 
-## 1. Назначение
+System Image — **не вся ОС Luna**, а неизменяемая версионированная системная userspace-файловая система одного релиза. Она содержит обязательный immutable minimum — программы, библиотеки, драйверы, firmware, configuration defaults и неизменяемые системные resources — достаточный для полноценного запуска Luna даже при отсутствии физической `LUNA-DATA`. Это источник, из которого `luna-init` материализует работающую системную среду Luna в RAM-backed logical `/`. `LUNA-DATA` является отдельной изменяемой и расширяемой частью ОС: она предоставляет persistent state, установленные Bundles, дополнительные системные компоненты и управляемые изменения.
 
-Этот контракт определяет границу между версионированным System Image, его manifest, `luna-init`, DATA layer и логической файловой системой работающей Luna.
-
-## 2. Обычный System Image
-
-System Image — непосредственно файловая система SquashFS. `.squashfs` является самим filesystem payload.
-
-Каноническая пара:
+System Image — **непосредственно файловая система SquashFS**. Это сам файл `.squashfs`, а не Bundle и не внешний контейнер вокруг другой файловой системы.
 
 ```text
 LUNA-SYS/images/luna-X.Y.Z.squashfs
 LUNA-SYS/images/luna-X.Y.Z.toml
 ```
 
-Один System Image представляет одну immutable-версию минимальной Luna userspace-базы.
+`.lbp` — transport/archive формат Bundle и не связан с представлением System Image.
 
-## 3. Внутренняя структура System Image
+## Внутренняя структура
 
-System Image содержит минимальный набор ресурсов и компонентов, необходимый для самостоятельного запуска базовой системы.
-
-Каноническая верхнеуровневая структура:
+Неизменяемый System Image — **не вся ОС Luna**, а минимальная неизменяемая база, необходимая для полного запуска Luna даже при отсутствии физической `LUNA-DATA`. Его внутренняя структура отражает основные классы системных ресурсов `LUNA-DATA/system`, за исключением изменяемого состояния DATA.
 
 ```text
 /
@@ -38,282 +29,86 @@ System Image содержит минимальный набор ресурсов
     ├── icons/
     ├── themes/
     ├── cursors/
+    ├── sounds/
     ├── locales/
     └── translations/
 ```
 
-Это logical root дерева System Image. Дополнительные верхнеуровневые каталоги не считаются частью контракта, пока не будут определены отдельным решением.
+`apps/` содержит минимальные системные приложения Luna, необходимые базовой ОС. `drivers/` и `firmware/` — отдельные классы ресурсов: первый содержит сущности/модули драйверов, второй — firmware payload. Firmware никогда не является дочерним элементом `drivers/`. `libs/`, `config/` и `resources/` содержат соответствующие минимальные неизменяемые ресурсы. Долговечное `state/` и управляемые `volumes/` не входят в образ и принадлежат `LUNA-DATA/system`. Дополнительная функциональность и изменяемые системные изменения являются расширениями DATA.
 
-### 3.1 `apps/`
+## Инварианты
 
-`apps/` содержит базовые системные приложения Luna, необходимые для полноценного запуска минимальной системы.
+1. Payload образа является SquashFS.
+2. Соседний manifest описывает identity/version соответствующего образа.
+3. Опубликованные System Images неизменяемы во время нормальной работы.
+4. Образ содержит неизменяемую userspace-среду Luna и её неизменяемые ресурсы.
+5. Изменяемое состояние машины, пользователя, приложений и cache находится вне образа в соответствующем DATA provider.
+6. System Image не является persistent logical `/` и не копируется целиком в RAM.
+7. `luna-init` открывает выбранный образ и материализует необходимые ресурсы в RAM-backed logical root; дополнительные неизменяемые ресурсы могут гидратироваться лениво.
 
-Системные приложения делятся по роли:
+## Совместимость
 
-- **boot-critical** — необходимы для построения рабочего System Environment и не могут заменяться из DATA;
-- **system components** — входят в базовую систему, но могут иметь более новую совместимую копию в DATA согласно policy.
+Manifest System Image объявляет совместимые версии `luna-init` core. Manifest `luna-init` отдельно объявляет совместимые идентичности kernel.
 
-`luna-system-runtime` является boot-critical системным приложением. Его базовая версия поставляется только в System Image, а DATA не может предоставлять его replacement-копию.
-
-Другие системные компоненты, например Niri и связанные с desktop/session stack приложения, могут иметь более новую совместимую копию в `LUNA-DATA/system/apps/`. Такая копия имеет priority при разрешении пути и позволяет обновлять компонент независимо от следующего System Image.
-
-Обновление базовой версии любого системного приложения происходит вместе с обновлением соответствующего System Image.
-
-### 3.2 `drivers/`
-
-`drivers/` содержит только минимально необходимый набор драйверов для запуска и работы базовой системы.
-
-Дополнительные или более новые совместимые драйверы могут находиться в `LUNA-DATA/system/drivers/` и разрешаться с более высоким priority.
-
-### 3.3 `firmware/`
-
-`firmware/` — отдельная сущность и не смешивается с `drivers/`.
-
-System Image содержит только firmware, необходимую минимальной базовой системе. Дополнительное или более новое firmware может предоставляться DATA/provider механизмом, если это допускает соответствующая driver/firmware policy.
-
-### 3.4 `libs/`
-
-`libs/` содержит минимальный библиотечный набор, необходимый для работоспособности System Image и его boot/runtime closure.
-
-System Image использует musl userspace ABI как базовую модель. glibc не является обязательной частью System Image.
-
-DATA может содержать дополнительные или более новые совместимые библиотеки. Наличие glibc в DATA используется только для компонентов, которым она действительно требуется; выбор ABI/runtime не является простым заменением musl по приоритету пути.
-
-### 3.5 `config/`
-
-`config/` содержит immutable defaults и базовую конфигурацию System Image.
-
-Изменения system-wide конфигурации создаются в DATA, а индивидуальные пользовательские изменения — в соответствующем `users/<user>/config`.
-
-### 3.6 `resources/`
-
-`resources/` содержит immutable системные ресурсы.
-
-Минимальный набор включает:
-
-```text
-resources/fonts/
-resources/icons/
-resources/themes/
-resources/cursors/
-resources/locales/
-resources/translations/
-```
-
-Дополнительные ресурсы и более новые версии уже существующих ресурсов могут находиться в DATA.
-
-Настройки ввода являются configuration и относятся к `config`, а не к `resources`.
-
-## 4. DATA extension model
-
-System Image и `LUNA-DATA/system` не являются моделью "system files" против "user files". Это два источника одного логического пространства.
-
-System Image — минимальная immutable base.
-
-`LUNA-DATA/system` — mutable system extension layer, содержащий дополнительные компоненты и system-wide changes.
-
-Пользовательский слой находится в:
-
-```text
-LUNA-DATA/users/<user>/
-```
-
-Корень `LUNA-DATA` не содержит отдельного общего `data/` каталога в рамках принятой структуры.
-
-Boot-critical системные компоненты являются исключением из общего правила DATA priority: они принадлежат System Image и не имеют DATA replacement path.
-
-## 5. Path priority
-
-При разрешении конкретного пути DATA имеет более высокий priority, чем System Image, только для сущностей, которым разрешено DATA resolution.
-
-Базовые системные приложения, помеченные как boot-critical, не относятся к DATA-replaceable сущностям.
-
-Базовое правило для DATA-replaceable объектов:
-
-```text
-requested path
-      ↓
-LUNA-DATA candidate exists?
-      ├── yes → use DATA candidate
-      └── no  → use System Image candidate
-```
-
-Разрешение происходит на уровне конкретного объекта/пути, а не как безусловная замена целого каталога.
-
-Пример:
-
-```text
-System Image:
-/resources/fonts/LunaSans.ttf
-/resources/fonts/LunaMono.ttf
-
-DATA/system:
-/resources/fonts/LunaSans.ttf
-/resources/icons/new-set/
-```
-
-Результат:
-
-```text
-LunaSans.ttf → DATA
-LunaMono.ttf → System Image
-new-set/*    → DATA
-```
-
-Этот же принцип применяется к библиотекам, драйверам, firmware и прочим DATA-replaceable ресурсам с учётом их отдельных compatibility/security policies.
-
-## 6. Path priority не отменяет compatibility
-
-Высший priority означает, что DATA-кандидат рассматривается первым для DATA-replaceable сущности. Это не означает автоматическое право его использовать.
-
-После path resolution соответствующая подсистема обязана проверить необходимые свойства кандидата, включая совместимость и policy.
-
-Принцип:
-
-```text
-Path Resolution
-      ↓
-selected candidate
-      ↓
-Compatibility / Policy validation
-      ↓
-use or fallback
-```
-
-Особенно это относится к приложениям, драйверам, firmware и библиотекам.
-
-## 7. Конфигурация
-
-Конфигурация имеет scope-aware модель поверх общего path priority.
+Поэтому полный boot target разрешается только так:
 
 ```text
 System Image
-└── config/
-    └── immutable defaults
-
-LUNA-DATA
-└── system/
-    └── config/
-        └── system-wide changes
-
-LUNA-DATA
-└── users/
-    └── <user>/
-        └── config/
-            └── user-specific changes
+    ↓ manifest образа
+совместимый luna-init
+    ↓ manifest init
+совместимый kernel
 ```
 
-Если пользователь меняет системную настройку, изменяемый вариант хранится в `LUNA-DATA/system/config`.
+Контракт System Image не определяет прямую совместимость image → kernel.
 
-Если изменение индивидуально для пользователя, оно хранится в `LUNA-DATA/users/<user>/config`.
+### Пути конфигурации
 
-## 8. Runtime state
+Пути внутри System Image описываются по его собственной структуре. Поэтому дефолтный native graphical session находится по `config/luna/native graphical session`; каталога `/etc` в System Image нет. Изменяемое переопределение относится к `LUNA-DATA/system/config/luna` configuration. `root-mapping` и materialization затем строят из этих источников RAM-backed logical root. runtime-пути вроде `/etc/...` не следует использовать для описания того, где конфигурация физически хранится в System Image.
 
-Runtime state не является частью immutable System Image.
+## Манифест
 
-Каталоги и данные, создаваемые во время работы системы, materialized/generated state и прочие volatile runtime facilities не должны попадать в SquashFS System Image как persistent runtime state.
+Manifest расположен рядом с образом и читается до открытия образа как файлового источника. Точная грамматика TOML определяется отдельной спецификацией контракта и не должна расширяться из соображений удобства реализации.
 
-System Image содержит только immutable ресурсы и содержимое, необходимое для построения рабочего окружения.
+## Materialization
 
-## 9. System applications and updates
+System Image остаётся неизменяемым физическим источником в `LUNA-SYS`. `luna-init` создаёт RAM-backed logical `/` и материализует boot-critical системное содержимое из выбранного образа. Весь образ не требуется копировать в RAM при загрузке. Материализованные ресурсы должны оставаться пригодными к использованию независимо от дальнейшей видимости исходного пути образа.
 
-System Image содержит базовые версии системных приложений Luna.
+## Жизненный цикл
 
-Boot-critical системные приложения, такие как `luna-system-runtime`, обновляются только вместе с System Image и не имеют DATA replacement-копии.
+System Images имеют независимые версии и удерживаются согласно политике обычного выбора, rollback и Factory. Обновление или удаление образа само по себе не заменяет kernel или `luna-init`; итоговый target всё равно должен разрешаться как совместимая тройка `System Image + luna-init + kernel`.
 
-Обновляемые системные компоненты, такие как Niri и другие компоненты desktop/session stack, могут иметь более новую совместимую DATA-копию. В этом случае DATA-копия получает priority, а базовая версия в System Image остаётся fallback.
+## Владение
 
-Таким образом:
+Формат System Image определяет неизменяемый filesystem payload и связь с manifest. `luna-boot.efi` обнаруживает и выбирает образ, `luna-init` использует его как неизменяемый источник materialization, а `luna-update-manager` выполняет связанные с ним update transactions.
 
-```text
-Boot-critical component
-    System Image only
-          ↓
-     System Image update
+## Recovery DATA Image
 
-DATA-replaceable component
-    System Image base
-          +
-    DATA newer version
-          ↓
-    DATA preferred
-```
+Recovery DATA Image — единственный recovery-specific image. Recovery использует обычный выбранный System Image + совместимый `luna-init` + совместимый kernel и добавляет этот версионированный DATA image как `VirtualData`.
 
-System Image остаётся минимальной immutable базой, а DATA может независимо расширять и обновлять разрешённые системные компоненты.
-
-## 10. Manifest
-
-Manifest является источником метаданных именно своего System Image payload.
-
-Минимальная зафиксированная схема включает:
-
-```toml
-[image]
-name = "luna"
-version = "4.0.0"
-format = "squashfs"
-
-[architecture]
-arch = "x86_64"
-
-[init]
-compatible = ["2.0.0", "2.1.0"]
-
-[bootstrap]
-critical = [
-    "/sbin/luna-system-runtime",
-]
-```
-
-`[bootstrap].critical` задаёт только boot-critical resources, необходимые `luna-init` до передачи управления `luna-system-runtime`.
-
-Все пути в `critical` являются абсолютными путями внутри logical System Image root, нормализованными и безопасными для разрешения.
-
-## 11. Boot target
-
-Окончательная загрузочная комбинация строится как атомарный target:
-
-```text
-System Image
-    ↓ compatible
-luna-init
-    ↓ compatible
-Kernel
-```
-
-Нельзя заменять один элемент target на произвольный элемент другого target без повторной проверки полной совместимости.
-
-## 12. Recovery System Image
-
-Recovery имеет отдельную область на `LUNA-SYS`:
-
-```text
-LUNA-SYS/recovery/
-├── recovery-X.Y.Z.squashfs
-├── recovery-X.Y.Z.toml
-└── ...
-```
-
-Recovery System Image — отдельный версионируемый SquashFS payload. Его lifecycle независим от обычных System Images и Factory target.
-
-Recovery System Image может иметь собственную внутреннюю immutable структуру по тем же базовым принципам, но её состав определяется Recovery-контрактом.
-
-## 13. Recovery DATA Image
-
-Recovery DATA Image — отдельный versioned artifact, связанный с Recovery target.
-
-Он предоставляет виртуальный DATA provider, materialized в RAM.
-
-Базовая структура Recovery DATA Image:
-
+Его логическая структура:
 ```text
 Recovery DATA Image
 ├── system/
 │   ├── apps/
+│   │   ├── recovery-tools/
+│   │   ├── data-discovery/
+│   │   ├── system-diagnostics/
+│   │   └── system-repair/
 │   ├── drivers/
+│   ├── firmware/
 │   ├── libs/
 │   ├── config/
-│   └── ...
+│   ├── resources/
+│   │   ├── fonts/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   ├── cursors/
+│   │   ├── sounds/
+│   │   ├── locales/
+│   │   └── translations/
+│   ├── state/
+│   └── volumes/
 ├── users/
 │   └── recovery/
 │       ├── home/
@@ -322,56 +117,6 @@ Recovery DATA Image
 └── cache/
 ```
 
-Физический `LUNA-DATA` не является источником этого Recovery окружения и не требуется для запуска Recovery.
+`state/` остаётся доступным для состояния Recovery и будущей функциональности. `volumes/` сохраняется, поскольку Recovery может обнаруживать, проверять и обрабатывать внешние диски, при этом они остаются отдельными объектами относительно работающего виртуального DATA provider.
 
-## 14. DATA abstraction
-
-Luna использует единую DATA abstraction с двумя provider-типами:
-
-```text
-DATA
-├── PhysicalData
-│   └── physical LUNA-DATA
-│
-└── VirtualData
-    └── Recovery DATA Image → RAM
-```
-
-Для `current` и `factory` DATA provider — физический `LUNA-DATA`.
-
-Для `recovery` используется VirtualData, созданный из Recovery DATA Image.
-
-## 15. Загрузка и materialization
-
-`luna-boot.efi` выбирает target и передаёт kernel контекст. Сам загрузчик не является владельцем логической файловой системы userspace.
-
-`luna-init` использует выбранный System Image как immutable source для построения рабочего окружения и проверяет `[bootstrap].critical` до запуска `luna-system-runtime`.
-
-Целевая модель:
-
-```text
-System Image
-     │
-     ├── immutable base
-     │
-     ▼
-luna-init
-     │
-     ├── boot-critical materialization
-     ├── runtime facilities
-     └── logical root construction
-     │
-     ▼
-Luna System Environment
-     │
-     ├── DATA/system (higher priority where permitted)
-     └── DATA/users/<user>
-```
-
-System Image остаётся immutable source; DATA добавляется через resolution/mapping layer.
-
-## 16. Целостность
-
-До активации необходимо проверить структурную корректность payload и внутреннюю согласованность manifest. Проверка подлинности и доверия определяется отдельным security/update-контрактом.
-
-Каждый boot target обязан сохранять идентичность конкретных Image, init и kernel, а Recovery target — также конкретного Recovery DATA Image.
+Отдельного Recovery System Image нет.

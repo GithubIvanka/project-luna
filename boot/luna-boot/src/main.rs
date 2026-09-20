@@ -4,12 +4,18 @@
 extern crate alloc;
 
 use uefi::boot::open_protocol_exclusive;
+use uefi::cstr16;
 use uefi::prelude::*;
 use uefi::proto::console::text::Output;
 
 #[entry]
 fn efi_main() -> Status {
     uefi::helpers::init().expect("failed to initialize UEFI services");
+    if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Output>()
+        && let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle)
+    {
+        let _ = stdout.output_string(cstr16!("Luna: EFI entry\r\n"));
+    }
     match boot::boot_flow() {
         Ok(()) => Status::SUCCESS,
         Err(error) => {

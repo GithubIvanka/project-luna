@@ -2,7 +2,9 @@
 
 use alloc::vec::Vec;
 use uefi::Status;
-use uefi::boot::{self, open_protocol_exclusive};
+use uefi::boot::{
+    self, OpenProtocolAttributes, OpenProtocolParams, open_protocol, open_protocol_exclusive,
+};
 use uefi::mem::memory_map::MemoryMapOwned;
 use uefi::proto::console::text::Input;
 use uefi::runtime::{self, ResetType};
@@ -15,8 +17,8 @@ use crate::error::{BootError, BootResult};
 use crate::external::boot_first_external;
 use crate::filesystem::{DataStatus, SystemFilesystem};
 use crate::handoff::{
-    BootMode, BootState, KernelHandoff, LunaHandoff, PreparedIdentity, current_stack_pointer,
-    transition_entry_address,
+    BootMode, BootState, KernelHandoff, LunaBootProgress, LunaHandoff, PreparedIdentity,
+    current_stack_pointer, transition_entry_address,
 };
 use crate::kernel::{KernelLoader, PreparedKernel};
 use crate::menu::{BootMenu, BootMenuAction, BootSelection};
@@ -24,12 +26,25 @@ use crate::paging::prepare_identity_map;
 use crate::splash;
 
 pub fn boot_flow() -> BootResult<()> {
+    debug_stage("Luna: flow 1 input\r\n");
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
-    let mut input = open_protocol_exclusive::<Input>(input_handle)?;
-    let menu_requested = boot_menu_requested(&mut input);
-    drop(input);
+    let mut input_protocol = unsafe {
+        open_protocol::<Input>(
+            OpenProtocolParams {
+                handle: input_handle,
+                agent: boot::image_handle(),
+                controller: None,
+            },
+            OpenProtocolAttributes::GetProtocol,
+        )
+    }?;
+    let input = input_protocol.get_mut().ok_or(BootError::FilesystemError)?;
+    let menu_requested = boot_menu_requested(input);
+    core::mem::forget(input_protocol);
 
+    debug_stage("Luna: flow 2 input ready\r\n");
     let previous_attempt = BootAttemptMarker::read()?;
+    debug_stage("Luna: flow 3 marker ready\r\n");
 
     let mut filesystem = match SystemFilesystem::open() {
         Ok(value) => Some(value),
@@ -37,11 +52,14 @@ pub fn boot_flow() -> BootResult<()> {
         Err(error) => return Err(error),
     };
 
+    debug_stage("Luna: flow 4 filesystem ready\r\n");
     let catalog = match filesystem.as_mut() {
         Some(fs) => BootCatalog::discover(fs).unwrap_or_default(),
         None => BootCatalog::default(),
     };
+    debug_stage("Luna: flow 5 catalog ready\r\n");
 
+    debug_stage("Luna: flow 6 before selection\r\n");
     let mut selection = if menu_requested {
         let stdout_handle = boot::get_handle_for_protocol::<uefi::proto::console::text::Output>()?;
         let stdin_handle = boot::get_handle_for_protocol::<Input>()?;
@@ -54,20 +72,25 @@ pub fn boot_flow() -> BootResult<()> {
                 target_index: catalog.default_target,
             })
     } else {
+        debug_stage("Luna: flow 6a before splash\r\n");
         splash::show();
+        debug_stage("Luna: flow 6b after splash\r\n");
         BootSelection {
             action: BootMenuAction::Continue,
             target_index: catalog.default_target,
         }
     };
+    debug_stage("Luna: flow 7 selection ready\r\n");
 
     if selection.action == BootMenuAction::ExternalBoot {
         return boot_first_external();
     }
 
     let filesystem = filesystem.as_mut().ok_or(BootError::FilesystemError)?;
+    debug_stage("Luna: flow 8 filesystem mut ready\r\n");
 
     let data_missing = !matches!(filesystem.data_status(), DataStatus::Found);
+    debug_stage("Luna: flow 9 data status ready\r\n");
     if data_missing
         && matches!(
             selection.action,
@@ -81,7 +104,7 @@ pub fn boot_flow() -> BootResult<()> {
         };
     }
 
-    let selected = match selection.action {
+    let mut selected = match selection.action {
         BootMenuAction::Recovery => catalog
             .recovery
             .clone()
@@ -98,6 +121,7 @@ pub fn boot_flow() -> BootResult<()> {
         }
         BootMenuAction::ExternalBoot => unreachable!(),
     }?;
+    debug_stage("Luna: flow 10 target selected\r\n");
 
     let mode = match selection.action {
         BootMenuAction::VerboseBoot => BootMode::Detailed,
@@ -105,6 +129,20 @@ pub fn boot_flow() -> BootResult<()> {
         BootMenuAction::Factory => BootMode::Factory,
         _ => BootMode::Normal,
     };
+
+    debug_stage("Luna: flow 11 mode start\r\n");
+    if selection.action == BootMenuAction::VerboseBoot {
+        selected.kernel_cmdline = selected
+            .kernel_cmdline
+            .split_whitespace()
+            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
+            .collect::<Vec<_>>()
+            .join(" ");
+        selected.kernel_cmdline.push_str(
+            " console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug",
+        );
+    }
+    debug_stage("Luna: flow 12 candidates start\r\n");
 
     // A fallback is an atomic image+init+kernel tuple. Never pair a failed
     // target's manifest/image with another target's prepared kernel.
@@ -143,6 +181,7 @@ pub fn boot_flow() -> BootResult<()> {
                 .cloned(),
         );
     }
+    debug_stage("Luna: flow 13 candidates ready\r\n");
 
     let mut prepared = None;
     let mut target = None;
@@ -168,18 +207,7 @@ pub fn boot_flow() -> BootResult<()> {
         _ => return Err(BootError::TargetNotFound),
     };
 
-    if selection.action == BootMenuAction::VerboseBoot {
-        target.kernel_cmdline = target
-            .kernel_cmdline
-            .split_whitespace()
-            .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
-            .collect::<Vec<_>>()
-            .join(" ");
-        target
-            .kernel_cmdline
-            .push_str(" loglevel=7 ignore_loglevel");
-    }
-
+    debug_stage("Luna: flow 14 kernel prepared\r\n");
     let attempt_id = BootAttemptMarker::next_attempt_id(
         previous_attempt,
         prepared.init_address,
@@ -189,8 +217,16 @@ pub fn boot_flow() -> BootResult<()> {
     let mut attempt = BootAttempt::new(attempt_id);
     attempt.advance(BootStage::BootloaderCompleted);
 
+    debug_stage("Luna: flow 15 attempt ready\r\n");
     let manifest_bytes = filesystem.read_file(&target.manifest_path)?;
+    debug_stage("Luna: flow 16 manifest read\r\n");
     let image_digest = filesystem.hash_file(&target.system_image_path)?;
+    debug_stage("Luna: flow 17 image hash\r\n");
+    if let Some(recovery_path) = target.recovery_data_path.as_deref() {
+        let recovery_digest = filesystem.hash_file(recovery_path)?;
+        target.recovery_data_digest = Some(recovery_digest);
+        debug_stage("Luna: flow 17a recovery DATA hash\r\n");
+    }
     let kernel_identity = PreparedIdentity {
         kernel_digest: prepared.kernel_digest,
     };
@@ -203,6 +239,7 @@ pub fn boot_flow() -> BootResult<()> {
             .unwrap_or(catalog.boot_state.attempt_id),
         failure_code: catalog.boot_state.failure_code,
     };
+    debug_stage("Luna: flow 18 handoff build start\r\n");
     let luna_handoff = LunaHandoff::build(
         &target,
         mode,
@@ -218,20 +255,33 @@ pub fn boot_flow() -> BootResult<()> {
         prepared.init_digest,
     )?;
 
+    debug_stage("Luna: flow 19 handoff built\r\n");
+    let progress = LunaBootProgress::allocate(attempt.attempt_id())?;
+    debug_stage("Luna: flow 20 progress allocated\r\n");
     let e820_ext = E820Extension::allocate()?;
+    debug_stage("Luna: flow 21 e820 allocated\r\n");
+    let mut luna_handoff = luna_handoff;
+    luna_handoff.link_next(progress.address);
+    debug_stage("Luna: flow 22 chain linked\r\n");
     prepared.boot_params.set_setup_data(e820_ext.address)?;
     let transition_entry = transition_entry_address();
     let stack_pointer = current_stack_pointer();
+    debug_stage("Luna: flow 23 e820 params set\r\n");
     let (page_table, page_table_pages) = prepare_identity_map(transition_entry, stack_pointer)?;
+    debug_stage("Luna: flow 24 page table ready\r\n");
 
     let mut reserved = prepared.allocations.clone();
     reserved.push((luna_handoff.address, luna_handoff.allocation_pages));
+    reserved.push((progress.address, progress.allocation_pages));
     reserved.push((e820_ext.address, e820_ext.allocation_pages));
     reserved.push((page_table, page_table_pages));
+    debug_stage("Luna: flow 25 reserved ready\r\n");
 
     // Persist exactly one minimal checkpoint before handing control to the
     // kernel. Detailed progress remains volatile in `BootAttempt`.
+    debug_stage("Luna: flow 26 marker begin\r\n");
     BootAttemptMarker::begin(attempt.attempt_id())?;
+    debug_stage("Luna: flow 27 marker begun\r\n");
     attempt.advance(BootStage::KernelHandoff);
 
     // From this point onward Boot Services are gone. The post-EBS path is
@@ -247,10 +297,23 @@ pub fn boot_flow() -> BootResult<()> {
     )
 }
 
+fn debug_stage(message: &str) {
+    use uefi::proto::console::text::Output;
+    if let Ok(handle) = boot::get_handle_for_protocol::<Output>()
+        && let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle)
+    {
+        let encoded = uefi::CString16::try_from(message).ok();
+        if let Some(encoded) = encoded {
+            let _ = stdout.output_string(&encoded);
+        }
+    }
+}
+
 fn same_target(left: &crate::target::BootTarget, right: &crate::target::BootTarget) -> bool {
     left.system_image_path == right.system_image_path
         && left.init_path == right.init_path
         && left.kernel_path == right.kernel_path
+        && left.recovery_data_path == right.recovery_data_path
 }
 
 fn enter_kernel_after_exit_boot_services(

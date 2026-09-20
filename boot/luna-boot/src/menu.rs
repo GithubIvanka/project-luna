@@ -6,7 +6,7 @@
 use alloc::string::String;
 
 use uefi::CString16;
-use uefi::boot::ScopedProtocol;
+use uefi::boot::{self, ScopedProtocol};
 use uefi::proto::console::text::{Input, Key, Output, ScanCode};
 
 use crate::target::BootTarget;
@@ -69,6 +69,10 @@ impl BootMenu {
             }
             self.print("\r\nArrow keys: Navigate    Enter: Select    Esc: Continue\r\n");
 
+            let event = self.stdin.wait_for_key_event().ok()?;
+            let mut events = [event];
+            boot::wait_for_event(&mut events).ok()?;
+
             match self.stdin.read_key() {
                 Ok(Some(Key::Special(ScanCode::UP))) => selected = selected.saturating_sub(1),
                 Ok(Some(Key::Special(ScanCode::DOWN))) => {
@@ -108,21 +112,28 @@ impl BootMenu {
         loop {
             let _ = self.stdout.clear();
             let _ = self.stdout.set_cursor_position(0, 0);
-            self.print("Project Luna\r\n\r\nSelect System Image\r\n\r\n");
+            self.print("Project Luna\r\n\r\nSelect Boot Target\r\n\r\n");
             for (index, target) in targets.iter().enumerate() {
                 self.print(if selected == index { "> " } else { "  " });
                 let mut label = String::new();
                 label.push_str(&target.name);
                 label.push_str(" [");
                 label.push_str(&target.system_version);
-                label.push(']');
-                if index == default_target {
-                    label.push_str(" [Current]");
-                }
+                label.push_str("]\r\n    init: ");
+                label.push_str(&target.init_path);
+                label.push_str("\r\n    kernel: ");
+                label.push_str(&target.kernel_id);
                 label.push_str("\r\n");
+                if index == default_target {
+                    label.push_str("    [Current]\r\n");
+                }
                 self.print(&label);
             }
             self.print("\r\nArrow keys: Navigate    Enter: Select    Esc: Back\r\n");
+            let event = self.stdin.wait_for_key_event().ok()?;
+            let mut events = [event];
+            boot::wait_for_event(&mut events).ok()?;
+
             match self.stdin.read_key() {
                 Ok(Some(Key::Special(ScanCode::UP))) => selected = selected.saturating_sub(1),
                 Ok(Some(Key::Special(ScanCode::DOWN))) => {
@@ -154,7 +165,7 @@ impl BootMenu {
             MenuEntry::Continue => label.push_str("Continue to Luna"),
             MenuEntry::VerboseBoot => label.push_str("Verbose Boot"),
             MenuEntry::SystemImageSelection => {
-                label.push_str("System Image selection");
+                label.push_str("Boot Target selection [image + init + kernel]");
                 if targets.is_empty() {
                     label.push_str(" [Unavailable]");
                 } else if let Some(target) = targets.get(default_target) {
