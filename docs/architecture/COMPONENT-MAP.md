@@ -15,7 +15,7 @@
 
 | Компонент | Ответственность |
 |---|---|
-| `luna-user-session` | состояние и lifecycle `UserSession` |
+| `luna-user-session` | единая UserSession boundary: identity, auth, credentials, seat, input, DRM/KMS, compositor и session UI |
 | `luna-app-runtime` | lifecycle `ApplicationInstance` и координация запуска |
 | `luna-app-manager` | lifecycle установленных Bundle |
 | `luna-bundle` | модель Bundle и LBP1 codec |
@@ -23,26 +23,33 @@
 | `luna-security` | trust и authorization policy |
 | `luna-namespace` | Linux namespace и materialization |
 
-## Системные компоненты
+## Физическая группировка workspace
 
 ```text
-luna-system-manager
-luna-update-manager
-luna-kernel-manager
-luna-device-manager
-luna-state
-luna-config
-luna-event
-luna-fs
-luna-common
-luna-network
-luna-audio
-luna-bluetooth
-luna-files
-luna-cli
+components/
+├── core/
+│   ├── boot-adjacent foundation
+│   ├── luna-init
+│   ├── luna-system-runtime
+│   ├── luna-user-session
+│   ├── security / namespace / mapping
+│   ├── filesystem / state / config / events
+│   └── system target / device / kernel / update managers
+├── system/
+│   ├── luna-app-manager
+│   └── luna-cli
+├── apps/
+│   └── обычные пользовательские приложения
+└── external/
+    ├── providers/
+    │   ├── luna-audio
+    │   ├── luna-network
+    │   ├── luna-bluetooth
+    │   └── luna-files
+    └── libraries/
 ```
 
-Каждый активный компонент имеет отдельный документ в `docs/architecture/components/`.
+Каждый активный компонент имеет отдельный документ в `docs/architecture/components/`. Папка компонента отражает архитектурную роль и не означает отдельный runtime process.
 
 ## Разрешение boot target
 
@@ -83,5 +90,7 @@ luna-namespace
 `luna-init` владеет границей PID 1. `luna-system-runtime` владеет долгоживущим системным supervision. `UserSession` — доменная сущность. `luna-app-runtime` владеет application execution lifecycle. `luna-root-mapping`, `luna-security` и `luna-namespace` сохраняют узкие специализированные обязанности.
 
 Не вводятся `luna-core`, generic `luna-runtime`, `luna-session`, `luna-run-session`, `luna-app-init` или отдельный application supervisor.
+
+Несколько функций одного domain boundary не должны автоматически становиться отдельными процессами. В частности, UserSession реализует seat/input/graphics/authentication/compositor как внутренние модули; отдельные внешние provider daemons являются временной совместимостью, а не частью целевой boot chain.
 
 Компоненты Luna не следует путать с внешними программными поставщиками. Например, `luna-audio`, `luna-bluetooth`, `luna-network` и `luna-files` являются Luna-owned границами, хотя используют внешние PipeWire/WirePlumber, BlueZ, NetworkManager, Yazi и другие проекты.

@@ -3,10 +3,13 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${LUNA_OUT_DIR:-${REPO_ROOT}/dist}"
-WORK="${OUT}/work"
-SYSTEM_ROOT="${WORK}/system-root"
-DATA_ROOT="${WORK}/data-root"
-SYSTEM_PARTITION_ROOT="${WORK}/system-partition"
+WORK="${OUT}/.build"
+SYSTEM_ROOT="${WORK}/system-image-root"
+LUNA_DATA_ROOT="${OUT}/luna-data"
+LUNA_SYS_ROOT="${OUT}/luna-sys"
+DATA_ROOT="$LUNA_DATA_ROOT"
+SYSTEM_PARTITION_ROOT="$LUNA_SYS_ROOT"
+PARTITION_WORK="${WORK}/partitions"
 
 LUNA_VERSION="${LUNA_VERSION:-0.1.0}"
 LUNA_INIT_VERSION="${LUNA_INIT_VERSION:-$LUNA_VERSION}"
@@ -48,7 +51,6 @@ case "$DESKTOP_ROOT" in
     *) echo "LUNA_DESKTOP_ROOT must point to an artifact under $REPO_ROOT/dist" >&2; exit 1 ;;
 esac
 [ -x "$DESKTOP_ROOT/usr/bin/luna-user-session" ] || { echo "UserSession handoff binary missing: $DESKTOP_ROOT/usr/bin/luna-user-session" >&2; exit 1; }
-[ -x "$DESKTOP_ROOT/usr/bin/niri-session" ] || { echo "niri session missing: $DESKTOP_ROOT/usr/bin/niri-session" >&2; exit 1; }
 
 RUNTIME_TARGET="x86_64-unknown-linux-musl"
 if ! rustup target list --installed | grep -qx "$RUNTIME_TARGET"; then rustup target add "$RUNTIME_TARGET"; fi
@@ -67,20 +69,24 @@ if [ -z "$KERNEL_VERSION" ]; then
 fi
 [ -n "$KERNEL_VERSION" ] && [ "$KERNEL_VERSION" != "bzImage" ] || { echo "could not determine kernel version; set LUNA_KERNEL_VERSION or provide an artifact release file" >&2; exit 1; }
 
-mkdir -p "$OUT" "$WORK"
-rm -rf "$SYSTEM_ROOT" "$DATA_ROOT" "$SYSTEM_PARTITION_ROOT"
-mkdir -p "$DATA_ROOT/system"/{apps,drivers,firmware,libs,config,state,volumes}
+mkdir -p "$OUT" "$WORK" "$PARTITION_WORK"
+rm -rf "$SYSTEM_ROOT" "$LUNA_DATA_ROOT" "$LUNA_SYS_ROOT"
+mkdir -p "$DATA_ROOT/system"/{apps,drivers,firmware,libs,config,resources,state,volumes}
+mkdir -p "$DATA_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 mkdir -p "$DATA_ROOT/users/luna"/{home,data,config}
 mkdir -p "$DATA_ROOT/cache"
-rm -f "$OUT"/luna-pc.img "$OUT"/luna-efi.img "$OUT"/luna-system.img "$OUT"/luna-data.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/BUILD-INFO "$OUT"/SHA256SUMS
+rm -f "$OUT"/luna-pc.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/BUILD-INFO "$OUT"/SHA256SUMS
 
+cargo build --release -p luna-device-manager --target "$RUNTIME_TARGET"
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
-cargo build --release --manifest-path "$REPO_ROOT/components/system/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
+cargo build --release --manifest-path "$REPO_ROOT/components/core/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
+DEVICE_MANAGER="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-device-manager"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
-LUNA_INIT="$REPO_ROOT/components/system/luna-init/target/$RUNTIME_TARGET/release/luna-init"
+LUNA_INIT="$REPO_ROOT/components/core/luna-init/target/$RUNTIME_TARGET/release/luna-init"
 if [ ! -x "$LUNA_INIT" ]; then
     LUNA_INIT="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-init"
 fi
+[ -x "$DEVICE_MANAGER" ] || { echo "luna-device-manager binary was not produced: $DEVICE_MANAGER" >&2; exit 1; }
 [ -x "$RUNTIME" ] || { echo "runtime binary was not produced: $RUNTIME" >&2; exit 1; }
 [ -x "$LUNA_INIT" ] || { echo "luna-init binary was not produced: $LUNA_INIT" >&2; exit 1; }
 file "$RUNTIME" | grep -Eq 'statically linked|static-pie linked' || { echo "luna-system-runtime is not statically linked; refusing to build PC image" >&2; exit 1; }
@@ -90,39 +96,125 @@ SESSION="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-user-session"
 [ -x "$SESSION" ] || { echo "luna-user-session handoff binary was not produced: $SESSION" >&2; exit 1; }
 file "$SESSION" | grep -Eq 'statically linked|static-pie linked' || { echo "luna-user-session handoff binary is not statically linked; refusing to build PC image" >&2; exit 1; }
 
-UNIX_CHKPWD_SOURCE="$(readlink -f "$DESKTOP_ROOT/sbin/unix_chkpwd" 2>/dev/null || true)"
-if [ ! -x "$UNIX_CHKPWD_SOURCE" ]; then UNIX_CHKPWD_SOURCE="$(readlink -f /sbin/unix_chkpwd 2>/dev/null || true)"; fi
-[ -x "$UNIX_CHKPWD_SOURCE" ] || { echo "unix_chkpwd helper is unavailable" >&2; exit 1; }
-mkdir -p "$SYSTEM_ROOT/apps/unix_chkpwd"
-cp -L "$UNIX_CHKPWD_SOURCE" "$SYSTEM_ROOT/apps/unix_chkpwd/unix_chkpwd"
-chmod 2755 "$SYSTEM_ROOT/apps/unix_chkpwd/unix_chkpwd"
+# Full desktop providers remain in DATA as complete functional packages.
+# The boot-critical System Image contains only Luna-native core binaries.
 
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/boot/luna-boot/Cargo.toml"
 EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 [ -f "$EFI" ] || { echo "UEFI loader was not produced: $EFI" >&2; exit 1; }
 
-# Canonical System Image: only the six accepted top-level namespaces exist.
+# Canonical System Image: only the accepted top-level namespaces exist; resource types live under resources/.
+# Recreate the build root so stale artifacts from an earlier image can never
+# masquerade as current System Image content.
+rm -rf "$SYSTEM_ROOT"
 mkdir -p "$SYSTEM_ROOT"/{apps,drivers,firmware,libs,config,resources}
-mkdir -p "$SYSTEM_ROOT/apps/luna-system-runtime" "$SYSTEM_ROOT/apps/luna-user-session" "$SYSTEM_ROOT/apps/unix_chkpwd"
-mkdir -p "$SYSTEM_ROOT/config/luna" "$SYSTEM_ROOT/resources"/{fonts,icons,themes,cursors,locales,translations}
+mkdir -p "$SYSTEM_ROOT/apps/luna-device-manager" "$SYSTEM_ROOT/apps/luna-system-runtime" "$SYSTEM_ROOT/apps/luna-user-session"
+mkdir -p "$SYSTEM_ROOT/config/luna" "$SYSTEM_ROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 
+cp "$DEVICE_MANAGER" "$SYSTEM_ROOT/apps/luna-device-manager/luna-device-manager"
+chmod 0755 "$SYSTEM_ROOT/apps/luna-device-manager/luna-device-manager"
 cp "$RUNTIME" "$SYSTEM_ROOT/apps/luna-system-runtime/luna-system-runtime"
 chmod 0755 "$SYSTEM_ROOT/apps/luna-system-runtime/luna-system-runtime"
 cp "$SESSION" "$SYSTEM_ROOT/apps/luna-user-session/luna-user-session"
 chmod 0755 "$SYSTEM_ROOT/apps/luna-user-session/luna-user-session"
 
 # The desktop builder produces a host-style staging root. It is only an
-# input staging area; its Linux directory layout is never embedded in Luna.
-cp -a "$DESKTOP_ROOT/usr/lib/." "$SYSTEM_ROOT/libs/"
-cp -a "$DESKTOP_ROOT/usr/share/." "$SYSTEM_ROOT/resources/"
-cp -a "$DESKTOP_ROOT/etc/." "$SYSTEM_ROOT/config/"
+# input staging area; its host directory layout is never embedded in Luna.
+cp -a "$DESKTOP_ROOT/usr/lib/." "$DATA_ROOT/system/libs/"
+cp -a "$DESKTOP_ROOT/etc/." "$DATA_ROOT/system/config/"
 
-# The dynamic ELF loader is a runtime bootstrap resource, not a Linux root.
-mkdir -p "$SYSTEM_ROOT/libs/loader"
+# System resources use the seven canonical resource types. Provider-specific
+# runtime data that normally lives below /usr/share stays inside the owning
+# application resource tree and is exposed by luna-init at its logical path.
+copy_resource_dir() {
+    local source="$1"
+    local target="$2"
+    [ -d "$source" ] || return 0
+    mkdir -p "$target"
+    cp -a "$source/." "$target/"
+}
+copy_resource_dir "$DESKTOP_ROOT/usr/share/fonts" "$DATA_ROOT/system/resources/fonts"
+copy_resource_dir "$DESKTOP_ROOT/usr/share/icons" "$DATA_ROOT/system/resources/icons"
+copy_resource_dir "$DESKTOP_ROOT/usr/share/themes" "$DATA_ROOT/system/resources/themes"
+copy_resource_dir "$DESKTOP_ROOT/usr/share/locale" "$DATA_ROOT/system/resources/translations"
+# Keep a separate canonical locale class even when the current desktop payload
+# has no locale-definition files. Cursor payloads may be supplied directly here.
+copy_resource_dir "$DESKTOP_ROOT/usr/share/cursors" "$DATA_ROOT/system/resources/cursors"
+copy_resource_dir "$DESKTOP_ROOT/usr/share/noctalia/assets/sounds" "$DATA_ROOT/system/resources/sounds"
+# The immutable System Image selects the Niri provider command.
+# Recovery VirtualData uses the exact same command; only the DATA source changes.
+for provider in noctalia wireplumber niri; do
+    if [ -d "$DESKTOP_ROOT/usr/share/$provider" ]; then
+        mkdir -p "$DATA_ROOT/system/apps/$provider/resources"
+        cp -a "$DESKTOP_ROOT/usr/share/$provider" "$DATA_ROOT/system/apps/$provider/resources/$provider"
+    fi
+done
+# GLVND uses data-driven vendor discovery outside the ELF dependency graph.
+# Keep Mesa's vendor metadata as an application resource so luna-init exposes
+# it at the canonical runtime path /usr/share/glvnd.
+if [ -d "$DESKTOP_ROOT/usr/share/glvnd" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/niri/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/glvnd" "$DATA_ROOT/system/apps/niri/resources/glvnd"
+fi
+# Provider-specific desktop data must live under the application that owns it.
+# luna-init exposes application resources at their logical runtime paths; the
+# application directory remains the immutable ownership boundary.
+if [ -d "$DESKTOP_ROOT/usr/share/libinput" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/niri/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/libinput" "$DATA_ROOT/system/apps/niri/resources/libinput"
+fi
+if [ -d "$DESKTOP_ROOT/usr/share/wayland-sessions" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/niri/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/wayland-sessions" "$DATA_ROOT/system/apps/niri/resources/wayland-sessions"
+fi
+if [ -d "$DESKTOP_ROOT/usr/share/applications" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/noctalia/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/applications" "$DATA_ROOT/system/apps/noctalia/resources/applications"
+fi
+if [ -d "$DESKTOP_ROOT/usr/share/polkit-1" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/dbus-daemon/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/polkit-1" "$DATA_ROOT/system/apps/dbus-daemon/resources/polkit-1"
+fi
+if [ -d "$DESKTOP_ROOT/usr/share/dbus-1" ]; then
+    mkdir -p "$DATA_ROOT/system/apps/dbus-daemon/resources"
+    cp -a "$DESKTOP_ROOT/usr/share/dbus-1" "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1"
+fi
+
+# Every full desktop executable is a DATA application. This keeps Niri,
+# Noctalia, Ghostty, Yazi and their helpers intact outside the boot-critical image.
+for source_dir in "$DESKTOP_ROOT/usr/bin" "$DESKTOP_ROOT/usr/sbin" "$DESKTOP_ROOT/usr/libexec"; do
+    [ -d "$source_dir" ] || continue
+    while IFS= read -r -d '' binary; do
+        name="$(basename "$binary")"
+        case "$name" in
+            luna-device-manager|luna-system-runtime|luna-user-session|greetd*|noctalia-greeter*|unix_chkpwd|dbus-run-session|seatd|niri-session)
+                continue
+                ;;
+        esac
+        app="$DATA_ROOT/system/apps/$name"
+        mkdir -p "$app"
+        cp -L "$binary" "$app/$name"
+        chmod 0755 "$app/$name" 2>/dev/null || true
+    done < <(find "$source_dir" -type f -perm -0100 -print0; find "$source_dir" -type l -print0)
+done
+
+# The Luna graphical session is created natively by luna-system-runtime.
+# Keep the retired greetd/Noctalia-greeter login path out of DATA even if an
+# upstream payload unexpectedly reintroduces one of its files.
+legacy_desktop_files="$(find "$DATA_ROOT/system" \( -type f -o -type l -o -type d \) -print | grep -E '/(greetd|noctalia-greeter)(/|$)' || true)"
+if [ -n "$legacy_desktop_files" ]; then
+    echo "legacy greetd/Noctalia-greeter payload detected in LUNA-DATA:" >&2
+    printf '%s\n' "$legacy_desktop_files" >&2
+    exit 1
+fi
+
+# The dynamic ELF loader belongs to the DATA provider runtime closure.
+mkdir -p "$DATA_ROOT/system/libs/loader"
 LOADER_SOURCE="$(readlink -f "$DESKTOP_ROOT/lib64/ld-linux-x86-64.so.2")"
 if [ ! -f "$LOADER_SOURCE" ]; then LOADER_SOURCE="/lib64/ld-linux-x86-64.so.2"; fi
 [ -f "$LOADER_SOURCE" ] || { echo "ELF loader is unavailable" >&2; exit 1; }
-rm -f "$SYSTEM_ROOT/libs/loader/ld-linux-x86-64.so.2"; cp -L "$LOADER_SOURCE" "$SYSTEM_ROOT/libs/loader/ld-linux-x86-64.so.2"
+rm -f "$DATA_ROOT/system/libs/loader/ld-linux-x86-64.so.2"
+cp -L "$LOADER_SOURCE" "$DATA_ROOT/system/libs/loader/ld-linux-x86-64.so.2"
 
 # Copy real ELF dependency files into the Luna libs namespace. This repairs
 # staging-root symlinks whose targets were never copied by the host builder.
@@ -130,10 +222,14 @@ stage_elf_dependencies() {
     local source_root="$1"
     local queue="$WORK/elf-dependency-queue"
     : > "$queue"
-    find "$source_root/usr/bin" "$source_root/usr/sbin" "$source_root/usr/libexec" \
-        -type f -perm -0100 -print0 2>/dev/null >> "$queue"
-    find "$source_root/usr/lib" -path '*/security/*.so' -type f -print0 2>/dev/null >> "$queue"
-    printf '%s\0' "$UNIX_CHKPWD_SOURCE" >> "$queue"
+    for search_root in "$source_root/usr/bin" "$source_root/usr/sbin" "$source_root/usr/libexec"; do
+        [ -d "$search_root" ] || continue
+        find "$search_root" -type f -perm -0100 -print0 2>/dev/null >> "$queue"
+        find "$search_root" -type l -print0 2>/dev/null >> "$queue"
+    done
+    if [ -d "$source_root/usr/lib" ]; then
+        find "$source_root/usr/lib" -path '*/security/*.so' -type f -print0 2>/dev/null >> "$queue"
+    fi
     declare -A seen=()
     local processed=0
     while true; do
@@ -157,9 +253,9 @@ stage_elf_dependencies() {
                 actual="$(readlink -f "$dep" 2>/dev/null || true)"
                 [ -f "$actual" ] || continue
                 case "$dep" in
-                    /lib64/*) rel="${dep#/lib64/}"; dest="$SYSTEM_ROOT/libs/loader/$rel" ;;
-                    /usr/lib/*) rel="${dep#/usr/lib/}"; dest="$SYSTEM_ROOT/libs/$rel" ;;
-                    /lib/*) rel="${dep#/lib/}"; dest="$SYSTEM_ROOT/libs/$rel" ;;
+                    /lib64/*) rel="${dep#/lib64/}"; dest="$DATA_ROOT/system/libs/loader/$rel" ;;
+                    /usr/lib/*) rel="${dep#/usr/lib/}"; dest="$DATA_ROOT/system/libs/$rel" ;;
+                    /lib/*) rel="${dep#/lib/}"; dest="$DATA_ROOT/system/libs/$rel" ;;
                 esac
                 mkdir -p "$(dirname "$dest")"
                 rm -f "$dest"
@@ -173,40 +269,18 @@ stage_elf_dependencies() {
 stage_elf_dependencies "$DESKTOP_ROOT"
 
 # No unresolved host-Linux symlinks may survive inside an immutable image.
-find "$SYSTEM_ROOT/libs" -xtype l -delete
+find "$DATA_ROOT/system/libs" -xtype l -delete
 
 # Remove build/development metadata from the runtime library namespace.
-find "$SYSTEM_ROOT/libs" -type d -name pkgconfig -prune -exec rm -rf {} +
-if [ -d "$SYSTEM_ROOT/libs/tmpfiles.d" ]; then
-    mkdir -p "$SYSTEM_ROOT/config/tmpfiles.d"
-    cp -a "$SYSTEM_ROOT/libs/tmpfiles.d/." "$SYSTEM_ROOT/config/tmpfiles.d/"
-    rm -rf "$SYSTEM_ROOT/libs/tmpfiles.d"
+find "$DATA_ROOT/system/libs" -type d -name pkgconfig -prune -exec rm -rf {} +
+if [ -d "$DATA_ROOT/system/libs/tmpfiles.d" ]; then
+    mkdir -p "$DATA_ROOT/system/config/tmpfiles.d"
+    cp -a "$DATA_ROOT/system/libs/tmpfiles.d/." "$DATA_ROOT/system/config/tmpfiles.d/"
+    rm -rf "$DATA_ROOT/system/libs/tmpfiles.d"
 fi
 
-# Every executable is an independent immutable application resource.
-# The source may be in usr/bin, usr/sbin or usr/libexec, but the physical
-# System Image never reproduces those Linux root namespaces.
-for source_dir in "$DESKTOP_ROOT/usr/bin" "$DESKTOP_ROOT/usr/sbin" "$DESKTOP_ROOT/usr/libexec"; do
-    [ -d "$source_dir" ] || continue
-    while IFS= read -r -d '' binary; do
-        name="$(basename "$binary")"
-        [ "$name" = "luna-user-session" ] && continue
-        app="$SYSTEM_ROOT/apps/$name"
-        mkdir -p "$app"
-        cp -a "$binary" "$app/$name"
-        if [ -f "$app/$name" ] && [ ! -L "$app/$name" ]; then
-            chmod 0755 "$app/$name" 2>/dev/null || true
-        fi
-    done < <(find "$source_dir" -type f -perm -0100 -print0; find "$source_dir" -type l -print0)
-done
-
-# Runtime service definitions use the logical application view.
-for service in network bluetooth removable-media; do
-    [ -f "$SYSTEM_ROOT/config/luna/services/$service.toml" ] || continue
-done
-sed -i 's#/usr/sbin/NetworkManager#/usr/bin/NetworkManager#g' "$SYSTEM_ROOT/config/luna/services/network.toml" 2>/dev/null || true
-sed -i 's#/usr/libexec/bluetooth/bluetoothd#/usr/bin/bluetoothd#g' "$SYSTEM_ROOT/config/luna/services/bluetooth.toml" 2>/dev/null || true
-sed -i 's#/usr/libexec/udisks2/udisksd#/usr/bin/udisksd#g' "$SYSTEM_ROOT/config/luna/services/removable-media.toml" 2>/dev/null || true
+# Desktop executables are already copied into DATA/system/apps above.
+# Runtime service definitions are DATA-owned configuration.
 
 # Immutable desktop/application configuration is owned by the config class;
 # session entry records the canonical app resource rather than /usr paths.
@@ -222,29 +296,33 @@ posix_shell = "sh"
 [session]
 entry = "/usr/bin/luna-user-session --handoff"
 EOF
-printf "%s\n" "/usr/bin/luna-user-session --handoff" > "$SYSTEM_ROOT/config/luna/graphical-session"
+# System Image contains the immutable default provider selection.
+# Physical/Virtual DATA may override the same path for a selected environment.
 
 # Authentication files are immutable bootstrap seeds only. luna-init copies them
 # into mutable LUNA-DATA/system/state/auth on first boot. A password hash may be
 # supplied for development images; otherwise the account is locked.
 cat > "$SYSTEM_ROOT/config/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/sh
-greeter:x:995:995:Luna Greeter:/run/greetd:/bin/sh
+messagebus:x:995:995:System Message Bus:/nonexistent:/usr/sbin/nologin
 luna:x:1000:1000:Luna User:/home/luna:/bin/sh
 EOF
 SHADOW_GID="${LUNA_SHADOW_GID:-$(getent group shadow | awk -F: 'NR == 1 {print $3}')}"
 [ -n "$SHADOW_GID" ] || { echo "shadow group GID is unavailable; set LUNA_SHADOW_GID" >&2; exit 1; }
+MESSAGEBUS_UID=995
+MESSAGEBUS_GID=995
 printf '%s\n' \
     'root:x:0:' \
     "shadow:x:${SHADOW_GID}:" \
-    'greeter:x:995:' \
+    "messagebus:x:${MESSAGEBUS_GID}:" \
+    'seat:x:997:luna' \
+    'input:x:998:luna' \
     'luna:x:1000:' > "$SYSTEM_ROOT/config/group"
 if [ -n "$LUNA_PASSWORD_HASH" ]; then
-    printf 'root:!*:0:0:99999:7:::\ngreeter:!*:0:0:99999:7:::\nluna:%s:0:0:99999:7:::\n' "$LUNA_PASSWORD_HASH" > "$SYSTEM_ROOT/config/shadow"
+    printf 'root:!*:0:0:99999:7:::\nluna:%s:0:0:99999:7:::\n' "$LUNA_PASSWORD_HASH" > "$SYSTEM_ROOT/config/shadow"
 else
     cat > "$SYSTEM_ROOT/config/shadow" <<'EOF'
 root:!*:0:0:99999:7:::
-greeter:!*:0:0:99999:7:::
 luna:!*:0:0:99999:7:::
 EOF
 fi
@@ -253,23 +331,206 @@ chmod 0600 "$SYSTEM_ROOT/config/shadow"
 printf "%s\n" "passwd: files" "group: files" "shadow: files" "gshadow: files" "hosts: files dns" "services: files" "networks: files" "protocols: files" > "$SYSTEM_ROOT/config/nsswitch.conf"
 chmod 0644 "$SYSTEM_ROOT/config/nsswitch.conf"
 
-# glibc NSS modules are required by PAM for file-backed account lookup.
+# Guard the architectural boundary: desktop/provider executables and their
+# dynamic runtime closure must never leak into the boot-critical System Image.
+if find "$SYSTEM_ROOT/apps" -mindepth 1 -maxdepth 1 -type d \
+    ! -name luna-device-manager ! -name luna-system-runtime ! -name luna-user-session \
+    -print -quit | grep -q .; then
+    echo "unexpected non-core application in System Image" >&2
+    exit 1
+fi
+if find "$SYSTEM_ROOT/libs" -type f -o -type l | grep -q .; then
+    echo "unexpected library payload in System Image; compositor/provider closure belongs in DATA or Recovery DATA" >&2
+    exit 1
+fi
+# D-Bus and several host services expect a stable machine identity. Derive a
+# per-installation identity during boot from the persistent SYSTEM partition
+# GUID rather than baking the builder host's /etc/machine-id into the image.
+
+# glibc NSS modules are compatibility dependencies for the transitional
+# DATA authentication/provider stack; they do not belong in System Image.
 for NSS_LIB in /usr/lib/x86_64-linux-gnu/libnss_files.so.2 /usr/lib/x86_64-linux-gnu/libnss_dns.so.2 /usr/lib/x86_64-linux-gnu/libresolv.so.2; do
     [ -f "$NSS_LIB" ] || { echo "required NSS library missing: $NSS_LIB" >&2; exit 1; }
     NSS_REL="${NSS_LIB#/usr/lib/}"
-    mkdir -p "$SYSTEM_ROOT/libs/$(dirname "$NSS_REL")"
-    cp -L "$NSS_LIB" "$SYSTEM_ROOT/libs/$NSS_REL"
+    mkdir -p "$DATA_ROOT/system/libs/$(dirname "$NSS_REL")"
+    cp -L "$NSS_LIB" "$DATA_ROOT/system/libs/$NSS_REL"
 done
 
 # DATA is mutable state and therefore never enters the System Image.
 
 
+# Recovery DATA is the only recovery-specific filesystem. It is intentionally
+# small and self-contained; luna-init materializes it into a writable tmpfs
+# VirtualData provider when boot mode is Recovery.
+RECOVERY_DATA_ROOT="$WORK/recovery-data-root"
+RECOVERY_DATA_IMAGE="$WORK/recovery.squashfs"
+rm -rf "$RECOVERY_DATA_ROOT"
+mkdir -p "$RECOVERY_DATA_ROOT/system"/{apps,drivers,firmware,libs,config,state,volumes}
+mkdir -p "$RECOVERY_DATA_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
+mkdir -p "$RECOVERY_DATA_ROOT/system/state/auth"
+mkdir -p "$RECOVERY_DATA_ROOT/system/apps"/{recovery-tools,data-discovery,system-diagnostics,system-repair}
+mkdir -p "$RECOVERY_DATA_ROOT/users/recovery"/{home,data,config}
+mkdir -p "$RECOVERY_DATA_ROOT/cache"
+
+# Recovery uses the same graphical provider family as normal boot. The
+# compositor is Niri in both cases; only the DATA provider changes from the
+# persistent LUNA-DATA filesystem to the in-RAM Recovery DATA image.
+mkdir -p "$RECOVERY_DATA_ROOT/system/apps"/{niri,noctalia,ghostty,dbus-daemon,pipewire,wireplumber}
+mkdir -p "$RECOVERY_DATA_ROOT/system/libs/x86_64-linux-gnu" "$RECOVERY_DATA_ROOT/system/libs/loader"
+
+for app in niri noctalia ghostty dbus-daemon pipewire wireplumber; do
+    source="$DATA_ROOT/system/apps/$app/$app"
+    if [ -f "$source" ] || [ -L "$source" ]; then
+        cp -L "$source" "$RECOVERY_DATA_ROOT/system/apps/$app/$app"
+        chmod 0755 "$RECOVERY_DATA_ROOT/system/apps/$app/$app" 2>/dev/null || true
+    fi
+done
+for app in niri noctalia ghostty; do
+    if [ -d "$DATA_ROOT/system/apps/$app/resources" ]; then
+        cp -a "$DATA_ROOT/system/apps/$app/resources" "$RECOVERY_DATA_ROOT/system/apps/$app/"
+    fi
+done
+
+# Niri reads its configuration from the logical /etc/luna path materialized
+# from Recovery DATA/system/config by luna-init, just like normal DATA.
+if [ -f "$DATA_ROOT/system/config/luna/niri-config.kdl" ]; then
+    mkdir -p "$RECOVERY_DATA_ROOT/system/config/luna"
+    cp -a "$DATA_ROOT/system/config/luna/niri-config.kdl" \
+        "$RECOVERY_DATA_ROOT/system/config/luna/niri-config.kdl"
+fi
+
+RECOVERY_QUEUE="$WORK/recovery-niri-elf-queue"
+: > "$RECOVERY_QUEUE"
+for app in niri noctalia ghostty dbus-daemon pipewire wireplumber; do
+    source="$RECOVERY_DATA_ROOT/system/apps/$app/$app"
+    [ -f "$source" ] || continue
+    printf '%s\0' "$source" >> "$RECOVERY_QUEUE"
+done
+RECOVERY_LOADER="$(readlink -f "$DATA_ROOT/system/libs/loader/ld-linux-x86-64.so.2" 2>/dev/null || true)"
+[ -f "$RECOVERY_LOADER" ] || { echo "glibc ELF loader is unavailable for Recovery Niri" >&2; exit 1; }
+cp -L "$RECOVERY_LOADER" "$RECOVERY_DATA_ROOT/system/libs/loader/ld-linux-x86-64.so.2"
+
+declare -A RECOVERY_SEEN=()
+RECOVERY_PROCESSED=0
+while true; do
+    mapfile -d '' -t RECOVERY_ENTRIES < "$RECOVERY_QUEUE" || true
+    RECOVERY_TOTAL="${#RECOVERY_ENTRIES[@]}"
+    [ "$RECOVERY_PROCESSED" -lt "$RECOVERY_TOTAL" ] || break
+    for ((index = RECOVERY_PROCESSED; index < RECOVERY_TOTAL; index++)); do
+        RECOVERY_ELF="${RECOVERY_ENTRIES[index]}"
+        RECOVERY_ACTUAL="$(readlink -f "$RECOVERY_ELF" 2>/dev/null || true)"
+        [ -f "$RECOVERY_ACTUAL" ] || continue
+        [[ ${RECOVERY_SEEN[$RECOVERY_ACTUAL]+x} ]] && continue
+        RECOVERY_SEEN[$RECOVERY_ACTUAL]=1
+        file "$RECOVERY_ACTUAL" | grep -q 'ELF' || continue
+        while IFS= read -r RECOVERY_DEP; do
+            [ -n "$RECOVERY_DEP" ] || continue
+            [ -f "$RECOVERY_DEP" ] || continue
+            RECOVERY_DEP_BASE="$(basename "$RECOVERY_DEP")"
+            RECOVERY_ACTUAL_DEP="$(readlink -f "$RECOVERY_DEP" 2>/dev/null || true)"
+            [ -f "$RECOVERY_ACTUAL_DEP" ] || continue
+            case "$RECOVERY_DEP_BASE" in
+                ld-linux-*.so.*) RECOVERY_DEST="$RECOVERY_DATA_ROOT/system/libs/loader/$RECOVERY_DEP_BASE" ;;
+                *) RECOVERY_DEST="$RECOVERY_DATA_ROOT/system/libs/x86_64-linux-gnu/$RECOVERY_DEP_BASE" ;;
+            esac
+            mkdir -p "$(dirname "$RECOVERY_DEST")"
+            cp -L "$RECOVERY_ACTUAL_DEP" "$RECOVERY_DEST"
+            [[ ${RECOVERY_SEEN[$RECOVERY_ACTUAL_DEP]+x} ]] || printf '%s\0' "$RECOVERY_ACTUAL_DEP" >> "$RECOVERY_QUEUE"
+        done < <(
+            LD_LIBRARY_PATH="$DATA_ROOT/system/libs/x86_64-linux-gnu:$REPO_ROOT/dist/.build/desktop-payload/usr/lib/x86_64-linux-gnu" \
+                ldd "$RECOVERY_ACTUAL" 2>/dev/null |
+                awk '/=> \// {print $3} /^\// {print $1}'
+        )
+    done
+    RECOVERY_PROCESSED="$RECOVERY_TOTAL"
+done
+
+if [ -d "$DATA_ROOT/system/apps/niri/resources/wayland-sessions" ]; then
+    mkdir -p "$RECOVERY_DATA_ROOT/system/apps/niri/resources"
+    cp -a "$DATA_ROOT/system/apps/niri/resources/wayland-sessions" "$RECOVERY_DATA_ROOT/system/apps/niri/resources/"
+fi
+if [ -d "$DATA_ROOT/system/apps/niri/resources/X11" ]; then
+    mkdir -p "$RECOVERY_DATA_ROOT/system/apps/niri/resources"
+    cp -a "$DATA_ROOT/system/apps/niri/resources/X11" "$RECOVERY_DATA_ROOT/system/apps/niri/resources/"
+fi
+mkdir -p "$RECOVERY_DATA_ROOT/system/config/luna"
+cat > "$RECOVERY_DATA_ROOT/system/config/luna/desktop.toml" <<'EOF'
+[desktop]
+compositor = "niri"
+shell = "noctalia"
+terminal = "ghostty"
+EOF
+
+cat > "$RECOVERY_DATA_ROOT/system/apps/recovery-tools/recovery-tools" <<'EOF'
+#!/usr/bin/sh
+printf '%s\n' 'Project Luna Recovery Tools'
+printf '%s\n' 'Use data-discovery, system-diagnostics or system-repair.'
+EOF
+cat > "$RECOVERY_DATA_ROOT/system/apps/data-discovery/data-discovery" <<'EOF'
+#!/usr/bin/sh
+printf '%s\n' 'LUNA-DATA candidates:'
+for path in /dev/disk/by-partuuid/*; do
+    [ -e "$path" ] || continue
+    printf '%s\n' "$path"
+done
+EOF
+cat > "$RECOVERY_DATA_ROOT/system/apps/system-diagnostics/system-diagnostics" <<'EOF'
+#!/usr/bin/sh
+printf '%s\n' 'Project Luna system diagnostics'
+printf 'kernel: '; uname -r 2>/dev/null || printf '%s\n' unavailable
+printf 'recovery-data: mounted as VirtualData\n'
+EOF
+cat > "$RECOVERY_DATA_ROOT/system/apps/system-repair/system-repair" <<'EOF'
+#!/usr/bin/sh
+printf '%s\n' 'Project Luna system repair tools are available through the Recovery environment.'
+printf '%s\n' 'Physical LUNA-DATA remains a separate repair target.'
+EOF
+chmod 0755 "$RECOVERY_DATA_ROOT"/system/apps/*/*
+
+cat > "$RECOVERY_DATA_ROOT/system/state/recovery.toml" <<EOF
+[recovery]
+version = "$LUNA_VERSION"
+provider = "VirtualData"
+EOF
+cat > "$RECOVERY_DATA_ROOT/system/state/auth/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/sh
+recovery:x:1001:1001:Luna Recovery:/home/recovery:/bin/sh
+EOF
+cat > "$RECOVERY_DATA_ROOT/system/state/auth/group" <<'EOF'
+root:x:0:
+shadow:x:42:
+seat:x:997:recovery
+recovery:x:1001:
+EOF
+if [ -n "$LUNA_PASSWORD_HASH" ]; then
+    printf '%s\n' \
+        'root:!*:0:0:99999:7:::' \
+        "recovery:${LUNA_PASSWORD_HASH}:0:0:99999:7:::" > "$RECOVERY_DATA_ROOT/system/state/auth/shadow"
+else
+    cat > "$RECOVERY_DATA_ROOT/system/state/auth/shadow" <<'EOF'
+root:!*:0:0:99999:7:::
+recovery:!*:0:0:99999:7:::
+EOF
+fi
+chmod 0644 "$RECOVERY_DATA_ROOT/system/state/auth/passwd" "$RECOVERY_DATA_ROOT/system/state/auth/group"
+chmod 0600 "$RECOVERY_DATA_ROOT/system/state/auth/shadow"
+for dir in "$RECOVERY_DATA_ROOT"/system/resources/*; do :; done
+
+mksquashfs "$RECOVERY_DATA_ROOT" "$RECOVERY_DATA_IMAGE" -noappend -comp zstd -all-root -no-xattrs >/dev/null
 mksquashfs "$SYSTEM_ROOT" "$OUT/luna-${LUNA_VERSION}.squashfs" -noappend -comp zstd -all-root -no-xattrs >/dev/null
 
 SYSTEM_SIZE_MIB="${LUNA_SYSTEM_SIZE_MIB:-768}"
-DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-512}"
+DATA_SIZE_MIB="${LUNA_DATA_SIZE_MIB:-1280}"
 SWAP_SIZE_MIB="${LUNA_SWAP_SIZE_MIB:-128}"
-IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-1664}"
+IMAGE_SIZE_MIB="${LUNA_IMAGE_SIZE_MIB:-2432}"
+
+# LUNA-DATA is a real btrfs filesystem image. Its backing partition must be
+# at least as large as the filesystem we create; otherwise desktop automount
+# sees the correct GPT partition but btrfs reports a truncated device. Keep a
+# small amount of free space in the default image for mutable runtime state.
+DATA_ROOT_BYTES="$(du -sb "$DATA_ROOT" | awk '{print $1}')"
+DATA_MIN_MIB="$(((DATA_ROOT_BYTES + 128 * 1024 * 1024 + 1024 * 1024 - 1) / (1024 * 1024)))"
+[ "$DATA_SIZE_MIB" -ge "$DATA_MIN_MIB" ] || DATA_SIZE_MIB="$DATA_MIN_MIB"
 SYSTEM_SECTORS=$((SYSTEM_SIZE_MIB * 2048))
 DATA_SECTORS=$((DATA_SIZE_MIB * 2048))
 SWAP_SECTORS=$((SWAP_SIZE_MIB * 2048))
@@ -285,6 +546,20 @@ REQUIRED_MIB=$(((REQUIRED_SECTORS + 2047) / 2048))
 
 mkdir -p "$SYSTEM_PARTITION_ROOT/config" "$SYSTEM_PARTITION_ROOT/cores" "$SYSTEM_PARTITION_ROOT/images" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION" "$SYSTEM_PARTITION_ROOT/recovery"
 cp "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/images/luna-${LUNA_VERSION}.squashfs"
+cp "$RECOVERY_DATA_IMAGE" "$SYSTEM_PARTITION_ROOT/recovery/recovery.squashfs"
+cat > "$SYSTEM_PARTITION_ROOT/recovery/recovery.toml" <<EOF
+[image]
+name = "recovery-data"
+version = "$LUNA_VERSION"
+format = "squashfs"
+role = "recovery"
+
+[architecture]
+arch = "x86_64"
+
+[init]
+compatible = ["$LUNA_INIT_VERSION"]
+EOF
 cp "$LUNA_INIT" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
 chmod 0755 "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init"
 cp "$KERNEL" "$SYSTEM_PARTITION_ROOT/kernels/$KERNEL_VERSION/bzImage"
@@ -336,6 +611,11 @@ image = "$LUNA_VERSION"
 init = "$LUNA_INIT_VERSION"
 kernel = "$KERNEL_VERSION"
 
+[targets.recovery]
+image = "$LUNA_VERSION"
+init = "$LUNA_INIT_VERSION"
+kernel = "$KERNEL_VERSION"
+
 [boot]
 attempt_id = 0
 previous_attempt_failed = false
@@ -351,32 +631,47 @@ sed -i \
     -e "s/__LUNA_DATA_PARTITION_GUID__/$DATA_GUID/g" \
     "$SYSTEM_PARTITION_ROOT/config/luna-data.toml"
 
-truncate -s "${DATA_SIZE_MIB}M" "$OUT/luna-data.img"
-"$MKFS_BTRFS" -q -f -L LUNA-DATA --rootdir "$DATA_ROOT" "$OUT/luna-data.img" >/dev/null
-truncate -s "${SYSTEM_SIZE_MIB}M" "$OUT/luna-system.img"
-mkfs.ext4 -q -F -L LUNA-SYS -d "$SYSTEM_PARTITION_ROOT" "$OUT/luna-system.img" >/dev/null
-rm -f "$OUT/luna-swap.img"
-fallocate -l "${SWAP_SIZE_MIB}M" "$OUT/luna-swap.img"
-chmod 0600 "$OUT/luna-swap.img"
-mkswap -L SWAP "$OUT/luna-swap.img" >/dev/null
+truncate -s "${DATA_SIZE_MIB}M" "$PARTITION_WORK/luna-data.fs"
+"$MKFS_BTRFS" -q -f -L LUNA-DATA --rootdir "$DATA_ROOT" "$PARTITION_WORK/luna-data.fs" >/dev/null
+DATA_FS_BYTES="$(stat -c '%s' "$PARTITION_WORK/luna-data.fs")"
+DATA_PARTITION_BYTES=$((DATA_SECTORS * 512))
+[ "$DATA_FS_BYTES" -le "$DATA_PARTITION_BYTES" ] || {
+    echo "LUNA-DATA filesystem ($DATA_FS_BYTES bytes) exceeds partition ($DATA_PARTITION_BYTES bytes)" >&2
+    exit 1
+}
+truncate -s "${SYSTEM_SIZE_MIB}M" "$PARTITION_WORK/luna-sys.fs"
+mkfs.ext4 -q -F -L LUNA-SYS -d "$SYSTEM_PARTITION_ROOT" "$PARTITION_WORK/luna-sys.fs" >/dev/null
+rm -f "$PARTITION_WORK/swap.fs"
+fallocate -l "${SWAP_SIZE_MIB}M" "$PARTITION_WORK/swap.fs"
+chmod 0600 "$PARTITION_WORK/swap.fs"
+mkswap -L SWAP "$PARTITION_WORK/swap.fs" >/dev/null
 
 truncate -s "${IMAGE_SIZE_MIB}M" "$OUT/luna-pc.img"
 sgdisk --zap-all "$OUT/luna-pc.img" >/dev/null
 sgdisk --disk-guid="$DISK_GUID" \
-       --partition-guid=2:"$SYS_GUID" \
-       --partition-guid=3:"$DATA_GUID" \
        -n "1:2048:$((2048 + 128 * 2048 - 1))" -t 1:ef00 -c 1:EFI \
        -n "2:${SYSTEM_START}:${SYSTEM_END}" -t 2:8300 -c 2:LUNA-SYS \
        -n "3:${DATA_START}:${DATA_END}" -t 3:8300 -c 3:LUNA-DATA \
        -n "4:${SWAP_START}:${SWAP_END}" -t 4:8200 -c 4:SWAP "$OUT/luna-pc.img" >/dev/null
-truncate -s 128M "$OUT/luna-efi.img"
-mkfs.fat -F 32 "$OUT/luna-efi.img" >/dev/null
-mmd -i "$OUT/luna-efi.img" ::/EFI; mmd -i "$OUT/luna-efi.img" ::/EFI/LUNA; mmd -i "$OUT/luna-efi.img" ::/EFI/BOOT
-mcopy -i "$OUT/luna-efi.img" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI; mcopy -i "$OUT/luna-efi.img" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
-dd if="$OUT/luna-efi.img" of="$OUT/luna-pc.img" bs=512 seek=2048 conv=notrunc status=none
-dd if="$OUT/luna-system.img" of="$OUT/luna-pc.img" bs=512 seek="$SYSTEM_START" conv=notrunc status=none
-dd if="$OUT/luna-data.img" of="$OUT/luna-pc.img" bs=512 seek="$DATA_START" conv=notrunc status=none
-dd if="$OUT/luna-swap.img" of="$OUT/luna-pc.img" bs=512 seek="$SWAP_START" conv=notrunc status=none
+# Partition GUIDs must be applied after the partitions exist. In particular,
+# LUNA-DATA's GUID is part of the fast-attach manifest contract.
+sgdisk --partition-guid=2:"$SYS_GUID" --partition-guid=3:"$DATA_GUID" "$OUT/luna-pc.img" >/dev/null
+truncate -s 128M "$PARTITION_WORK/efi.fs"
+mkfs.fat -F 32 "$PARTITION_WORK/efi.fs" >/dev/null
+mmd -i "$PARTITION_WORK/efi.fs" ::/EFI; mmd -i "$PARTITION_WORK/efi.fs" ::/EFI/LUNA; mmd -i "$PARTITION_WORK/efi.fs" ::/EFI/BOOT
+mcopy -i "$PARTITION_WORK/efi.fs" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI; mcopy -i "$PARTITION_WORK/efi.fs" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
+dd if="$PARTITION_WORK/efi.fs" of="$OUT/luna-pc.img" bs=512 seek=2048 conv=notrunc status=none
+dd if="$PARTITION_WORK/luna-sys.fs" of="$OUT/luna-pc.img" bs=512 seek="$SYSTEM_START" conv=notrunc status=none
+dd if="$PARTITION_WORK/luna-data.fs" of="$OUT/luna-pc.img" bs=512 seek="$DATA_START" conv=notrunc status=none
+dd if="$PARTITION_WORK/swap.fs" of="$OUT/luna-pc.img" bs=512 seek="$SWAP_START" conv=notrunc status=none
+
+# Verify the physical GPT identity against the manifest written into LUNA-SYS.
+ACTUAL_DISK_GUID="$(sgdisk -p "$OUT/luna-pc.img" | awk -F': ' '/Disk identifier \(GUID\):/ {print tolower($2); exit}')"
+ACTUAL_DATA_GUID="$(sgdisk -i 3 "$OUT/luna-pc.img" | awk -F': ' '/Partition unique GUID:/ {print tolower($2); exit}')"
+MANIFEST_DISK_GUID="$(awk -F' = ' '/^preferred_disk_guid/ {gsub(/"/, "", $2); print tolower($2)}' "$SYSTEM_PARTITION_ROOT/config/luna-data.toml")"
+MANIFEST_DATA_GUID="$(awk -F' = ' '/^preferred_partition_guid/ {gsub(/"/, "", $2); print tolower($2)}' "$SYSTEM_PARTITION_ROOT/config/luna-data.toml")"
+[ "$ACTUAL_DISK_GUID" = "$MANIFEST_DISK_GUID" ] || { echo "LUNA-DATA manifest disk GUID mismatch: manifest=$MANIFEST_DISK_GUID GPT=$ACTUAL_DISK_GUID" >&2; exit 1; }
+[ "$ACTUAL_DATA_GUID" = "$MANIFEST_DATA_GUID" ] || { echo "LUNA-DATA manifest partition GUID mismatch: manifest=$MANIFEST_DATA_GUID GPT=$ACTUAL_DATA_GUID" >&2; exit 1; }
 
 cat > "$OUT/BUILD-INFO" <<EOF
 Project Luna PC graphical development image
@@ -394,7 +689,8 @@ partitions=EFI:128MiB,LUNA-SYS:${SYSTEM_SIZE_MIB}MiB,LUNA-DATA:${DATA_SIZE_MIB}M
 image_size=${IMAGE_SIZE_MIB}MiB
 boot_ui=graphical
 user_session=/usr/bin/luna-user-session
-desktop=/usr/bin/niri-session
+desktop_provider_selection=Niri-direct-native-session
+recovery_provider_selection=Niri-direct-native-session-VirtualData
 shell=/usr/bin/fish
 terminal=/usr/bin/ghostty
 compatibility_shells=/usr/bin/bash,/usr/bin/sh
@@ -403,6 +699,6 @@ login_username=luna
 login_credential=development-only
 early_userspace=direct-memory-resident-luna-init
 EOF
-sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init" "$OUT/luna-system.img" "$OUT/luna-data.img" > "$OUT/SHA256SUMS"
+sha256sum "$OUT/luna-pc.img" "$OUT/luna-${LUNA_VERSION}.squashfs" "$SYSTEM_PARTITION_ROOT/cores/luna-${LUNA_INIT_VERSION}.init" "$PARTITION_WORK/luna-sys.fs" "$PARTITION_WORK/luna-data.fs" > "$OUT/SHA256SUMS"
 
 echo "Built Project Luna graphical PC image: $OUT/luna-pc.img"

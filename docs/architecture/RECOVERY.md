@@ -16,9 +16,8 @@ Recovery-специфичные данные находятся в `LUNA-SYS/rec
 
 ```text
 LUNA-SYS/recovery/
-├── recovery-X.Y.Z.squashfs
-├── recovery-X.Y.Z.toml
-└── ...
+├── recovery.squashfs
+└── recovery.toml
 ```
 
 Это **Recovery DATA Image**, а не Recovery System Image. Recovery не имеет отдельной системной SquashFS: используется обычный выбранный System Image, а `luna-init` и kernel разрешаются той же цепочкой `image → init → kernel`, что и при normal boot.
@@ -66,6 +65,8 @@ Recovery
 ```
 
 Recovery может стартовать без физической `LUNA-DATA`.
+
+В Recovery не запускается интерактивный desktop login provider. `luna-init` передаёт `luna-system-runtime` идентичность виртуального пользователя `recovery`, а runtime непосредственно создаёт активный Recovery UserSession. Поэтому Recovery DATA не обязана содержать `greetd` или Noctalia Greeter: её графический вход — тот же Niri provider, что и в Normal/Factory, с native seat/session ownership Luna.
 
 ## Доступ к физической DATA
 

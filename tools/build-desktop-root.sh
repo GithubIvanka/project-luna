@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="${LUNA_DESKTOP_ROOT_OUT:-${REPO_ROOT}/dist/desktop-root}"
+OUT="${LUNA_DESKTOP_ROOT_OUT:-${REPO_ROOT}/dist/.build/desktop-payload}"
 SRC="${LUNA_DESKTOP_SRC:-${REPO_ROOT}/dist/sources}"
 JOBS="${LUNA_BUILD_JOBS:-$(nproc)}"
 MESON_BUILD_SUFFIX="$(basename "$OUT")"
@@ -10,8 +10,6 @@ NIRI_TARGET_DIR="$SRC/niri/target-${MESON_BUILD_SUFFIX}"
 
 NIRI_TAG="${LUNA_NIRI_TAG:-v26.04}"
 NOCTALIA_TAG="${LUNA_NOCTALIA_TAG:-v5.0.0-beta.8}"
-NOCTALIA_GREETER_REF="${LUNA_NOCTALIA_GREETER_REF:-b4e668d4f8aada549d5c990c3a18458fae8be6b9}"
-GREETD_REF="${LUNA_GREETD_REF:-0.10.3}"
 GHOSTTY_TAG="${LUNA_GHOSTTY_TAG:-v1.3.1}"
 GHOSTTY_ZIG_VERSION="${LUNA_GHOSTTY_ZIG_VERSION:-0.15.2}"
 FISH_VERSION="${LUNA_FISH_VERSION:-4.8.1}"
@@ -21,8 +19,19 @@ WLROOTS_VERSION="${LUNA_WLROOTS_VERSION:-0.20.2}"
 WIREPLUMBER_VERSION="${LUNA_WIREPLUMBER_VERSION:-0.5.13}"
 
 mkdir -p "$OUT" "$SRC"
+OUT="$(cd "$OUT" && pwd)"
+SRC="$(cd "$SRC" && pwd)"
+MESON_BUILD_SUFFIX="$(basename "$OUT")"
+NIRI_TARGET_DIR="$SRC/niri/target-${MESON_BUILD_SUFFIX}"
+for _root_var in LUNA_NIRI_DEV_ROOT LUNA_PIPEWIRE_DEV_ROOT LUNA_SDBUS_DEV_ROOT LUNA_LIBRSVG_DEV_ROOT LUNA_NOCTALIA_DEV_ROOT LUNA_GMP_DEV_ROOT LUNA_MPFR_DEV_ROOT LUNA_GTK4_LAYER_SHELL_DEV_ROOT; do
+    if [ -v "$_root_var" ]; then
+        declare -n _root_ref="$_root_var"
+        _root_ref="$(cd "$_root_ref" && pwd)"
+    fi
+done
+unset _root_var _root_ref
 rm -rf "$OUT"
-mkdir -p "$OUT/usr/bin" "$OUT/usr/lib" "$OUT/usr/share" "$OUT/etc/profile.d" "$OUT/etc/luna" "$OUT/etc/pam.d" "$OUT/var/lib/noctalia-greeter"
+mkdir -p "$OUT/usr/bin" "$OUT/usr/lib" "$OUT/usr/share" "$OUT/etc/profile.d" "$OUT/etc/luna"
 
 fetch_git() {
     local url="$1" ref="$2" dir="$3"
@@ -42,8 +51,6 @@ fetch_git() {
 
 fetch_git https://github.com/niri-wm/niri.git "$NIRI_TAG" "$SRC/niri"
 fetch_git https://github.com/noctalia-dev/noctalia.git "$NOCTALIA_TAG" "$SRC/noctalia"
-fetch_git https://github.com/noctalia-dev/noctalia-greeter.git "$NOCTALIA_GREETER_REF" "$SRC/noctalia-greeter"
-fetch_git https://github.com/kennylevinsen/greetd.git "$GREETD_REF" "$SRC/greetd"
 fetch_git https://github.com/ghostty-org/ghostty.git "$GHOSTTY_TAG" "$SRC/ghostty"
 fetch_git https://gitlab.freedesktop.org/wayland/wayland.git "$WAYLAND_VERSION" "$SRC/wayland"
 fetch_git https://gitlab.freedesktop.org/wayland/wayland-protocols.git "$WAYLAND_PROTOCOLS_VERSION" "$SRC/wayland-protocols"
@@ -112,8 +119,9 @@ export PKG_CONFIG_SYSROOT_DIR="$OUT"
 export PKG_CONFIG_PATH="$OUT/usr/lib/pkgconfig:$OUT/usr/share/pkgconfig:$OUT/usr/lib/x86_64-linux-gnu/pkgconfig"
 
 # wlroots also needs host-provided development dependencies (libdrm,
-# pixman and xkbcommon). Expose their headers/pkg-config metadata through
-# the staging sysroot only for this build, then remove the build-only files.
+# pixman, xkbcommon and the Smithay DRM metadata libraries). Expose their
+# headers/pkg-config metadata through the staging sysroot only for this build,
+# then remove the build-only files.
 for dep in libdrm pixman-1 xkbcommon; do
     if [ -d "/usr/include/$dep" ]; then
         mkdir -p "$OUT/usr/include"
@@ -125,8 +133,46 @@ for dep in libdrm pixman-1 xkbcommon; do
         cp -f "$pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
     fi
 done
+if [ -n "${LUNA_NIRI_DEV_ROOT:-}" ]; then
+    mkdir -p "$OUT/usr/include" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig" "$OUT/usr/lib/x86_64-linux-gnu" "$OUT/usr/share/hwdata"
+    if [ -f "${LUNA_NIRI_DEV_ROOT}/usr/share/hwdata/pnp.ids" ]; then
+        cp -f "${LUNA_NIRI_DEV_ROOT}/usr/share/hwdata/pnp.ids" "$OUT/usr/share/hwdata/pnp.ids"
+    else
+        echo "missing hwdata pnp.ids in Niri development root" >&2
+        exit 1
+    fi
+    for dep in libdisplay-info libliftoff; do
+        pc="${LUNA_NIRI_DEV_ROOT}/usr/lib/x86_64-linux-gnu/pkgconfig/${dep}.pc"
+        if [ -f "$pc" ]; then
+            cp -f "$pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
+        fi
+    done
+    if [ -d "${LUNA_NIRI_DEV_ROOT}/usr/include/libdisplay-info" ]; then
+        ln -sfn "${LUNA_NIRI_DEV_ROOT}/usr/include/libdisplay-info" "$OUT/usr/include/libdisplay-info"
+    fi
+    if [ -f "${LUNA_NIRI_DEV_ROOT}/usr/include/libliftoff.h" ]; then
+        ln -sfn "${LUNA_NIRI_DEV_ROOT}/usr/include/libliftoff.h" "$OUT/usr/include/libliftoff.h"
+    fi
+    for lib in display-info liftoff; do
+        found=0
+        for src in "${LUNA_NIRI_DEV_ROOT}/usr/lib/x86_64-linux-gnu/lib${lib}.so"*; do
+            [ -e "$src" ] || continue
+            cp -a "$src" "$OUT/usr/lib/x86_64-linux-gnu/"
+            found=1
+        done
+        [ "$found" -eq 1 ] || { echo "missing Niri development library: lib${lib}" >&2; exit 1; }
+    done
+fi
 (
+# hwdata's pkgdatadir must remain a host source path: wlroots embeds pnp.ids
+# into generated source during the build, so applying DESTDIR as a pkg-config
+# sysroot would incorrectly prepend the staging root to that source path.
+unset PKG_CONFIG_SYSROOT_DIR
+export CFLAGS="-I$OUT/usr/include"
+export CXXFLAGS="-I$OUT/usr/include"
+export LDFLAGS="-L$OUT/usr/lib/x86_64-linux-gnu"
     cd "$SRC/wlroots"
+    rm -rf build-luna-${MESON_BUILD_SUFFIX}
     meson setup build-luna-${MESON_BUILD_SUFFIX} --buildtype=release --prefix=/usr -Dxwayland=disabled -Dexamples=false
     meson compile -C build-luna-${MESON_BUILD_SUFFIX} -j "$JOBS"
     DESTDIR="$OUT" meson install -C build-luna-${MESON_BUILD_SUFFIX}
@@ -135,6 +181,8 @@ for dep in libdrm pixman-1 xkbcommon; do
     rm -f "$OUT/usr/include/$dep"
     rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/$dep.pc"
 done
+unset PKG_CONFIG
+unset LUNA_WLROOTS_HW_DATA
 # WirePlumber needs native GLib helper tools such as glib-mkenums.
 # Build it against the host development environment; only its installed
 # runtime payload is placed into the Luna desktop root. Some CI hosts carry
@@ -210,8 +258,6 @@ if [ -n "${LUNA_NIRI_DEV_ROOT:-}" ]; then
     cp -f "$LUNA_NIRI_DEV_ROOT"/usr/lib/x86_64-linux-gnu/pkgconfig/*.pc "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
 fi
 
-bash "$REPO_ROOT/tools/patch-noctalia-greeter.sh" "$SRC/noctalia-greeter/meson.build"
-
 if [ -n "${LUNA_SDBUS_DEV_ROOT:-}" ]; then
     mkdir -p "$OUT/usr/include" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig"
     ln -sfn "${LUNA_SDBUS_DEV_ROOT}/usr/include/sdbus-c++" "$OUT/usr/include/sdbus-c++"
@@ -236,7 +282,18 @@ if [ -n "${LUNA_LIBRSVG_DEV_ROOT:-}" ]; then
 fi
 if [ -n "${LUNA_NOCTALIA_DEV_ROOT:-}" ]; then
     mkdir -p "$OUT/usr/include" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig" "$OUT/usr/share/pkgconfig"
-    cp -a "${LUNA_NOCTALIA_DEV_ROOT}/usr/include/." "$OUT/usr/include/"
+    # Merge Noctalia's development headers without replacing include roots
+    # already supplied by another native-development source. The staged roots
+    # are build inputs only; none of these development headers belong in the
+    # final System Image.
+    while IFS= read -r -d '' inc; do
+        name="$(basename "$inc")"
+        dest="$OUT/usr/include/$name"
+        if [ -e "$dest" ] || [ -L "$dest" ]; then
+            continue
+        fi
+        cp -a "$inc" "$dest"
+    done < <(find "${LUNA_NOCTALIA_DEV_ROOT}/usr/include" -mindepth 1 -maxdepth 1 -print0)
     if [ -n "${LUNA_GMP_DEV_ROOT:-}" ]; then
         mkdir -p "$OUT/usr/include"
         install -Dm0644 "${LUNA_GMP_DEV_ROOT}/usr/include/x86_64-linux-gnu/gmp.h" "$OUT/usr/include/gmp.h"
@@ -291,9 +348,29 @@ install -Dm0755 "$NIRI_TARGET_DIR/release/niri" "$OUT/usr/bin/niri"
 install -Dm0755 "$SRC/niri/resources/niri-session" "$OUT/usr/share/niri/upstream-niri-session"
 install -Dm0644 "$SRC/niri/resources/niri.desktop" "$OUT/usr/share/wayland-sessions/niri.desktop"
 install -Dm0644 "$SRC/niri/resources/niri-portals.conf" "$OUT/usr/share/xdg-desktop-portal/niri-portals.conf"
+# libinput uses runtime quirks data from /usr/share; without it wlroots cannot
+# initialize the input backend inside the self-contained Luna System Image.
+if [ -d /usr/share/libinput ]; then
+    mkdir -p "$OUT/usr/share/libinput"
+    cp -a /usr/share/libinput/. "$OUT/usr/share/libinput/"
+fi
+# libinput uses udev for device enumeration and ID_INPUT/ID_SEAT tagging.
+# Luna does not use systemd as its service manager, so only the standalone
+# udev daemon binary and the small set of input/seat rules are staged here.
+install -Dm0755 /usr/bin/udevadm "$OUT/usr/bin/systemd-udevd"
+install -Dm0755 /usr/bin/udevadm "$OUT/usr/bin/udevadm"
+mkdir -p "$OUT/usr/lib/udev/rules.d"
+for rule in 50-udev-default.rules 60-input-id.rules 71-seat.rules 73-seat-late.rules; do
+    if [ -f "/usr/lib/udev/rules.d/$rule" ]; then
+        install -Dm0644 "/usr/lib/udev/rules.d/$rule" "$OUT/usr/lib/udev/rules.d/$rule"
+    fi
+done
+if [ -f /usr/lib/udev/hwdb.bin ]; then
+    install -Dm0444 /usr/lib/udev/hwdb.bin "$OUT/usr/lib/udev/hwdb.bin"
+fi
 if [ -n "${LUNA_NIRI_DEV_ROOT:-}" ]; then
     while IFS= read -r -d '' inc; do
-        rm -f "$OUT/usr/include/$(basename "$inc")"
+        rm -rf "$OUT/usr/include/$(basename "$inc")"
     done < <(find "$LUNA_NIRI_DEV_ROOT/usr/include" -mindepth 1 -maxdepth 1 -type d -print0)
     find "$LUNA_NIRI_DEV_ROOT/usr/lib/x86_64-linux-gnu/pkgconfig" -maxdepth 1 -type f -name '*.pc' -print0 \
         | while IFS= read -r -d '' pc; do rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/$(basename "$pc")"; done
@@ -305,67 +382,92 @@ fi
     meson compile -C build-luna-${MESON_BUILD_SUFFIX} -j "$JOBS"
     DESTDIR="$OUT" meson install -C build-luna-${MESON_BUILD_SUFFIX}
 )
+
+# Luna owns authentication and graphical session creation. Noctalia's optional
+# greeter integration is a separate login-provider product and must not enter
+# the Luna desktop payload, even when upstream installs it by default.
+rm -rf "$OUT/usr/share/noctalia-greeter" "$OUT/var/lib/noctalia-greeter"
+rm -f "$OUT/usr/bin/greetd" "$OUT/usr/bin/noctalia-greeter" "$OUT/usr/bin/noctalia-greeter-apply-appearance" "$OUT/usr/bin/noctalia-greeter-compositor" "$OUT/usr/bin/noctalia-greeter-print-greetd-config" "$OUT/usr/bin/noctalia-greeter-session" "$OUT/usr/lib/tmpfiles.d/noctalia-greeter.conf" "$OUT/usr/share/polkit-1/actions/org.noctalia.greeter.apply-appearance.policy" "$OUT/etc/pam.d/greetd" "$OUT/etc/pam.d/greetd-greeter"
 if [ -n "${LUNA_PIPEWIRE_DEV_ROOT:-}" ]; then
-    rm -f "$OUT/usr/include/pipewire-0.3" "$OUT/usr/include/spa-0.2"
+    rm -rf "$OUT/usr/include/pipewire-0.3" "$OUT/usr/include/spa-0.2"
     rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libpipewire-0.3.pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libspa-0.2.pc"
 fi
 if [ -d /usr/include/pixman-1 ]; then
     ln -sfn /usr/include/pixman-1 "$OUT/usr/include/pixman-1"
 fi
 
-(
-    cd "$SRC/noctalia-greeter"
-    meson setup build-luna-${MESON_BUILD_SUFFIX} --buildtype=release --prefix=/usr -Db_lto=true
-    meson compile -C build-luna-${MESON_BUILD_SUFFIX} -j "$JOBS"
-    DESTDIR="$OUT" meson install -C build-luna-${MESON_BUILD_SUFFIX}
-)
 if [ -n "${LUNA_SDBUS_DEV_ROOT:-}" ]; then
-    rm -f "$OUT/usr/include/sdbus-c++" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/sdbus-c++.pc"
+    rm -rf "$OUT/usr/include/sdbus-c++" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/sdbus-c++.pc"
 fi
 if [ -n "${LUNA_LIBRSVG_DEV_ROOT:-}" ]; then
-    rm -f "$OUT/usr/include/librsvg-2.0" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/librsvg-2.0.pc"
+    rm -rf "$OUT/usr/include/librsvg-2.0" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/librsvg-2.0.pc"
 fi
-rm -f "$OUT/usr/include/pixman-1"
+rm -rf "$OUT/usr/include/pixman-1"
 if [ -n "${LUNA_NOCTALIA_DEV_ROOT:-}" ]; then
     rm -rf "$OUT/usr/include/nlohmann" "$OUT/usr/include/libqalculate"
-    rm -f "$OUT/usr/include/cairo" "$OUT/usr/include/freetype2" "$OUT/usr/include/pango-1.0" "$OUT/usr/include/harfbuzz"
-    rm -f "$OUT/usr/include/curl" "$OUT/usr/include/glib-2.0" "$OUT/usr/include/gmp.h" "$OUT/usr/include/mpfr.h"
-    rm -f "$OUT/usr/lib/x86_64-linux-gnu/glib-2.0/include"
+    rm -rf "$OUT/usr/include/cairo" "$OUT/usr/include/freetype2" "$OUT/usr/include/pango-1.0" "$OUT/usr/include/harfbuzz"
+    rm -rf "$OUT/usr/include/curl" "$OUT/usr/include/glib-2.0" "$OUT/usr/include/gmp.h" "$OUT/usr/include/mpfr.h"
+    rm -rf "$OUT/usr/lib/x86_64-linux-gnu/glib-2.0/include"
     for inc in polkit-1 gio-unix-2.0 libmount blkid fribidi sysprof-6 gdk-pixbuf-2.0 glycin-2 libsecret-1 p11-kit-1 webp opus; do
-        rm -f "$OUT/usr/include/$inc"
+        rm -rf "$OUT/usr/include/$inc"
     done
     rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libqalculate.pc" "$OUT/usr/share/pkgconfig/nlohmann_json.pc"
 fi
 if [ -n "${LUNA_PIPEWIRE_DEV_ROOT:-}" ]; then
-    rm -f "$OUT/usr/include/pipewire-0.3" "$OUT/usr/include/spa-0.2"
+    rm -rf "$OUT/usr/include/pipewire-0.3" "$OUT/usr/include/spa-0.2"
     rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libpipewire-0.3.pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/libspa-0.2.pc"
 fi
-
-(
-    cd "$SRC/greetd"
-    cargo build --release
-)
-install -Dm0755 "$SRC/greetd/target/release/greetd" "$OUT/usr/bin/greetd"
 
 # Ghostty's GTK build uses libadwaita's Blueprint compiler and gtk4-layer-shell.
 # Expose the host development headers and linker-facing libraries for the
 # native build; runtime dependencies remain in the root for closure collection.
-if [ -d /usr/include/gtk4-layer-shell ]; then
-    ln -sfn /usr/include/gtk4-layer-shell "$OUT/usr/include/gtk4-layer-shell"
-elif [ -d "${REPO_ROOT}/dist/tools/gtk4-layer-shell-dev/usr/include/gtk4-layer-shell" ]; then
-    ln -sfn "${REPO_ROOT}/dist/tools/gtk4-layer-shell-dev/usr/include/gtk4-layer-shell" "$OUT/usr/include/gtk4-layer-shell"
-fi
-if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc ]; then
-    cp -f /usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
-elif [ -f "${REPO_ROOT}/dist/tools/gtk4-layer-shell-dev/usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc" ]; then
-    cp -f "${REPO_ROOT}/dist/tools/gtk4-layer-shell-dev/usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
-fi
-for lib in /usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so* "${REPO_ROOT}"/dist/tools/gtk4-layer-shell-dev/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so*; do
-    [ -e "$lib" ] || continue
-    cp -a "$lib" "$OUT/usr/lib/x86_64-linux-gnu/"
+# D-Bus daemon needs its system/session configuration at the logical
+# /usr/share/dbus-1 path. The service files alone are insufficient.
+mkdir -p "$OUT/usr/share/dbus-1"
+for cfg in system.conf session.conf; do
+    if [ -f "/usr/share/dbus-1/$cfg" ]; then
+        cp -f "/usr/share/dbus-1/$cfg" "$OUT/usr/share/dbus-1/$cfg"
+    fi
 done
-layer_shell_so="$(find /usr/lib/x86_64-linux-gnu "${REPO_ROOT}/dist/tools/gtk4-layer-shell-dev/usr/lib/x86_64-linux-gnu" -maxdepth 1 -type f -name 'libgtk4-layer-shell.so.*' 2>/dev/null | sort -V | tail -n1)"
+# Luna supervises system services itself, so D-Bus must not depend on the
+# distro-specific setuid activation helper or external service manager.
+if [ -f "$OUT/usr/share/dbus-1/system.conf" ]; then
+    sed -i '/<standard_system_servicedirs\/>/d; /<servicehelper>/d' "$OUT/usr/share/dbus-1/system.conf"
+fi
+if [ -d /usr/share/dbus-1/system.d ]; then
+    mkdir -p "$OUT/usr/share/dbus-1/system.d"
+    cp -a /usr/share/dbus-1/system.d/. "$OUT/usr/share/dbus-1/system.d/"
+fi
+# Polkit actions are desktop policy resources and are consumed through the
+# system D-Bus namespace; keep them with dbus-daemon's application resources.
+if [ -d /usr/share/polkit-1 ]; then
+    mkdir -p "$OUT/usr/share/polkit-1"
+    cp -a /usr/share/polkit-1/. "$OUT/usr/share/polkit-1/"
+fi
+
+if [ -n "${LUNA_GTK4_LAYER_SHELL_DEV_ROOT:-}" ]; then
+    mkdir -p "$OUT/usr/include" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig" "$OUT/usr/lib/x86_64-linux-gnu"
+    ln -sfn "${LUNA_GTK4_LAYER_SHELL_DEV_ROOT}/usr/include/gtk4-layer-shell" "$OUT/usr/include/gtk4-layer-shell"
+    cp -f "${LUNA_GTK4_LAYER_SHELL_DEV_ROOT}/usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc" "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
+    for lib in "${LUNA_GTK4_LAYER_SHELL_DEV_ROOT}"/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so* /usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so*; do
+        [ -e "$lib" ] || continue
+        cp -a "$lib" "$OUT/usr/lib/x86_64-linux-gnu/"
+    done
+else
+    if [ -d /usr/include/gtk4-layer-shell ]; then
+        ln -sfn /usr/include/gtk4-layer-shell "$OUT/usr/include/gtk4-layer-shell"
+    fi
+    if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc ]; then
+        cp -f /usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/"
+    fi
+    for lib in /usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so*; do
+        [ -e "$lib" ] || continue
+        cp -a "$lib" "$OUT/usr/lib/x86_64-linux-gnu/"
+    done
+fi
+layer_shell_so="$(find "$OUT/usr/lib/x86_64-linux-gnu" -maxdepth 1 -type f -name 'libgtk4-layer-shell.so.*' -print 2>/dev/null | sort -V | tail -n1)"
 [ -z "$layer_shell_so" ] || ln -sfn "$(basename "$layer_shell_so")" "$OUT/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so"
+[ -z "$layer_shell_so" ] || ln -sfn "$(basename "$layer_shell_so")" "$OUT/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell-0.so"
 if [ -d /usr/include/libadwaita-1 ]; then
     ln -sfn /usr/include/libadwaita-1 "$OUT/usr/include/libadwaita-1"
 fi
@@ -416,21 +518,25 @@ done
         echo "blueprint-compiler is required to build Ghostty" >&2
         exit 1
     fi
-    zig build -Doptimize=ReleaseFast -Dapp-runtime=gtk -Di18n=false -p "$OUT/usr"
+    # Use the staged gtk4-layer-shell as a system integration while keeping
+    # Ghostty's other Zig dependencies on their normal package mechanism.
+    export C_INCLUDE_PATH="$OUT/usr/include/gtk4-layer-shell:$OUT/usr/include/gtk-4.0:$OUT/usr/include"
+    export LIBRARY_PATH="$OUT/usr/lib/x86_64-linux-gnu"
+    zig build -fsys=gtk4-layer-shell -Doptimize=ReleaseFast -Dapp-runtime=gtk -Di18n=false -p "$OUT/usr"
 )
 
 # Remove development-only staging before assembling the runtime closure.
-rm -f "$OUT/usr/include/gtk4-layer-shell"
+rm -rf "$OUT/usr/include/gtk4-layer-shell"
 rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/gtk4-layer-shell-0.pc"
-rm -f "$OUT/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so"
+rm -f "$OUT/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell.so" "$OUT/usr/lib/x86_64-linux-gnu/libgtk4-layer-shell-0.so"
 rm -f "$OUT/usr/lib/x86_64-linux-gnu/libadwaita-1.so"
 rm -f "$OUT/usr/lib/x86_64-linux-gnu/libgtk-4.so"
-rm -f "$OUT/usr/include/libadwaita-1" "$OUT/usr/include/gtk-4.0"
+rm -rf "$OUT/usr/include/libadwaita-1" "$OUT/usr/include/gtk-4.0"
 for inc in glib-2.0 gio-unix-2.0 libmount blkid sysprof-6 fribidi gdk-pixbuf-2.0 glycin-2 pango-1.0 harfbuzz cairo freetype2 libpng16 pixman-1 graphene-1.0 appstream; do
-    rm -f "$OUT/usr/include/$inc"
+    rm -rf "$OUT/usr/include/$inc"
 done
-rm -f "$OUT/usr/lib/x86_64-linux-gnu/glib-2.0/include"
-rm -f "$OUT/usr/lib/x86_64-linux-gnu/graphene-1.0/include"
+rm -rf "$OUT/usr/lib/x86_64-linux-gnu/glib-2.0/include"
+rm -rf "$OUT/usr/lib/x86_64-linux-gnu/graphene-1.0/include"
 for pc in glib-2.0 gobject-2.0 gio-2.0 gtk4 libadwaita-1; do
     rm -f "$OUT/usr/lib/x86_64-linux-gnu/pkgconfig/$pc.pc"
 done
@@ -440,39 +546,11 @@ install -Dm0755 "$(command -v bash)" "$OUT/usr/bin/bash"
 ln -sfn /usr/bin/bash "$OUT/usr/bin/sh"
 ln -sfn /usr/bin/fish "$OUT/usr/bin/luna-shell"
 
-for tool in dbus-run-session dbus-daemon dbus-send; do
+for tool in dbus-daemon dbus-send; do
     if [ -x "/usr/bin/$tool" ]; then
         install -Dm0755 "/usr/bin/$tool" "$OUT/usr/bin/$tool"
     fi
 done
-if [ -x /usr/bin/setpriv ]; then
-    install -Dm0755 /usr/bin/setpriv "$OUT/usr/bin/setpriv"
-else
-    echo "setpriv is required for non-root graphical sessions" >&2
-    exit 1
-fi
-
-cat > "$OUT/usr/bin/niri-session" <<'LUNA_NIRI_SESSION_EOF'
-#!/bin/sh
-set -eu
-export XDG_SESSION_TYPE=wayland
-export XDG_CURRENT_DESKTOP=niri
-export XDG_SESSION_DESKTOP=niri
-export MOZ_ENABLE_WAYLAND=1
-export QT_QPA_PLATFORM=wayland
-export SDL_VIDEODRIVER=wayland
-export XDG_DATA_DIRS="/usr/local/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
-mkdir -p "$HOME/.config/niri"
-if [ ! -e "$HOME/.config/niri/config.kdl" ]; then
-    cp /etc/luna/niri-config.kdl "$HOME/.config/niri/config.kdl"
-fi
-if command -v dbus-run-session >/dev/null 2>&1; then
-    exec dbus-run-session -- /usr/bin/niri --session
-fi
-exec /usr/bin/niri --session
-LUNA_NIRI_SESSION_EOF
-chmod 0755 "$OUT/usr/bin/niri-session"
-
 
 cat > "$OUT/etc/luna/niri-config.kdl" <<'EOF'
 input {
@@ -504,11 +582,13 @@ hotkey-overlay {
 prefer-no-csd
 EOF
 
-# Project Luna visual identity. Use one vector icon everywhere so the desktop,
-# file manager and launcher remain consistent without raster duplication.
-install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Luna.svg"
-install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Files.svg"
-install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/luna.svg"
+# Project Luna visual identity is optional until the branding asset is present.
+# The runtime desktop must not fail merely because the source tree has no icon.
+if [ -f "$REPO_ROOT/assets/icons/luna.svg" ]; then
+    install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Luna.svg"
+    install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/dev.projectluna.Files.svg"
+    install -Dm0644 "$REPO_ROOT/assets/icons/luna.svg" "$OUT/usr/share/icons/hicolor/scalable/apps/luna.svg"
+fi
 
 cat > "$OUT/usr/share/applications/ghostty.desktop" <<'EOF'
 [Desktop Entry]
@@ -555,26 +635,6 @@ Type=Application
 DesktopNames=niri;
 EOF
 
-cat > "$OUT/var/lib/noctalia-greeter/greeter.toml" <<'EOF'
-[session]
-default = "Project Luna"
-
-[auth]
-allow_empty_password = false
-request_timeout = 60
-EOF
-
-cat > "$OUT/etc/pam.d/greetd" <<'EOF'
-auth required pam_unix.so
-account required pam_unix.so
-session required pam_unix.so
-EOF
-
-cat > "$OUT/etc/pam.d/greetd-greeter" <<'EOF'
-account required pam_permit.so
-session required pam_permit.so
-EOF
-
 cat > "$OUT/etc/profile" <<'EOF'
 export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 export XDG_CURRENT_DESKTOP=niri
@@ -606,8 +666,6 @@ file_manager_icon = "dev.projectluna.Files"
 [versions]
 niri = "$NIRI_TAG"
 noctalia = "$NOCTALIA_TAG"
-noctalia_greeter = "$NOCTALIA_GREETER_REF"
-greetd = "$GREETD_REF"
 ghostty = "$GHOSTTY_TAG"
 fish = "$FISH_VERSION"
 wayland = "$WAYLAND_VERSION"
@@ -649,6 +707,76 @@ bundle_elf_deps() {
 }
 
 bundle_elf_deps "$OUT"
+
+# GLVND selects Mesa EGL/DRI components through dynamic discovery, so the
+# normal executable dependency walk cannot see them. Stage the Mesa loader,
+# GBM backend and the QEMU virtio DRI driver explicitly, then resolve their
+# ELF dependencies into the same runtime closure.
+mkdir -p "$OUT/usr/share/glvnd/egl_vendor.d" "$OUT/usr/lib/x86_64-linux-gnu/dri" "$OUT/usr/lib/x86_64-linux-gnu/gbm"
+if [ -f /usr/share/glvnd/egl_vendor.d/50_mesa.json ]; then
+    cp -a /usr/share/glvnd/egl_vendor.d/50_mesa.json "$OUT/usr/share/glvnd/egl_vendor.d/"
+fi
+for lib in /usr/lib/x86_64-linux-gnu/libEGL_mesa.so* /usr/lib/x86_64-linux-gnu/libGLX_mesa.so* /usr/lib/x86_64-linux-gnu/libgallium-*.so*; do
+    [ -e "$lib" ] || continue
+    cp -a "$lib" "$OUT/usr/lib/x86_64-linux-gnu/"
+done
+for lib in /usr/lib/x86_64-linux-gnu/dri/virtio_gpu_dri.so /usr/lib/x86_64-linux-gnu/dri/swrast_dri.so /usr/lib/x86_64-linux-gnu/dri/kms_swrast_dri.so /usr/lib/x86_64-linux-gnu/gbm/dri_gbm.so; do
+    [ -e "$lib" ] || continue
+    mkdir -p "$OUT/$(dirname "${lib#/}")"
+    cp -a "$lib" "$OUT/${lib#/}"
+done
+# Debian/Ubuntu ship the Mesa DRI frontends above as symlinks to the common
+# Gallium loader, which must be staged explicitly because it is not an ELF
+# DT_NEEDED dependency of the symlink itself.
+for lib in /usr/lib/x86_64-linux-gnu/dri/libdril_dri.so*; do
+    [ -e "$lib" ] || continue
+    cp -a "$lib" "$OUT/usr/lib/x86_64-linux-gnu/dri/"
+done
+
+bundle_elf_runtime_deps() {
+    local root="$1"
+    local pass=0
+    while [ "$pass" -lt 8 ]; do
+        pass=$((pass + 1))
+        local changed=0
+        while IFS= read -r -d '' elf; do
+            file "$elf" | grep -q 'ELF' || continue
+            while IFS= read -r dep; do
+                case "$dep" in
+                    /lib/*|/lib64/*|/usr/lib/*)
+                        [ -e "$dep" ] || continue
+                        local rel="${dep#/}"
+                        local dst="$root/$rel"
+                        if [ ! -e "$dst" ]; then
+                            mkdir -p "$(dirname "$dst")"
+                            cp -a "$dep" "$dst"
+                            changed=1
+                        fi
+                        ;;
+                esac
+            done < <(ldd "$elf" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib64|lib|usr\/lib)/ {print $1}')
+        done < <(find "$root/usr/lib" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dri.so' \) -print0)
+        if [ "$changed" -eq 0 ]; then
+            break
+        fi
+    done
+}
+
+bundle_elf_runtime_deps "$OUT"
+
+# Mesa's GLVND vendor library has optional X11/DRM monitoring dependencies
+# that are not always reported by the native link closure in this staging
+# setup. They must still be present for libEGL_mesa to load inside Luna.
+for lib in \
+    libxcb-dri3.so.0 libxcb-present.so.0 libxcb-randr.so.0 libxcb-xfixes.so.0 \
+    libxcb-sync.so.1 libxshmfence.so.1 libdrm_amdgpu.so.1 libdrm_intel.so.1 \
+    libsensors.so.5 libedit.so.2 libpciaccess.so.0 libbsd.so.0 libmd.so.0; do
+    for src in /usr/lib/x86_64-linux-gnu/${lib}*; do
+        [ -e "$src" ] || continue
+        cp -a "$src" "$OUT/usr/lib/x86_64-linux-gnu/"
+    done
+done
+bundle_elf_runtime_deps "$OUT"
 
 ELF_LOADER="$(readlink -f /lib64/ld-linux-x86-64.so.2)"
 [ -n "$ELF_LOADER" ] && [ -f "$ELF_LOADER" ] || { echo "ELF loader not found on build host" >&2; exit 1; }

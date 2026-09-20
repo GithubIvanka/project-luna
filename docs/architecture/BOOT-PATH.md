@@ -30,8 +30,8 @@ LUNA-SYS/images/*.toml
 LUNA-SYS/cores/*.init
 LUNA-SYS/cores/*.toml
 LUNA-SYS/kernels/<kernel-id>/...
-LUNA-SYS/recovery/recovery-X.Y.Z.squashfs
-LUNA-SYS/recovery/recovery-X.Y.Z.toml
+LUNA-SYS/recovery/recovery.squashfs
+LUNA-SYS/recovery/recovery.toml
 ```
 
 ## 4. Совместимость
@@ -108,21 +108,26 @@ PID 1  luna-init
 
 ## 11. Пользовательская сессия
 
+UserSession является одной runtime boundary для всей интерактивной графической среды:
+
 ```text
 luna-system-runtime
   ↓
-графический login
-  ↓
-authentication
-  ↓
 UserSession
-  ↓
-Wayland
-  ↓
-niri + Noctalia Shell
+  ├── authentication
+  ├── credentials
+  ├── seat
+  ├── input
+  ├── DRM/KMS
+  ├── compositor / Wayland
+  └── session UI
+           ↓
+      active user session
 ```
 
-Ghostty + fish запускаются уже внутри пользовательской среды.
+В Alpha внешние greetd/seatd/libinput/wlroots/Niri/Noctalia допускаются только как transitional providers. Они не являются обязательной последовательной архитектурной цепочкой.
+
+Ghostty + fish запускаются уже внутри активной пользовательской среды.
 
 ## 12. Запуск приложения
 
@@ -180,7 +185,7 @@ previous compatible target
 
 ## 15. Recovery
 
-Recovery использует обычный выбранный System Image и совместимые `luna-init` и kernel. Recovery DATA Image материализуется в RAM как `VirtualData`.
+Recovery использует обычный выбранный System Image и совместимые `luna-init` и kernel. Recovery DATA Image материализуется в RAM как `VirtualData`. Его GUI provider — прямой запуск `/usr/bin/niri --session`, такой же как в Normal/Factory. В Recovery виртуальный пользователь `recovery` получает активный UserSession напрямую; интерактивный `greetd`/Noctalia login provider не требуется.
 
 Физическая `LUNA-DATA` при этом не является backing store работающего Recovery; она становится объектом диагностики и ремонта.
 

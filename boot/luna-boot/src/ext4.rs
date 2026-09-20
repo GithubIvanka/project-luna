@@ -326,12 +326,7 @@ impl<D: BlockDevice> Ext4<D> {
         Ok(())
     }
 
-    fn read_extent_range(
-        &mut self,
-        node: &[u8],
-        offset: u64,
-        out: &mut [u8],
-    ) -> BootResult<()> {
+    fn read_extent_range(&mut self, node: &[u8], offset: u64, out: &mut [u8]) -> BootResult<()> {
         if u16_at(node, 0) != 0xf30a {
             return Err(BootError::InvalidFilesystem);
         }
@@ -349,7 +344,12 @@ impl<D: BlockDevice> Ext4<D> {
                 let block_index = file_offset / bs;
                 let in_block = (file_offset % bs) as usize;
                 let chunk = (out.len() - written).min(self.geometry.block_size as usize - in_block);
-                self.read_extent_block_range(node, block_index, in_block, &mut out[written..written + chunk])?;
+                self.read_extent_block_range(
+                    node,
+                    block_index,
+                    in_block,
+                    &mut out[written..written + chunk],
+                )?;
                 written += chunk;
             }
             return Ok(());
@@ -383,15 +383,17 @@ impl<D: BlockDevice> Ext4<D> {
             let extent_end = match found {
                 Some((p, logical, extent_end, raw_len)) => {
                     if raw_len & 0x8000 != 0 {
-                        let bytes = ((extent_end * bs).saturating_sub(cursor))
-                            .min(end - cursor) as usize;
+                        let bytes =
+                            ((extent_end * bs).saturating_sub(cursor)).min(end - cursor) as usize;
                         out[write_offset..write_offset + bytes].fill(0);
                         cursor += bytes as u64;
                         continue;
                     }
-                    let physical = (u32_at(node, p + 8) as u64)
-                        | ((u16_at(node, p + 6) as u64) << 32);
-                    let delta = block.checked_sub(logical).ok_or(BootError::FilesystemError)?;
+                    let physical =
+                        (u32_at(node, p + 8) as u64) | ((u16_at(node, p + 6) as u64) << 32);
+                    let delta = block
+                        .checked_sub(logical)
+                        .ok_or(BootError::FilesystemError)?;
                     let physical = physical
                         .checked_add(delta)
                         .ok_or(BootError::FilesystemError)?;

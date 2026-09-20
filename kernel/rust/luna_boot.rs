@@ -268,6 +268,7 @@ const RECORD_KERNEL_IDENTITY: u16 = 4;
 const RECORD_LUNA_INIT_IMAGE: u16 = 5;
 const RECORD_BOOT_MODE: u16 = 6;
 const RECORD_BOOT_STATE: u16 = 7;
+const RECORD_RECOVERY_DATA_IMAGE: u16 = 8;
 
 static mut HANDOFF_PHYS: u64 = 0;
 static mut HANDOFF_SIZE: u32 = 0;
@@ -347,10 +348,7 @@ unsafe fn update_progress(stage: u8, failure_code: u32) {
     if PROGRESS_PHYS == 0 {
         return;
     }
-    let base = memremap_runtime(
-        PROGRESS_PHYS,
-        SETUP_DATA_NODE_SIZE + 32,
-    ) as *mut u8;
+    let base = memremap_runtime(PROGRESS_PHYS, SETUP_DATA_NODE_SIZE + 32) as *mut u8;
     if base.is_null() {
         return;
     }
@@ -383,7 +381,11 @@ unsafe fn verify_init_digest(phys: u64, size: u64, expected: &[u8; 32]) -> bool 
     let len = size as usize;
     let base = memremap_runtime(phys, len) as *const u8;
     if base.is_null() {
-        kernel::pr_err!("Luna: init digest early_memremap failed at {:#x}+{}\n", phys, len);
+        kernel::pr_err!(
+            "Luna: init digest early_memremap failed at {:#x}+{}\n",
+            phys,
+            len
+        );
         return false;
     }
     let input = core::slice::from_raw_parts(base, len);
@@ -401,7 +403,11 @@ unsafe fn verify_init_digest(phys: u64, size: u64, expected: &[u8; 32]) -> bool 
 
 #[unsafe(link_section = ".init.text")]
 unsafe fn parse_handoff(phys: u64, node_len: u32) {
-    kernel::pr_info!("Luna: parse_handoff entered phys={:#x} len={}\n", phys, node_len);
+    kernel::pr_info!(
+        "Luna: parse_handoff entered phys={:#x} len={}\n",
+        phys,
+        node_len
+    );
     clear_state();
 
     let len = node_len as usize;
@@ -416,7 +422,11 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
 
     let base = bindings::early_memremap(phys as bindings::phys_addr_t, len) as *mut u8;
     if base.is_null() {
-        kernel::pr_err!("Luna: handoff early_memremap failed at {:#x}+{}\n", phys, len);
+        kernel::pr_err!(
+            "Luna: handoff early_memremap failed at {:#x}+{}\n",
+            phys,
+            len
+        );
         return;
     }
 
@@ -461,6 +471,8 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
     let mut kernel_seen = false;
     let mut mode_seen = false;
     let mut state_seen = false;
+    let mut recovery_seen = false;
+    let mut boot_mode = 0u8;
     let mut init_digest = [0u8; 32];
 
     while offset < records_end {
@@ -470,7 +482,12 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
         }
 
         let record_type = read_u16(base, offset);
-        kernel::pr_info!("Luna: handoff record off={} type={} size={}\n", offset, record_type, read_u32(base, offset + 4));
+        kernel::pr_info!(
+            "Luna: handoff record off={} type={} size={}\n",
+            offset,
+            record_type,
+            read_u32(base, offset + 4)
+        );
         let record_size = read_u32(base, offset + 4) as usize;
         let payload = match offset.checked_add(RECORD_HEADER_SIZE) {
             Some(value) => value,
@@ -494,7 +511,39 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
                     reject(base, len);
                     return;
                 }
+                boot_mode = unsafe { *base.add(payload) };
+                if boot_mode > 4 {
+                    reject(base, len);
+                    return;
+                }
                 mode_seen = true;
+            }
+            RECORD_RECOVERY_DATA_IMAGE => {
+                if record_size < 40 {
+                    reject(base, len);
+                    return;
+                }
+                let version_len = read_u16(base, payload) as usize;
+                let filename_len = read_u16(base, payload + 2) as usize;
+                let strings = match payload.checked_add(40) {
+                    Some(value) => value,
+                    None => {
+                        reject(base, len);
+                        return;
+                    }
+                };
+                let strings_len = match version_len.checked_add(filename_len) {
+                    Some(value) => value,
+                    None => {
+                        reject(base, len);
+                        return;
+                    }
+                };
+                if strings_len > record_size - 40 {
+                    reject(base, len);
+                    return;
+                }
+                recovery_seen = true;
             }
             RECORD_BOOT_STATE => {
                 if record_size != 24 {
@@ -556,17 +605,19 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
         && kernel_seen
         && init_seen
         && mode_seen
-        && state_seen)
+        && state_seen
+        && (boot_mode != 2 || recovery_seen))
     {
         kernel::pr_err!(
-            "Luna: handoff records rejected system={} data={} image={} kernel={} init={} mode={} state={}\n",
+            "Luna: handoff records rejected system={} data={} image={} kernel={} init={} mode={} state={} recovery={}\n",
             system_seen as u8,
             data_seen as u8,
             image_seen as u8,
             kernel_seen as u8,
             init_seen as u8,
             mode_seen as u8,
-            state_seen as u8
+            state_seen as u8,
+            recovery_seen as u8
         );
         reject(base, len);
         return;
@@ -650,7 +701,8 @@ pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
                 clear_state();
                 return;
             };
-            let payload = bindings::early_memremap(payload_phys as bindings::phys_addr_t, 32) as *const u8;
+            let payload =
+                bindings::early_memremap(payload_phys as bindings::phys_addr_t, 32) as *const u8;
             if !payload.is_null() {
                 let mut magic = [0u8; 8];
                 ptr::copy_nonoverlapping(payload, magic.as_mut_ptr(), magic.len());

@@ -5,6 +5,7 @@ out
 target/
 docs/archive/
 graphify-out/
+automation/luna-agent/providers.env
 
 .idea/
 .vscode/

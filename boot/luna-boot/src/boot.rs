@@ -138,9 +138,9 @@ pub fn boot_flow() -> BootResult<()> {
             .filter(|part| *part != "quiet" && !part.starts_with("loglevel="))
             .collect::<Vec<_>>()
             .join(" ");
-        selected
-            .kernel_cmdline
-            .push_str(" console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug");
+        selected.kernel_cmdline.push_str(
+            " console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug",
+        );
     }
     debug_stage("Luna: flow 12 candidates start\r\n");
 
@@ -202,7 +202,7 @@ pub fn boot_flow() -> BootResult<()> {
             Err(error) => return Err(error),
         }
     }
-    let (target, mut prepared) = match (target, prepared) {
+    let (mut target, mut prepared) = match (target, prepared) {
         (Some(target), Some(prepared)) => (target, prepared),
         _ => return Err(BootError::TargetNotFound),
     };
@@ -222,6 +222,11 @@ pub fn boot_flow() -> BootResult<()> {
     debug_stage("Luna: flow 16 manifest read\r\n");
     let image_digest = filesystem.hash_file(&target.system_image_path)?;
     debug_stage("Luna: flow 17 image hash\r\n");
+    if let Some(recovery_path) = target.recovery_data_path.as_deref() {
+        let recovery_digest = filesystem.hash_file(recovery_path)?;
+        target.recovery_data_digest = Some(recovery_digest);
+        debug_stage("Luna: flow 17a recovery DATA hash\r\n");
+    }
     let kernel_identity = PreparedIdentity {
         kernel_digest: prepared.kernel_digest,
     };
@@ -308,6 +313,7 @@ fn same_target(left: &crate::target::BootTarget, right: &crate::target::BootTarg
     left.system_image_path == right.system_image_path
         && left.init_path == right.init_path
         && left.kernel_path == right.kernel_path
+        && left.recovery_data_path == right.recovery_data_path
 }
 
 fn enter_kernel_after_exit_boot_services(

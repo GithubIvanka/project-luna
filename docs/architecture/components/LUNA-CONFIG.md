@@ -14,7 +14,7 @@
 
 ## Хранение
 
-Конфигурация системы относится к `LUNA-DATA/system/config`. Конфигурация пользователя — к `LUNA-DATA/users/<user>/config`.
+Изменяемая общесистемная конфигурация относится к `LUNA-DATA/system/config`. Для классов, имеющих immutable default, этот default хранится в соответствующем `config/` внутри System Image. Для desktop/session defaults это `System Image/config/luna/desktop.toml`; provider-specific mutable settings находятся в `LUNA-DATA/system/config/luna`. Runtime получает уже материализованный логический вид через Root Mapping. Конфигурация пользователя — к `LUNA-DATA/users/<user>/config`.
 
 Точная семантика precedence зависит от класса ресурса и определяется соответствующим контрактом.
 

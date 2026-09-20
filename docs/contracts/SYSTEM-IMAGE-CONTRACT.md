@@ -2,7 +2,7 @@
 
 ## Определение
 
-System Image — неизменяемая версионированная системная userspace-файловая система одного релиза Luna. Это источник, из которого `luna-init` материализует работающую системную среду Luna в RAM-backed logical `/`.
+System Image — **не вся ОС Luna**, а неизменяемая версионированная системная userspace-файловая система одного релиза. Она содержит обязательный immutable minimum — программы, библиотеки, драйверы, firmware, configuration defaults и неизменяемые системные resources — достаточный для полноценного запуска Luna даже при отсутствии физической `LUNA-DATA`. Это источник, из которого `luna-init` материализует работающую системную среду Luna в RAM-backed logical `/`. `LUNA-DATA` является отдельной изменяемой и расширяемой частью ОС: она предоставляет persistent state, установленные Bundles, дополнительные системные компоненты и управляемые изменения.
 
 System Image — **непосредственно файловая система SquashFS**. Это сам файл `.squashfs`, а не Bundle и не внешний контейнер вокруг другой файловой системы.
 
@@ -15,7 +15,7 @@ LUNA-SYS/images/luna-X.Y.Z.toml
 
 ## Внутренняя структура
 
-Неизменяемый System Image содержит минимальную системную базу, необходимую для полного запуска Luna OS. Его внутренняя структура отражает основные классы системных ресурсов `LUNA-DATA/system`, за исключением изменяемого состояния DATA.
+Неизменяемый System Image — **не вся ОС Luna**, а минимальная неизменяемая база, необходимая для полного запуска Luna даже при отсутствии физической `LUNA-DATA`. Его внутренняя структура отражает основные классы системных ресурсов `LUNA-DATA/system`, за исключением изменяемого состояния DATA.
 
 ```text
 /
@@ -29,6 +29,7 @@ LUNA-SYS/images/luna-X.Y.Z.toml
     ├── icons/
     ├── themes/
     ├── cursors/
+    ├── sounds/
     ├── locales/
     └── translations/
 ```
@@ -60,6 +61,10 @@ System Image
 ```
 
 Контракт System Image не определяет прямую совместимость image → kernel.
+
+### Пути конфигурации
+
+Пути внутри System Image описываются по его собственной структуре. Поэтому дефолтный native graphical session находится по `config/luna/native graphical session`; каталога `/etc` в System Image нет. Изменяемое переопределение относится к `LUNA-DATA/system/config/luna` configuration. `root-mapping` и materialization затем строят из этих источников RAM-backed logical root. runtime-пути вроде `/etc/...` не следует использовать для описания того, где конфигурация физически хранится в System Image.
 
 ## Манифест
 
@@ -94,6 +99,14 @@ Recovery DATA Image
 │   ├── firmware/
 │   ├── libs/
 │   ├── config/
+│   ├── resources/
+│   │   ├── fonts/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   ├── cursors/
+│   │   ├── sounds/
+│   │   ├── locales/
+│   │   └── translations/
 │   ├── state/
 │   └── volumes/
 ├── users/

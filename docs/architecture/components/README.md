@@ -17,7 +17,17 @@
 
 Документация компонентов описывает архитектуру, принадлежащую Luna. Внешнее программное обеспечение, используемое для реализации конкретной границы, описывается как внешний provider/dependency и не считается компонентом Luna.
 
-Рекомендуемая группировка репозитория: `components/system/` — для разработанных Luna системных компонентов, участвующих в поведении или состоянии ОС; `components/external/` — для явно интегрируемых внешних/vendor-компонентов, которым необходимо находиться в репозитории.
+Каноническая группировка репозитория:
+
+```text
+components/core/               → основная система Luna
+components/system/             → системные приложения
+components/apps/               → обычные пользовательские приложения
+components/external/providers/ → Luna-facing adapters внешних providers
+components/external/libraries/ → дополнительные внешние/support libraries
+```
+
+Каталог определяет архитектурную роль. Package name `luna-*` определяет конкретный компонент. Наличие отдельного crate не означает отдельный процесс или daemon.
 
 Например, `luna-audio` определяет границу аудиоподсистемы Luna, тогда как PipeWire/WirePlumber остаётся внешним provider. Тот же принцип применяется к `luna-bluetooth`/BlueZ, `luna-network`/NetworkManager и `luna-files`/Yazi.
 
@@ -35,7 +45,6 @@
 - [LUNA-ROOT-MAPPING](LUNA-ROOT-MAPPING.md)
 - [LUNA-SECURITY](LUNA-SECURITY.md)
 - [LUNA-NAMESPACE](LUNA-NAMESPACE.md)
-- [LUNA-LOGIN](LUNA-LOGIN.md)
 
 ## Системные службы и основы
 

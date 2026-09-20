@@ -1,40 +1,73 @@
-# Project Luna — status
+# Project Luna — текущий статус
 
-**Revision:** 2026-09-15
+**Revision:** 2026-09-19
 
-`docs/ARCHITECTURE.md` is the architectural authority. This file records implementation status only.
+Статус отражает фактическое состояние локальной ветки `alpha-development` и подтверждённые проверки. Архитектурный источник истины: `docs/ARCHITECTURE.md`.
 
-## Implemented foundation
+## Текущая стадия
 
-- Rust workspace and shared domain types.
-- LBP1 Bundle codec with BLAKE3, TAR, zstd, TOML and Ed25519 support.
-- Logical mapping model in `luna-root-mapping`.
-- Linux namespace and Landlock primitives in `luna-namespace`.
-- Authorization model in `luna-security`.
-- Durable `redb` state backend in `luna-state`.
-- System target/state model in `luna-system-manager`.
-- Update/checkpoint orchestration in `luna-update-manager`.
-- Process supervision and session APIs in `luna-system-runtime`.
-- Application plan and instance lifecycle in `luna-app-runtime`.
-- UEFI discovery, target selection, kernel loading, boot menu, external boot and handoff code.
-- Direct-memory `luna-init` kernel plumbing and FD 3 handoff support.
-- x86_64 PC image builder using `LUNA-SYS` and `LUNA-DATA` labels.
+Project Luna находится на стадии **Alpha integration / bring-up**. Архитектурная модель и основные Rust-компоненты уже сформированы; текущая работа сосредоточена на сборке воспроизводимого bootable образа и замыкании end-to-end пути.
 
-## Partial implementation
+## Подтверждено
 
-`luna-init` currently validates FD 3 and keeps the initial process alive, but the full architecture-defined logical-root construction and child startup of `luna-system-runtime` are not implemented yet.
+- Rust workspace из 23 пакетов проходит `cargo check --workspace`.
+- Workspace tests проходят; privileged namespace/Landlock checks остаются `ignored`, когда окружение не предоставляет необходимые права.
+- `cargo clippy --workspace --all-targets -- -D warnings` проходит.
+- `cargo fmt --all -- --check` и `git diff --check` проходят.
+- `luna-boot.efi` собирается для `x86_64-unknown-uefi`.
+- Компонентный OVMF smoke на свежем kernel artifact подтверждает `UEFI -> luna-boot -> Linux kernel -> LunaBootHandoffV1 -> luna-init -> luna-system-runtime`.
+- Kernel принимает handoff и memory-resident `luna-init`; direct-PID1 путь подтверждён на свежем собранном artifact. Это ещё не E2E-проверка полного `luna-pc.img`.
+- PC image builder создаёт GPT с `EFI`, `LUNA-SYS`, `LUNA-DATA` и `SWAP`; System Image является непосредственным SquashFS с соседним TOML manifest.
 
-The bootloader has discovery/selection/handoff machinery, but complete end-to-end boot success, persistent fallback behavior and production hardening still require integration testing.
+## Текущие блокеры
 
-Application runtime has planning, authorization and namespace primitives, but production-safe child creation and complete install-to-launch integration remain incomplete.
+- Свежий kernel artifact из текущего `alpha-development` HEAD уже собран и прошёл компонентный OVMF smoke; следующий обязательный шаг — загрузить через OVMF именно собранный `luna-pc.img`.
+- Полный graphical path и настоящий E2E для собранного `luna-pc.img` ещё не закрыты. Предыдущий компонентный OVMF fixture доходил до `luna-system-runtime`, после чего получал `greetd backend is missing`, потому что в fixture не входили реальные desktop-пакеты.
+- Полный PC image теперь является обязательной основой для настоящего end-to-end OVMF smoke path; старые `dist` artifacts больше не используются как доказательство current HEAD.
+- Production hardening `luna-app-runtime`, полноценное enforcement security, update/rollback, recovery и hardware validation остаются следующими этапами.
 
-Device, network, audio, Bluetooth, files and graphical login components provide domain/UI baselines; production backends and desktop integration remain in development.
+## Исправлено в текущей уборке
 
-## Explicit implementation discrepancies
+- Удалён неиспользуемый `luna-init/src/bootstrap.rs`; bootstrap semantics теперь находятся в одном implementation path.
+- Удалён пустой `components/system/luna-login` и соответствующая битая документационная ссылка.
+- `dist/` очищен от старых kernel worktrees, старых PC images, QEMU logs и повторных build trees; сохранён только актуальный cache/source слой, необходимый для пересборки.
+- Дальнейшая проверка строится на fresh artifacts, а не на старых вариантах из `dist`.
 
-1. The current kernel/init implementation establishes `luna-init` as the initial userspace task; the remaining gap is completing the architecture-defined bootstrap and child startup of `luna-system-runtime` while keeping `luna-init` as PID 1.
-2. Existing builder and runtime paths still contain implementation-era assumptions that must be reconciled with the canonical `LUNA-SYS`/`LUNA-DATA` layout and direct-init model.
-3. Semantic boot-success confirmation must be connected to clearing `LunaBootAttempt`.
-4. `luna-system-manager` and the bootloader state parser still contain legacy `init` fields for current/factory targets; the current contract intentionally excludes those fields and resolves init through manifests at boot.
+## Следующий вертикальный slice
 
-These items do not authorize architecture changes.
+Физическая структура компонентов теперь разделена по архитектурной роли:
+
+```text
+components/core/
+components/system/
+components/apps/
+components/external/providers/
+components/external/libraries/
+```
+
+Для boot/GUI следующий vertical slice:
+
+```text
+current HEAD
+  -> kernel
+  -> luna-boot
+  -> luna-init
+  -> System Image
+  -> LUNA-DATA
+  -> luna-pc.img
+  -> QEMU/OVMF
+  -> luna-system-runtime
+  -> UserSession
+      -> native InputBackend
+      -> native SeatController
+      -> native DRM/KMS backend
+      -> minimal graphical SessionUI/compositor
+  -> optional DATA desktop provider (Niri + Noctalia)
+```
+
+Niri/Noctalia остаются полноценными DATA providers; их не требуется урезать до размеров boot-critical GUI.
+## Agent infrastructure
+
+Luna Agent использует sequential task queue, Git-tree guard и allow-listed verification. Локальный Graphify graph используется как навигация и impact-analysis; source code и current contracts остаются нормативными.
+
+Текущая задача очереди — `DESKTOP-000`; autonomous runner должен возобновляться только после фиксации текущих repository changes в Git.

@@ -23,6 +23,9 @@
 - `SECURITY-MODEL.md` — trust, permissions и authorization.
 - `UPDATE-LIFECYCLE.md` — lifecycle обновления и rollback.
 - `COMPONENT-MAP.md` — карта компонентов и границы ответственности.
+- `MINIMAL-BOOT-BASELINE.md` — минимальная модель boot/session и принцип OneFileLinux baseline.
+
+Для правил сборки и работы с локальными artifacts используйте `docs/development/BUILD-ARTIFACTS.md`.
 
 ## Документы компонентов
 
@@ -44,8 +47,11 @@
 Группировка репозитория:
 
 ```text
-components/system/   → компоненты Luna
-components/external/ → внешние/vendor материалы, если их нужно хранить в репозитории
+components/core/                  → основная система Luna
+components/system/                → системные приложения и инструменты
+components/apps/                  → обычные пользовательские приложения
+components/external/providers/    → Luna-facing adapters внешних providers
+components/external/libraries/    → дополнительные внешние/support libraries
 ```
 
 Например, `luna-audio` задаёт Luna-facing audio boundary, а PipeWire/WirePlumber остаётся внешним provider. Аналогично `luna-bluetooth`/BlueZ, `luna-network`/NetworkManager и `luna-files`/Yazi.

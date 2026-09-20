@@ -10,11 +10,19 @@
 - `LoginState` и переходами authentication flow;
 - lifecycle сессии;
 - связь аутентифицированного пользователя с пользовательским execution context;
-- внутреннюю реализацию login flow через внешний greetd/Noctalia Greeter.
+- session authentication и credential boundary;
+- seat ownership/access;
+- input device access и нормализацию Luna input events;
+- DRM/KMS access и graphics session lifecycle;
+- compositor/session UI lifecycle.
+
+`luna-user-session` является единой Group C boundary. Эти функции являются внутренними библиотеками/modules одного crate/runtime boundary, а не обязательными отдельными daemon processes.
 
 ## Не владеет
 
-`luna-user-session` не является daemon, process supervisor, generic runtime layer или security authority.
+`luna-user-session` не является generic system supervisor и не владеет общим process supervision.
+
+Внешние provider/reference backends допускаются только там, где Luna пока не владеет полным контрактом: libseat/libinput и desktop provider stack могут использоваться как compatibility layers. Отдельные `seatd`, `greetd` и Noctalia Greeter больше не являются runtime-компонентами Luna.
 
 ## Состояния
 
@@ -26,7 +34,7 @@ RESTRICTED
 TERMINATED
 ```
 
-До перехода в `ACTIVE` UserSession переводит `LoginState` из `VISIBLE` в `AUTHENTICATING` и выполняет login flow. После успешной аутентификации `LoginState` становится `SUCCEEDED`, а `SessionState` — `ACTIVE`. Ошибка аутентификации оставляет сессию неактивной и фиксируется в `LoginState::FAILED`.
+До перехода в `ACTIVE` UserSession переводит `LoginState` из `VISIBLE` в `AUTHENTICATING` и выполняет native authentication boundary. В текущем Alpha выбранная boot/session identity валидируется внутри `luna-user-session`; отдельный greeter/login daemon не запускается. После успешной аутентификации `LoginState` становится `SUCCEEDED`, а `SessionState` — `ACTIVE`. Поле для интерактивного ввода credentials остаётся задачей будущего native SessionUI.
 
 `RESTRICTED` означает, что сессия сохраняется как управляемый контекст, но доступ и выполнение приложений ограничиваются согласно policy. Конкретная session policy может вместо этого разрешить продолжение или потребовать завершение приложений.
 
@@ -66,6 +74,23 @@ TERMINATED
 
 Системные службы и операции обновления могут продолжать работу при смене пользователя, если это безопасно.
 
+## Внутренняя структура
+
+Целевая внутренняя структура:
+
+```text
+UserSession
+├── auth
+├── credentials
+├── seat
+├── input
+├── graphics
+├── compositor
+└── session_ui
+```
+
+Каждый модуль имеет узкий контракт и может тестироваться отдельно, но для boot path они образуют одну UserSession runtime boundary.
+
 ## Статус
 
-State model, session identity и графический login flow объединены в одном компоненте. Handoff entry point поставляется тем же crate и не образует отдельного архитектурного компонента. greetd и Noctalia Greeter остаются внешними механизмами аутентификации и отображения login UI.
+State model, session identity и базовый session lifecycle уже объединены в одном компоненте. Login flow, seat, input, graphics и compositor постепенно переносятся из transitional external providers в эти внутренние модули. Пока provider backend ещё используется, это явно помечается как переходный слой.

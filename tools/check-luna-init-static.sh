@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-artifact="${1:-components/system/luna-init/target/x86_64-unknown-linux-musl/release/luna-init}"
+artifact="${1:-components/core/luna-init/target/x86_64-unknown-linux-musl/release/luna-init}"
 
 if [[ ! -f "$artifact" ]]; then
     printf 'luna-init artifact not found: %s\n' "$artifact" >&2
-    printf 'build it first with: cargo build --manifest-path components/system/luna-init/Cargo.toml --release\n' >&2
+    printf 'build it first with: cargo build --manifest-path components/core/luna-init/Cargo.toml --release\n' >&2
     exit 1
 fi
 

@@ -18,14 +18,14 @@ fi
 
 rm -rf "$SYSROOT"
 mkdir -p "$SYSROOT"/{apps,drivers,firmware,libs,config,resources}
-mkdir -p "$SYSROOT/resources"/{fonts,icons,themes,cursors,locales,translations}
+mkdir -p "$SYSROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 mkdir -p "$SYSROOT/apps/luna-system-runtime" "$SYSROOT/apps/luna-user-session" "$SYSROOT/config/luna"
-mkdir -p "$SYSROOT/libs/loader"
+mkdir -p "$SYSROOT/apps/niri"
 
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
-cargo build --release --manifest-path "$REPO_ROOT/components/system/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
+cargo build --release --manifest-path "$REPO_ROOT/components/core/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
-LUNA_INIT="$REPO_ROOT/components/system/luna-init/target/$RUNTIME_TARGET/release/luna-init"
+LUNA_INIT="$REPO_ROOT/components/core/luna-init/target/$RUNTIME_TARGET/release/luna-init"
 if [ ! -x "$LUNA_INIT" ]; then
     LUNA_INIT="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-init"
 fi
@@ -53,21 +53,34 @@ SESSION="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-user-session"
 [ -x "$SESSION" ] || { echo "UserSession handoff binary was not produced: $SESSION" >&2; exit 1; }
 cp "$SESSION" "$SYSROOT/apps/luna-user-session/luna-user-session"
 chmod 0755 "$SYSROOT/apps/luna-user-session/luna-user-session"
+cat > "$OUT/test-niri.rs" <<'EOF'
+use std::thread;
+use std::time::Duration;
+fn main() -> ! {
+    println!("Luna test niri: graphical session started");
+    loop { thread::sleep(Duration::from_secs(60)); }
+}
+EOF
+rustc --target "$RUNTIME_TARGET" -O "$OUT/test-niri.rs" -o "$SYSROOT/apps/niri/niri"
+chmod 0755 "$SYSROOT/apps/niri/niri"
+rm -f "$OUT/test-niri.rs"
+cat > "$SYSROOT/config/luna/niri-config.kdl" <<'EOF'
+input {}
+layout { gaps 0 }
+EOF
+chmod 0644 "$SYSROOT/config/luna/niri-config.kdl"
 printf "%s\n" "/usr/bin/luna-user-session --handoff" > "$SYSROOT/config/luna/graphical-session"
 cat > "$SYSROOT/config/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/sh
-greeter:x:995:995:Luna Greeter:/run/greetd:/bin/sh
 luna:x:1000:1000:Luna User:/home/luna:/bin/sh
 EOF
 cat > "$SYSROOT/config/group" <<'EOF'
 root:x:0:
 shadow:x:42:
-greeter:x:995:
 luna:x:1000:
 EOF
 cat > "$SYSROOT/config/shadow" <<'EOF'
 root:!*:0:0:99999:7:::
-greeter:!*:0:0:99999:7:::
 luna:!*:0:0:99999:7:::
 EOF
 chmod 0644 "$SYSROOT/config/passwd" "$SYSROOT/config/group"
@@ -75,9 +88,6 @@ chmod 0600 "$SYSROOT/config/shadow"
 printf "%s\n" "passwd: files" "group: files" "shadow: files" "gshadow: files" "hosts: files dns" "services: files" "networks: files" "protocols: files" > "$SYSROOT/config/nsswitch.conf"
 chmod 0644 "$SYSROOT/config/nsswitch.conf"
 
-LOADER_SOURCE="$(readlink -f /lib64/ld-linux-x86-64.so.2)"
-[ -f "$LOADER_SOURCE" ] || { echo "luna-test userspace: ELF loader is unavailable" >&2; exit 1; }
-cp -L "$LOADER_SOURCE" "$SYSROOT/libs/loader/ld-linux-x86-64.so.2"
 
 mksquashfs "$SYSROOT" "$OUT/luna-0.1.0.squashfs" -noappend -comp zstd -all-root -no-xattrs >/dev/null
 cp "$LUNA_INIT" "$OUT/luna-test.init"

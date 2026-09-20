@@ -1,27 +1,34 @@
 [workspace]
 resolver = "2"
 members = [
-  "components/system/luna-common",
-  "components/system/luna-fs",
-  "components/system/luna-root-mapping",
-  "components/system/luna-namespace",
-  "components/system/luna-config",
-  "components/system/luna-security",
-  "components/system/luna-state",
-  "components/system/luna-event",
-  "components/system/luna-bundle",
+  "components/core/luna-common",
+  "components/core/luna-fs",
+  "components/core/luna-root-mapping",
+  "components/core/luna-namespace",
+  "components/core/luna-config",
+  "components/core/luna-security",
+  "components/core/luna-state",
+  "components/core/luna-event",
+  "components/core/luna-bundle",
   "components/system/luna-app-manager",
-  "components/system/luna-system-manager",
-  "components/system/luna-update-manager",
-  "components/system/luna-device-manager",
-  "components/system/luna-kernel-manager",
-  "components/system/luna-system-runtime",
-  "components/system/luna-user-session",
-  "components/system/luna-app-runtime",
+  "components/core/luna-system-manager",
+  "components/core/luna-update-manager",
+  "components/core/luna-device-manager",
+  "components/core/luna-kernel-manager",
+  "components/core/luna-system-runtime",
+  "components/core/luna-user-session",
+  "components/core/luna-app-runtime",
   "components/system/luna-cli",
-  "components/system/luna-audio",
-  "components/system/luna-network",
-  "components/system/luna-bluetooth",
-  "components/system/luna-files",
+  "components/external/providers/luna-audio",
+  "components/external/providers/luna-network",
+  "components/external/providers/luna-bluetooth",
+  "components/external/providers/luna-files",
   "tools/build-progress",
 ]
+
+[workspace.metadata.luna.components]
+core = "OS foundation and boot/runtime infrastructure"
+system = "Luna-owned system applications and administration tools"
+apps = "Luna user applications"
+external.providers = "Luna-facing adapters backed by external providers"
+external.libraries = "Additional external/support libraries"

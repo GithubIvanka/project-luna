@@ -4,8 +4,8 @@
 extern crate alloc;
 
 use uefi::boot::open_protocol_exclusive;
-use uefi::prelude::*;
 use uefi::cstr16;
+use uefi::prelude::*;
 use uefi::proto::console::text::Output;
 
 #[entry]

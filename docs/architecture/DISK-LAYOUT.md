@@ -38,14 +38,13 @@ LUNA-SYS/
 │   ├── luna-data.toml
 │   └── ...
 └── recovery/
-    ├── recovery-X.Y.Z.squashfs
-    ├── recovery-X.Y.Z.toml
-    └── ...
+    ├── recovery.squashfs
+    └── recovery.toml
 ```
 
 Пути вроде `/images` и `/cores` в коде bootloader являются путями относительно корня подключённого `LUNA-SYS`, а не отдельными разделами. Используется именно `LUNA-SYS` того же физического диска, что и EFI.
 
-`LUNA-SYS/recovery/` содержит только Recovery DATA Images и соседние manifests. Каноническая форма — `recovery-X.Y.Z.squashfs` рядом с `recovery-X.Y.Z.toml`; отдельного Recovery System Image нет.
+`LUNA-SYS/recovery/` содержит единственный канонический Recovery DATA Image и его manifest: `recovery.squashfs` + `recovery.toml`. Recovery DATA является общей GUI/recovery provider layer для набора версионированных System Images; отдельного Recovery System Image нет.
 
 ## LUNA-DATA
 
@@ -57,6 +56,14 @@ LUNA-DATA/
 │   ├── firmware/
 │   ├── libs/
 │   ├── config/
+│   ├── resources/
+│   │   ├── fonts/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   ├── cursors/
+│   │   ├── sounds/
+│   │   ├── locales/
+│   │   └── translations/
 │   ├── state/
 │   ├── volumes/
 │   └── ...
@@ -68,7 +75,7 @@ LUNA-DATA/
 └── cache/
 ```
 
-`apps`, `drivers`, `firmware`, `libs` и `config` являются каноническими управляемыми ОС областями. `drivers/` и `firmware/` относятся к разным классам ресурсов и не должны объединяться. `state` хранит долговременное состояние системы, используемое `luna-state`; `volumes` предназначен для состояния управляемых внешних томов. Новые каталоги верхнего уровня требуют явного архитектурного одобрения.
+`apps`, `drivers`, `firmware`, `libs`, `config` и `resources` являются каноническими областями `LUNA-DATA/system`. `resources/` использует ту же классификацию, что и System Image: `fonts/`, `icons/`, `themes/`, `cursors/`, `sounds/`, `locales/` и `translations/`. `drivers/` и `firmware/` относятся к разным классам и не объединяются. `state` и `volumes` остаются mutable-only областями DATA и отсутствуют в System Image. Новые каталоги верхнего уровня требуют явного архитектурного одобрения.
 
 ## Расположение и привязка LUNA-DATA
 
@@ -84,7 +91,13 @@ LUNA-DATA/
 
 ## Выбор файловой системы
 
-Текущая сборка для x86_64 PC использует ext4 для изменяемых разделов. Это не меняет формат System Image: она остаётся непосредственно SquashFS.
+Для текущей x86_64 PC-сборки:
+- EFI — FAT32;
+- LUNA-SYS — ext4;
+- LUNA-DATA — btrfs;
+- SWAP — swap.
+
+Это не меняет формат System Image: она остаётся непосредственно SquashFS.
 
 ## Граница безопасности
 

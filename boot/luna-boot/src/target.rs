@@ -13,6 +13,8 @@ pub struct BootTarget {
     pub kernel_path: String,
     pub kernel_id: String,
     pub kernel_cmdline: String,
+    pub recovery_data_path: Option<String>,
+    pub recovery_data_digest: Option<[u8; 32]>,
     pub is_recovery: bool,
     pub is_factory: bool,
 }
@@ -39,6 +41,8 @@ impl BootTarget {
             kernel_path: kernel_path.into(),
             kernel_id: kernel_id.into(),
             kernel_cmdline: String::new(),
+            recovery_data_path: None,
+            recovery_data_digest: None,
             is_recovery: false,
             is_factory: false,
         }
@@ -46,6 +50,16 @@ impl BootTarget {
 
     pub fn with_cmdline(mut self, cmdline: impl Into<String>) -> Self {
         self.kernel_cmdline = cmdline.into();
+        self
+    }
+
+    pub fn with_recovery_data(mut self, path: impl Into<String>) -> Self {
+        self.recovery_data_path = Some(path.into());
+        self
+    }
+
+    pub fn with_recovery_data_digest(mut self, digest: [u8; 32]) -> Self {
+        self.recovery_data_digest = Some(digest);
         self
     }
 

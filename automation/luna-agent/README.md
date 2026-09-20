@@ -104,11 +104,43 @@ To pause a running service without editing the repository, create the external
 marker `~/.local/state/project-luna/luna-agent/PAUSE`. The runner will stop
 starting/resuming work; remove the marker to continue.
 
+## Resilient free backend
+
+The `free` backend routes every AI turn through independent provider scopes;
+it does not treat several free models behind one gateway as separate quota
+pools. The default order is:
+
+```text
+Inception/Mercury 2.5
+  -> Gemini 2.5 Pro
+  -> OpenCode Zen free models
+  -> Cerebras GPT-OSS 120B
+  -> OpenRouter free models
+  -> Mistral (when a model is configured)
+  -> Atria (only when its API contract is explicitly configured)
+  -> local Ollama / Ornith 1.5 9B
+```
+
+A quota, rate-limit, authentication failure, or provider outage cools the
+whole provider scope and the runner resumes the same task/turn on the next
+independent scope. Task state, Git state, acceptance criteria, skills, and
+verification evidence are unchanged by a provider switch.
+
+Provider credentials are loaded from the user-owned file
+`~/.config/project-luna/luna-agent/providers.env`. Never put API keys in Git.
+Start from `automation/luna-agent/providers.env.example` and use
+`chmod 600` on the private copy. Missing providers are skipped automatically.
+
+The free pool is implemented through Harness/DSH's OpenAI-compatible provider
+support, so the critical path does not depend on the unreliable OpenCode
+standalone process. OpenCode remains available for the separate review worker.
+
 ## Runtime tuning
 
 The defaults are conservative, but unattended runs can override them without
 editing the repository: `LUNA_AGENT_MAX_ATTEMPTS`, `LUNA_AGENT_MAX_TURNS`,
-`LUNA_AGENT_HARNESS_TIMEOUT`, and `LUNA_AGENT_OPENCODE_TIMEOUT`.
+`LUNA_AGENT_HARNESS_TIMEOUT`, `LUNA_AGENT_OPENCODE_TIMEOUT`,
+`LUNA_AGENT_FREE_TIMEOUT`, and `LUNA_AGENT_FREE_RETRY_SECONDS`.
 
 The OpenCode review worker uses `opencode-direct.sh`, which reads the existing
 OpenRouter credential from OpenCode's local auth store without writing the key

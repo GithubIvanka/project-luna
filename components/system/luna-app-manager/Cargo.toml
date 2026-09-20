@@ -12,4 +12,4 @@ name = "luna-app-manager"
 path = "src/main.rs"
 
 [dependencies]
-luna-common = { path = "../luna-common" }
+luna-common = { path = "../../core/luna-common" }

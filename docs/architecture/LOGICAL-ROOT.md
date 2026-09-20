@@ -60,6 +60,20 @@ request != grant
 
 Физические `LUNA-SYS/...` и `LUNA-DATA/...` пути не являются API приложения.
 
+При этом и внутренние пути System Image, и пути `LUNA-DATA/system/...` являются **источниками** для Root Mapping. Например:
+
+```text
+LUNA-DATA/system/config/luna/graphical session
+                    ↓ если существует
+             DATA provider config
+
+System Image/config/luna/graphical session
+                    ↓ иначе
+             default config
+```
+
+После materialization эти источники могут быть представлены в logical root другими runtime-путями. Поэтому `/data/system/...` и `/etc/...` нельзя использовать как описание физической структуры System Image или LUNA-DATA.
+
 ## Ограничения
 
 Приложение не должно видеть весь System Image или физическое дерево Luna только потому, что ему требуется `/usr`, `/lib`, `/home` или другой логический путь. Каждая ресурсная область предоставляется явно через разрешённую модель mapping/policy.

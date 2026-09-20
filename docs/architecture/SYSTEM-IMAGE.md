@@ -2,7 +2,9 @@
 
 ## Определение
 
-System Image — неизменяемая версионированная userspace-файловая система конкретного релиза Luna. Это источник, из которого `luna-init` материализует работающую системную среду в RAM-backed logical `/`.
+**Краткая модель:** `SYS = boot/runtime core + default config`.
+
+System Image — **не вся ОС Luna**, а неизменяемая версионированная минимальная userspace-файловая система конкретного релиза. Это обязательный immutable minimum для запуска boot/runtime path и достижения UserSession boundary. Графический compositor/shell не обязаны находиться внутри System Image: при normal/factory они приходят из физической `LUNA-DATA`, а при Recovery — из единственного Recovery DATA Image. `luna-init` использует System Image как immutable source, из которого материализуется работающая системная среда в RAM-backed logical `/`. `LUNA-DATA` и Recovery DATA являются отдельными provider layers.
 
 ```text
 LUNA-SYS/images/
@@ -26,12 +28,20 @@ LUNA-SYS/images/
     ├── icons/
     ├── themes/
     ├── cursors/
+    ├── sounds/
     ├── locales/
     └── translations/
 ```
 
 `drivers/` и `firmware/` — разные resource classes. `drivers/` содержит driver entities/modules, `firmware/` — firmware payloads. Firmware никогда не является частью `drivers/`.
 
+Важно различать внутренние пути источников и пути работающего logical root. Например, `config/luna/native graphical session` — это путь **внутри System Image**. Это не `/etc/luna/native graphical session` внутри образа: каталога `etc/` в структуре System Image нет. Аналогично источник изменяемого переопределения находится в физическом `LUNA-DATA/system/config/luna` configuration. Уже во время загрузки `root-mapping`/materialization строят из этих источников RAM-backed logical root и только там предоставляют приложению его логические runtime-пути.
+
+`resources/` содержит семь типов ресурсов: `fonts/`, `icons/`, `themes/`, `cursors/`, `sounds/`, `locales/` и `translations/`. Runtime-данные конкретного системного приложения, которые должны быть доступны по стандартному пути вроде `/usr/share/<name>`, относятся к этому приложению и хранятся внутри `apps/<name>/resources/`; они не изменяют классификацию `resources/` как общего набора типов ресурсов.
+
+
+
+`resources/sounds/` — канонический класс звуковых ресурсов System Image. Это именно ресурсный класс, а не отдельный раздел System Image. Системные звуки, необходимые базовой среде Luna и её стандартным компонентам, входят в immutable System Image; изменяемые или дополнительные звуковые наборы могут появляться в соответствующем `LUNA-DATA/system/resources/sounds/`.
 `state/` и `volumes/` отсутствуют намеренно: это mutable DATA concerns и они находятся в `LUNA-DATA/system`.
 
 ## Манифест

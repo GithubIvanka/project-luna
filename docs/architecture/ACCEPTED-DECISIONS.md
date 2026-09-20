@@ -1,7 +1,7 @@
 # Project Luna — Актуальные принятые решения
 
 **Статус:** нормативная сводка принятых архитектурных решений
-**Ревизия:** 2026-09-15
+**Ревизия:** 2026-09-18
 **Источник авторитета:** `docs/ARCHITECTURE.md`
 
 Этот документ объединяет принятые решения, затрагивающие несколько архитектурных областей. Это текущая сводка, а не исторический журнал. Если архивный текст противоречит этому документу или `docs/ARCHITECTURE.md`, действуют текущие документы.
@@ -55,7 +55,8 @@ LUNA-SYS/
 - Его соседний манифест: `luna-X.Y.Z.toml`.
 - `.lbp` никогда не является форматом System Image.
 - Глобального манифеста System Image не существует.
-- System Image — неизменяемый версионированный источник userspace, из которого `luna-init` материализует работающую системную среду.
+- System Image — не вся ОС, а неизменяемый версионированный минимальный источник userspace, из которого `luna-init` материализует работающую системную среду. Он должен содержать immutable minimum, достаточный для полноценного запуска Luna даже при отсутствии физической `LUNA-DATA`.
+- `LUNA-DATA` — отдельная изменяемая и расширяемая часть ОС; она добавляет persistent state, Bundles, дополнительные системные компоненты и управляемые изменения поверх immutable base.
 - System Images неизменяемы, версионируются и хранятся согласно политике удержания.
 - System Image, `luna-init` и kernel версионируются независимо и образуют один полный boot target при корректной цепочке совместимости.
 - Точная грамматика манифеста System Image определяется контрактом System Image.
@@ -74,6 +75,7 @@ LUNA-SYS/
     ├── icons/
     ├── themes/
     ├── cursors/
+    ├── sounds/
     ├── locales/
     └── translations/
 ```
@@ -173,7 +175,7 @@ System Image
 - Recovery DATA Image содержит схему `luna-data` для виртуального recovery-пользователя и программное окружение для диагностики и восстановления системы.
 - Recovery может запускаться без физического `LUNA-DATA`.
 - Физический DATA может проверяться и восстанавливаться из Recovery, но не является хранилищем работающей Recovery-среды.
-- Recovery-специфические data artifacts находятся в `LUNA-SYS/recovery/`.
+- Recovery-специфические data artifacts находятся в единственном `LUNA-SYS/recovery/recovery.squashfs` с `recovery.toml`; Recovery GUI provider — Niri.
 - Recovery и Factory — разные режимы и не должны сводиться к generic fallback runtime.
 
 ## 10. Модель LUNA-DATA
@@ -188,6 +190,14 @@ LUNA-DATA/
 │   ├── firmware/
 │   ├── libs/
 │   ├── config/
+│   ├── resources/
+│   │   ├── fonts/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   ├── cursors/
+│   │   ├── sounds/
+│   │   ├── locales/
+│   │   └── translations/
 │   ├── state/
 │   ├── volumes/
 │   └── ...
@@ -201,7 +211,7 @@ LUNA-DATA/
 
 - `system/apps` хранит установленные application Bundles.
 - `system/drivers` и `system/firmware` — отдельные системно управляемые области ресурсов.
-- `system/libs`, `system/config`, `system/state` и `system/volumes` также являются системно управляемыми областями.
+- `system/libs`, `system/config`, `system/resources`, `system/state` и `system/volumes` также являются системно управляемыми областями. `system/resources` повторяет классификацию неизменяемых ресурсов System Image: `fonts`, `icons`, `themes`, `cursors`, `sounds`, `locales`, `translations`. `state` и `volumes` являются mutable-only областями и не входят в System Image.
 - `users/<user>/home`, `data` и `config` относятся к конкретному пользователю.
 - `cache` является удаляемым и не является авторитетным durable state store.
 - Физические пути — детали хранения, а не API приложения.
@@ -277,6 +287,7 @@ luna-namespace
 - Принятые состояния сессии: ACTIVE, RESTRICTED и TERMINATED.
 - Выход из активной desktop session по умолчанию переводит её в поведение RESTRICTED.
 - Граница входа является графической; authentication завершается до предоставления активной сессии.
+- Recovery является отдельным исключением: виртуальный пользователь `recovery`, созданный из Recovery DATA provider, получает активный Recovery UserSession без интерактивного login provider.
 - TTY не является обычным механизмом login.
 - Wayland — принятое направление интеграции дисплея.
 - Выбранная desktop-среда: `niri + Noctalia Shell`.

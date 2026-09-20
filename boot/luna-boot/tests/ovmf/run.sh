@@ -48,7 +48,8 @@ EOF
 mkfs.ext4 -q -F -L LUNA-SYS -d "$OUT/system-root" "$OUT/system.img" 256M
 
 rm -rf "$OUT/data-root"
-mkdir -p "$OUT/data-root/system"/{apps,drivers,firmware,libs,config,state,volumes}
+mkdir -p "$OUT/data-root/system"/{apps,drivers,firmware,libs,config,resources,state,volumes}
+mkdir -p "$OUT/data-root/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 mkdir -p "$OUT/data-root/users/luna"/{home,data,config}
 mkdir -p "$OUT/data-root/cache"
 truncate -s 128M "$OUT/data.img"
@@ -79,15 +80,19 @@ dd if="$OUT/data.img" of="$OUT/disk.img" bs=512 seek=657408 conv=notrunc status=
 dd if="$OUT/swap.img" of="$OUT/disk.img" bs=512 seek=919552 conv=notrunc status=none
 
 cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
+if [ -n "${LUNA_QEMU_SERIAL_LOG:-}" ]; then
+    SERIAL_ARGS=(-serial "file:${LUNA_QEMU_SERIAL_LOG}")
+else
+    SERIAL_ARGS=(-serial stdio)
+fi
 exec qemu-system-x86_64 \
   -machine q35 \
   -m 2G \
   -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" \
   -drive format=raw,file="$OUT/disk.img" \
-  -serial stdio \
+  "${SERIAL_ARGS[@]}" \
   -display "${LUNA_QEMU_DISPLAY:-none}" \
   -no-reboot \
   -no-shutdown \
-  -d int,cpu_reset \
   -D "$OUT/qemu.log"

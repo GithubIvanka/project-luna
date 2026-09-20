@@ -22,6 +22,7 @@ import time
 import tomllib
 
 from verification import VERIFICATION_CHECKS, run_check
+from free_backend import FREE_POOL, Provider, prepare_dsh, provider_available, provider_entries, provider_for
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -44,8 +45,7 @@ OPENCODE_MODEL = os.environ.get("LUNA_AGENT_OPENCODE_MODEL", "openrouter/deepsee
 OPENCODE_CONFIG = os.environ.get("LUNA_AGENT_OPENCODE_CONFIG")
 BACKEND = os.environ.get("LUNA_AGENT_BACKEND", "online")
 OFFLINE_MODE = os.environ.get("LUNA_AGENT_OFFLINE", "0") == "1"
-FREE_MODEL = os.environ.get("LUNA_AGENT_FREE_MODEL", "openrouter/deepseek/deepseek-v4-flash-0731:free")
-LOCAL_MODEL = os.environ.get("LUNA_AGENT_LOCAL_MODEL", "local/ornith-1.5:9b")
+LOCAL_MODEL = os.environ.get("LUNA_AGENT_LOCAL_MODEL", "ornith-1.5:9b")
 DSH_FREE_HOME = STATE_DIR / "dsh-free"
 TASKS_VERSION = 2
 
@@ -56,6 +56,18 @@ def run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProce
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def free_pool_entry(index: int) -> Provider:
+    return provider_for(index)
+
+
+def free_pool_scope(entry: Provider) -> str:
+    return entry.scope
+
+
+def free_pool_size() -> int:
+    return len(FREE_POOL)
 
 
 def load_tasks() -> list[dict]:
@@ -272,31 +284,29 @@ def resolve_opencode() -> str:
 
 
 def is_free_model(model: str | None) -> bool:
-    return bool(model and model.endswith(":free"))
+    return bool(model and any(provider.model == model for provider in FREE_POOL))
 
 
-def prepare_free_harness(env: dict[str, str], model: str) -> None:
-    if not model.startswith("openrouter/") or not is_free_model(model):
-        raise RuntimeError(f"free Harness backend requires an OpenRouter :free model, got {model!r}")
-    model_id = model.removeprefix("openrouter/")
-    auth_file = Path.home() / ".local/share/opencode/auth.json"
-    if not auth_file.is_file():
-        raise RuntimeError(f"OpenCode OpenRouter credentials not found: {auth_file}")
-    try:
-        auth = json.loads(auth_file.read_text(encoding="utf-8"))
-        api_key = auth["openrouter"]["key"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise RuntimeError("failed to read the existing OpenRouter credential") from exc
-    if not isinstance(api_key, str) or not api_key:
-        raise RuntimeError("existing OpenRouter credential is empty")
+def pool_entry_available(entry: Provider, state: dict | None = None) -> bool:
+    cooldowns = (state or {}).get("provider_cooldowns", {})
+    return provider_available(entry, cooldowns)
 
-    DSH_FREE_HOME.mkdir(parents=True, exist_ok=True)
-    settings = """llm-pi-ai:\n  providers:\n    openrouter:\n      displayName: OpenRouter\n      api: openai-completions\n      baseURL: https://openrouter.ai/api/v1\n      apiKeyEnv: OPENROUTER_API_KEY\n      models:\n        - id: {model}\n          name: {model}\n          contextWindow: 1310720\n          maxTokens: 65536\nagent-default-model:\n  provider: openrouter\n  model: {model}\n  reasoningEffort: high\n""".format(model=model_id)
-    tmp = DSH_FREE_HOME / "settings.yaml.tmp"
-    tmp.write_text(settings, encoding="utf-8")
-    tmp.replace(DSH_FREE_HOME / "settings.yaml")
-    env["DSH_HOME"] = str(DSH_FREE_HOME)
-    env["OPENROUTER_API_KEY"] = api_key
+
+def next_free_pool_index(current: int, *, skip_scope: str | None = None, state: dict | None = None) -> int | None:
+    for step in range(1, free_pool_size() + 1):
+        idx = (current + step) % free_pool_size()
+        entry = free_pool_entry(idx)
+        if skip_scope and free_pool_scope(entry) == skip_scope:
+            continue
+        if pool_entry_available(entry, state):
+            return idx
+    return None
+
+
+def prepare_free_harness(env: dict[str, str], provider: Provider) -> None:
+    if not is_free_model(provider.model):
+        raise RuntimeError(f"selected provider is not in the free pool: {provider.model!r}")
+    prepare_dsh(env, DSH_FREE_HOME, provider)
 
 
 def defer_free_backend_retry(state: dict, info: dict, reason: str) -> bool:
@@ -312,12 +322,119 @@ def defer_free_backend_retry(state: dict, info: dict, reason: str) -> bool:
     return True
 
 
+def classify_free_failure(log: Path) -> tuple[str, str] | None:
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")[-16000:].lower()
+    except OSError:
+        return None
+    global_markers = (
+        "free-models-per-day",
+        "openrouter_free_tier_daily",
+        'x-ratelimit-remaining\\":\\"0',
+        "daily ceiling",
+    )
+    if any(marker in text for marker in global_markers):
+        return ("provider", "global-rate-limit")
+    transient_markers = (
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "quota exceeded",
+        "resource exhausted",
+        "temporarily unavailable",
+        "service unavailable",
+        "overloaded",
+        "capacity",
+        "status code 429",
+        "http 429",
+        "http 503",
+        "status code 402",
+        "http 402",
+        " code 429",
+        " code 503",
+        "insufficient credits",
+        "payment required",
+    )
+    auth_markers = (
+        "unauthorized",
+        "authentication failed",
+        "invalid api key",
+        "no provider available",
+        "api key is required",
+        "missing api key",
+        "status code 401",
+        "status code 403",
+        "http 401",
+        "http 403",
+    )
+    context_markers = (
+        "context length exceeded",
+        "maximum context length",
+        "context window exceeded",
+        "token limit exceeded",
+        "too many tokens",
+    )
+    if any(marker in text for marker in auth_markers):
+        return ("auth", "provider-unavailable")
+    model_markers = context_markers + (
+        "model not found",
+        "model was not found",
+        "unknown model",
+        "invalid model",
+        "model does not exist",
+    )
+    if any(marker in text for marker in model_markers):
+        return ("model", "model-limit")
+    if any(marker in text for marker in transient_markers):
+        reason = "quota-exhausted" if any(marker in text for marker in ("quota exceeded", "resource exhausted", "free-models-per-day", "insufficient credits")) else "provider-rate-limit"
+        return ("provider", reason)
+    return None
+
+
+def advance_free_pool(state: dict, info: dict, log: Path, forced_reason: str | None = None) -> bool:
+    failure = classify_free_failure(log)
+    if BACKEND != "free" or (failure is None and forced_reason is None) or git_status():
+        return False
+    current = int(info.get("free_pool_index", 0))
+    current_entry = free_pool_entry(current)
+    scope, reason = failure or ("provider", forced_reason or "provider-failure")
+    failed_scope = free_pool_scope(current_entry) if scope in {"provider", "openrouter"} else None
+    if scope == "auth":
+        failed_scope = free_pool_scope(current_entry)
+    if failed_scope:
+        cooldown_seconds = 86_400 if reason in {"global-rate-limit", "quota-exhausted"} else FREE_RETRY_SECONDS
+        if scope == "auth":
+            cooldown_seconds = max(FREE_RETRY_SECONDS, 3_600)
+        state.setdefault("provider_cooldowns", {})[failed_scope] = time.time() + cooldown_seconds
+    next_index = next_free_pool_index(current, skip_scope=failed_scope, state=state)
+    info["turns"] = max(0, int(info.get("turns", 0)) - 1)
+    if next_index is None:
+        info["status"] = "pending"
+        info["phase"] = "backend-wait"
+        info["last_result"] = reason
+        state["backend_wait_until"] = time.time() + FREE_RETRY_SECONDS
+        state["runner_status"] = "waiting-backend"
+        save_state(state)
+        return True
+    entry = free_pool_entry(next_index)
+    info["free_pool_index"] = next_index
+    info["selected_runner"] = "harness"
+    info["selected_model"] = entry.model
+    info["status"] = "pending"
+    info["phase"] = "model-fallback"
+    info["last_result"] = f"{reason}:{current_entry.scope}:{current_entry.model} -> {entry.scope}:{entry.model}"
+    state["runner_status"] = "working"
+    save_state(state)
+    return True
+
+
 def run_agent(
     agent: str,
     prompt: str,
     timeout: int,
     log: Path,
     model: str | None = None,
+    free_runner: str | None = None,
 ) -> int:
     env = os.environ.copy()
     # Let DSH Agent Skills discover the project's canonical .agents/skills tree.
@@ -331,24 +448,20 @@ def run_agent(
     if OPENCODE_CONFIG:
         env["OPENCODE_CONFIG"] = OPENCODE_CONFIG
     if local_mode:
-        selected_model = model if model and model.startswith("local/") else LOCAL_MODEL
+        selected_model = model if model and model.startswith("local/") else f"local/{LOCAL_MODEL.removeprefix('local/')}"
         cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
+    elif free_mode:
+        if not is_free_model(model):
+            raise RuntimeError(f"free backend requires a selected pool model, got {model!r}")
+        selected_model = model
+        provider = next(provider for provider in FREE_POOL if provider.model == selected_model)
+        timeout = min(timeout, FREE_TIMEOUT)
+        prepare_free_harness(env, provider)
+        cmd = [resolve_dsh(), "--profile", "headless", prompt]
     elif agent == "opencode-review":
-        selected_model = model or (FREE_MODEL if free_mode else OPENCODE_MODEL)
-        if free_mode and not is_free_model(selected_model):
-            selected_model = FREE_MODEL
+        selected_model = model or OPENCODE_MODEL
         cmd = [resolve_opencode(), "run", "--standalone", "--auto", "--model", selected_model, prompt]
-        if free_mode:
-            timeout = min(timeout, FREE_TIMEOUT)
     elif agent == "harness":
-        selected_model = model or FREE_MODEL if free_mode else model
-        if free_mode:
-            if not selected_model or not is_free_model(selected_model):
-                selected_model = FREE_MODEL
-            prepare_free_harness(env, selected_model)
-            timeout = min(timeout, FREE_TIMEOUT)
-        else:
-            selected_model = selected_model or OPENCODE_MODEL
         cmd = [resolve_dsh(), "--profile", "headless", prompt]
     else:
         raise RuntimeError(f"unknown agent: {agent}")
@@ -385,49 +498,52 @@ def run_agent(
                     pass
                 proc.wait()
 
-        if agent == "opencode-review" and (timed_out or rc != 0):
+        if agent == "opencode-review" and (timed_out or rc != 0) and not free_mode:
             reason = "timeout" if timed_out else f"exit {rc}"
-            if free_mode:
-                fh.write(f"\n=== FREE REVIEW RETRY ({reason}) -> same model later ===\n")
-                fh.write("Automatic free-model rotation is disabled; the runner will retry this model after the backend wait interval.\n")
-            else:
-                fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
-                fallback_prompt = (
-                    prompt
-                    + "\n\nOpenCode review worker was unavailable. "
-                    "Perform this review as a fresh independent pass with the Harness worker. "
-                    "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
-                )
-                fallback_cmd = [resolve_dsh(), "--profile", "headless", fallback_prompt]
-                fh.write(f"=== FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
-                fallback = subprocess.Popen(
-                    fallback_cmd,
-                    cwd=ROOT,
-                    env=env,
-                    text=True,
-                    stdout=fh,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
+            fh.write(f"\n=== OPENCODE FALLBACK ({reason}) -> HARNESS REVIEW ===\n")
+            fallback_prompt = (
+                prompt
+                + "\n\nOpenCode review worker was unavailable. "
+                "Perform this review as a fresh independent pass with the Harness worker. "
+                "Do not assume the previous review succeeded; inspect the implementation and report concrete findings.\n"
+            )
+            fallback_cmd = [resolve_dsh(), "--profile", "headless", fallback_prompt]
+            fh.write(f"=== FALLBACK COMMAND ===\n{' '.join(fallback_cmd)}\n")
+            fallback = subprocess.Popen(
+                fallback_cmd,
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                rc = fallback.wait(timeout=HARNESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                fh.write(f"\n=== FALLBACK TIMEOUT {HARNESS_TIMEOUT}s; terminating process group ===\n")
                 try:
-                    rc = fallback.wait(timeout=HARNESS_TIMEOUT)
+                    os.killpg(fallback.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    fallback.wait(timeout=15)
                 except subprocess.TimeoutExpired:
-                    fh.write(f"\n=== FALLBACK TIMEOUT {HARNESS_TIMEOUT}s; terminating process group ===\n")
                     try:
-                        os.killpg(fallback.pid, signal.SIGTERM)
+                        os.killpg(fallback.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                    try:
-                        fallback.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(fallback.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                        fallback.wait()
+                    fallback.wait()
 
         fh.write(f"\n=== EXIT {rc} ===\n")
     return rc
+
+
+def first_free_pool_index(state: dict) -> int | None:
+    for index in range(free_pool_size()):
+        if pool_entry_available(free_pool_entry(index), state):
+            return index
+    return None
 
 
 def prompt_for(task: dict, info: dict) -> tuple[str, int]:
@@ -452,6 +568,8 @@ def prompt_for(task: dict, info: dict) -> tuple[str, int]:
                 prompt += f"- {name}: {result.get('output_tail', '').strip()}\n"
     if info.get("phase") == "post-commit-dirty":
         prompt += "PREVIOUS SESSION CREATED A COMMIT BUT LEFT UNCOMMITTED CHANGES. Inspect those changes, decide whether they belong to this task, complete or revert them safely without destructive reset/clean operations, then create a focused follow-up commit before verification.\n"
+    if info.get("phase") == "model-fallback":
+        prompt += f"PREVIOUS FREE PROVIDER FAILED. Continue the same logical AI turn on the next provider/model. Previous provider result: {info.get('last_result', 'unknown')}. Preserve the existing task scope and acceptance criteria; do not restart or widen the task.\n"
     prompt += "Implement or review this task using the repository's current accepted architecture.\n"
     if BACKEND == "free":
         timeout = FREE_TIMEOUT
@@ -599,7 +717,25 @@ def run_once(state: dict) -> str:
         info["started_at"] = now()
         if BACKEND == "free":
             requested_model = task.get("model")
-            info["selected_model"] = requested_model if is_free_model(requested_model) else FREE_MODEL
+            if requested_model and any(item.model == requested_model for item in FREE_POOL):
+                pool_index = next(i for i, item in enumerate(FREE_POOL) if item.model == requested_model)
+            else:
+                pool_index = first_free_pool_index(state)
+            if pool_index is None:
+                info["status"] = "pending"
+                info["phase"] = "backend-wait"
+                info["last_result"] = "no_free_provider_available"
+                state["backend_wait_until"] = time.time() + FREE_RETRY_SECONDS
+                state["runner_status"] = "waiting-backend"
+                state["current_task"] = tid
+                save_state(state)
+                return "backend-wait"
+            entry = free_pool_entry(pool_index)
+            info["free_pool_index"] = pool_index
+            info["selected_runner"] = "harness"
+            info["selected_provider"] = entry.id
+            info["selected_scope"] = entry.scope
+            info["selected_model"] = entry.model
         info["before_head"] = git_head()
         info["expected_tree"] = git_tree_fingerprint()
         state["current_task"] = tid
@@ -622,21 +758,52 @@ def run_once(state: dict) -> str:
         save_state(state)
         return "failed"
 
+    if BACKEND == "free":
+        current_index = int(info.get("free_pool_index", 0))
+        current_entry = free_pool_entry(current_index)
+        if not pool_entry_available(current_entry, state):
+            next_index = next_free_pool_index(current_index - 1, state=state)
+            if next_index is None:
+                info["status"] = "pending"
+                info["phase"] = "backend-wait"
+                info["last_result"] = "selected_free_provider_unavailable"
+                state["backend_wait_until"] = time.time() + FREE_RETRY_SECONDS
+                state["runner_status"] = "waiting-backend"
+                save_state(state)
+                return "backend-wait"
+            info["free_pool_index"] = next_index
+            next_entry = free_pool_entry(next_index)
+            info["selected_provider"] = next_entry.id
+            info["selected_scope"] = next_entry.scope
+            info["selected_model"] = next_entry.model
+            info["selected_runner"] = "harness"
+            info["phase"] = "model-fallback"
+            info["last_result"] = f"provider-unavailable:{current_entry.scope}:{current_entry.model} -> {next_entry.scope}:{next_entry.model}"
+            save_state(state)
     info["turns"] = int(info.get("turns", 0)) + 1
     save_state(state)
     prompt, timeout = prompt_for(task, info)
     selected_model = info.get("selected_model") if BACKEND == "free" else task.get("model")
+    selected_runner = "harness" if BACKEND == "free" else None
     if BACKEND == "free" and not selected_model:
-        selected_model = FREE_MODEL
+        entry = next((item for item in FREE_POOL if pool_entry_available(item, state)), free_pool_entry(0))
+        selected_model = entry.model
+        selected_runner = "harness"
+        info["free_pool_index"] = FREE_POOL.index(entry)
+        info["selected_provider"] = entry.id
+        info["selected_scope"] = entry.scope
         info["selected_model"] = selected_model
+        info["selected_runner"] = selected_runner
         save_state(state)
     log = log_path(tid, task["agent"])
     try:
-        rc = run_agent(task["agent"], prompt, timeout, log, selected_model)
+        rc = run_agent(task["agent"], prompt, timeout, log, selected_model, selected_runner)
     except subprocess.TimeoutExpired:
         status = git_status()
         dirty = bool(status)
         info["expected_tree"] = git_tree_fingerprint()
+        if advance_free_pool(state, info, log, "provider-timeout"):
+            return "model-fallback"
         if defer_free_backend_retry(state, info, "free_backend_timeout"):
             return "backend-wait"
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
@@ -651,6 +818,8 @@ def run_once(state: dict) -> str:
         status = git_status()
         dirty = bool(status)
         info["expected_tree"] = git_tree_fingerprint()
+        if advance_free_pool(state, info, log):
+            return "model-fallback"
         if defer_free_backend_retry(state, info, f"free_backend_exit_{rc}"):
             return "backend-wait"
         info["status"] = "pending" if info["attempts"] < MAX_ATTEMPTS else "blocked"
@@ -754,10 +923,14 @@ def doctor() -> int:
         elif not Path(OPENCODE_CONFIG).is_file():
             failures.append(f"local OpenCode config not found: {OPENCODE_CONFIG}")
     elif BACKEND == "free":
-        print(f"free model: {FREE_MODEL}")
+        print("free pool:")
+        for entry in provider_entries():
+            marker = "OK" if entry["available"] else "skip"
+            suffix = " (experimental)" if entry["experimental"] else ""
+            print(f"  {marker}: {entry['scope']} / {entry['model']}{suffix}")
     if BACKEND == "free":
         try:
-            print(f"opencode: {resolve_opencode()}")
+            print(f"dsh: {resolve_dsh()}")
         except RuntimeError as exc:
             failures.append(str(exc))
     elif BACKEND == "local" or OFFLINE_MODE:
@@ -800,9 +973,10 @@ def main() -> int:
         payload = dict(state)
         payload["effective_status"] = effective_status(state)
         payload["backend"] = BACKEND
+        active_info = payload.get("tasks", {}).get(payload.get("current_task"), {}) if payload.get("current_task") else {}
         payload["model"] = (
             LOCAL_MODEL if BACKEND == "local"
-            else FREE_MODEL if BACKEND == "free"
+            else active_info.get("selected_model", FREE_POOL[0].model) if BACKEND == "free"
             else OPENCODE_MODEL
         )
         payload["pause_marker"] = str(PAUSE_FILE) if PAUSE_FILE.exists() else None

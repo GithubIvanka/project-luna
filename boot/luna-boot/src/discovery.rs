@@ -279,7 +279,6 @@ pub struct BootCatalog {
 impl BootCatalog {
     pub fn discover(fs: &mut SystemFilesystem) -> BootResult<Self> {
         let images = fs.read_dir("/images")?;
-        let recovery_dir = fs.read_dir("/recovery").unwrap_or_default();
         let cores = fs.read_dir("/cores")?;
         let kernel_dirs = fs.read_dir("/kernels")?;
         let boot_state = match fs.read_file("/config/boot-state.toml") {
@@ -375,7 +374,9 @@ impl BootCatalog {
                 kernel.kernel_path,
                 kernel.version.clone(),
             );
-            target = target.with_cmdline("console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug");
+            target = target.with_cmdline(
+                "console=tty0 console=ttyS0,115200n8 loglevel=7 ignore_loglevel initcall_debug",
+            );
             match manifest.role {
                 ImageRole::Normal => targets.push(target),
                 ImageRole::Factory => factory_candidates.push(target.factory()),
@@ -383,52 +384,52 @@ impl BootCatalog {
             }
         }
 
+        // Recovery DATA is a singleton provider for the whole System Image set.
+        // Its version is metadata; the physical recovery GUI image itself is
+        // always /recovery/recovery.squashfs so four System Images never carry
+        // four copies of the recovery compositor/runtime.
         let mut recovery_candidates = Vec::new();
-        for image in recovery_dir
-            .iter()
-            .filter(|entry| entry.is_file() && entry.name.ends_with(".squashfs"))
-        {
-            let Some(stem) = image.name.strip_suffix(".squashfs") else {
-                continue;
-            };
-            let Some(version) = stem.strip_prefix("recovery-") else {
-                continue;
-            };
-            let manifest_path = format!("/recovery/{}.toml", stem);
-            let manifest_bytes = match fs.read_file(&manifest_path) {
-                Ok(bytes) => bytes,
-                Err(_) => continue,
-            };
-            let manifest = match ImageManifest::parse(&manifest_bytes) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            if manifest.version != version
-                || manifest.format != "squashfs"
-                || manifest.arch != "x86_64"
+        let recovery_image_path = "/recovery/recovery.squashfs";
+        let recovery_manifest_path = "/recovery/recovery.toml";
+        if fs.file_exists(recovery_image_path)? && fs.file_exists(recovery_manifest_path)? {
+            let manifest_bytes = fs.read_file(recovery_manifest_path)?;
+            let manifest = ImageManifest::parse(&manifest_bytes)?;
+            if manifest.format == "squashfs"
+                && manifest.arch == "x86_64"
+                && manifest.role == ImageRole::Recovery
             {
-                continue;
+                if let Some(base) = targets
+                    .iter()
+                    .filter(|target| {
+                        manifest.compatible_inits.iter().any(|allowed| {
+                            allowed == "*"
+                                || allowed
+                                    == target
+                                        .init_path
+                                        .trim_start_matches("/cores/luna-")
+                                        .trim_end_matches(".init")
+                        })
+                    })
+                    .max_by(|a, b| version_cmp(&a.system_version, &b.system_version))
+                    .cloned()
+                {
+                    recovery_candidates.push(
+                        BootTarget::new(
+                            String::from("Recovery Environment"),
+                            base.image_family,
+                            base.system_version,
+                            base.system_image_path,
+                            base.manifest_path,
+                            base.init_path,
+                            base.kernel_path,
+                            base.kernel_id,
+                        )
+                        .with_cmdline("console=tty0 console=ttyS0,115200n8 recovery quiet")
+                        .with_recovery_data(recovery_image_path)
+                        .recovery(),
+                    );
+                }
             }
-
-            let Some(init) = select_init(&manifest, &inits) else {
-                continue;
-            };
-            let Some(kernel) = select_kernel(&init.manifest, &kernels) else {
-                continue;
-            };
-            let target = BootTarget::new(
-                String::from("Recovery Environment"),
-                manifest.name.clone(),
-                manifest.version.clone(),
-                format!("/recovery/{}", image.name),
-                manifest_path,
-                init.init_path.clone(),
-                kernel.kernel_path,
-                kernel.version.clone(),
-            )
-            .with_cmdline("quiet loglevel=3")
-            .recovery();
-            recovery_candidates.push(target);
         }
 
         targets.sort_by(|a, b| version_cmp(&b.system_version, &a.system_version));

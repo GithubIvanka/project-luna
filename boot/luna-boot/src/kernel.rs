@@ -1,7 +1,7 @@
 //! Linux bzImage loader and physical-memory preparation.
 
-use alloc::vec;
 use alloc::format;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ptr;
 
@@ -104,7 +104,9 @@ impl<'a> KernelLoader<'a> {
         debug_stage("Luna: kernel 12 init alloc start\r\n");
         let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
         debug_stage("Luna: kernel 13 init alloc done\r\n");
-        debug_stage(&format!("Luna: init phys=0x{init_address:x} size={init_size}\r\n"));
+        debug_stage(&format!(
+            "Luna: init phys=0x{init_address:x} size={init_size}\r\n"
+        ));
         unsafe {
             ptr::write_bytes(init_address as *mut u8, 0, init_pages * PAGE_SIZE);
             ptr::copy_nonoverlapping(init.as_ptr(), init_address as *mut u8, init_size);
@@ -339,9 +341,7 @@ fn allocate_kernel(_preferred: u64, size: usize, alignment: u64) -> BootResult<u
     if alignment == 0 || !alignment.is_power_of_two() {
         return Err(BootError::InvalidKernel);
     }
-    let extra = alignment
-        .checked_sub(1)
-        .ok_or(BootError::InvalidKernel)? as usize;
+    let extra = alignment.checked_sub(1).ok_or(BootError::InvalidKernel)? as usize;
     let request_size = size
         .checked_add(extra)
         .ok_or(BootError::MemoryAllocationFailed)?;

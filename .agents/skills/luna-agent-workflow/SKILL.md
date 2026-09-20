@@ -45,6 +45,12 @@ Use this skill for non-trivial coding, architecture, debugging, and research tas
 - Use graph results to locate relevant symbols and dependency paths, then verify conclusions against the actual source and current documentation.
 - Treat the graph as a navigation aid, not authoritative truth; stale graph data must never override the repository.
 
+## Resilient model routing
+- In `free` backend work, provider boundaries are the unit of quota isolation: several free models behind one gateway do not count as independent capacity.
+- Preserve the same task, AI turn, Git state, acceptance criteria, skills, and verification evidence when switching providers.
+- Prefer the next independent provider on quota, rate-limit, auth, or outage failures; do not spend remaining turns cycling the same exhausted provider.
+- Keep local Ollama/Ornith available as the final execution tier so cloud availability cannot become a permanent queue blocker.
+
 ## Review mode
 - After meaningful changes, review the diff as if finding regressions.
 - Check architecture boundaries, error paths, compatibility, and tests.
