@@ -1,85 +1,46 @@
-# Project Luna — Component Development Template
+# Шаблон разработки компонента
 
-Use this template when starting a dedicated component-development discussion.
+Используйте эту структуру для каждого активного архитектурного документа компонента.
 
-## 1. Context to provide
+## Идентичность
 
-```text
-Read first:
-- docs/ARCHITECTURE.md
-- docs/decisions/ACCEPTED-DECISIONS.md
-- docs/architecture/components/<COMPONENT>.md
-- docs/development/API-CONTRACTS-1.6.md
-- docs/architecture/CRATE-MAP.md
-- relevant RFC/ADR files named by the component document
-```
+- имя компонента;
+- путь в репозитории;
+- архитектурная роль;
+- статус.
 
-Then inspect the current component source and tests.
+## Ответственность
 
-## 2. Required analysis
+Что принадлежит компоненту.
 
-Before editing, state internally:
+## Не входит в ответственность
 
-- exact ownership;
-- explicit non-ownership;
-- current implementation status;
-- allowed dependencies;
-- accepted invariants;
-- open decisions;
-- tests that prove the contract.
+Что компонент не должен владеть.
 
-Do not fill an open decision with a guess.
+## Жизненный цикл
 
-## 3. Implementation sequence
+Состояния, переходы и поведение при запуске/остановке.
 
-```text
-contract
- ↓
-current implementation audit
- ↓
-smallest compatible change
- ↓
-unit tests
- ↓
-integration tests
- ↓
-format/check/clippy/build
- ↓
-diff/architecture audit
- ↓
-commit
-```
+## Зависимости
 
-## 4. New requirement
+Cargo-зависимости и архитектурные зависимости. Отдельно указывать обязательные зависимости и необязательные/backend-связи.
 
-When a requested feature crosses a boundary:
+## Интерфейсы
 
-```text
-identify existing owner
-       ↓
-add API to existing owner if appropriate
-       ↓
-otherwise open architecture question
-       ↓
-ADR/RFC acceptance
-       ↓
-component map update
-       ↓
-implementation
-```
+Публичный Rust API, IPC/wire contract, файлы, descriptors и другие внешне видимые границы.
 
-Never create a new crate first and justify it afterwards.
+## Взаимодействия
 
-## 5. Completion report
+Какие компоненты его вызывают или используют и допустимое направление зависимости.
 
-Every component-development task should report:
+## Поведение при отказах
 
-- files changed;
-- contract preserved;
-- tests added/updated;
-- commands/checks run;
-- CI result for the exact commit if available;
-- remaining open work;
-- any architecture question discovered.
+Fail-closed поведение, повторные попытки, fallback или правила распространения ошибки.
 
-Do not report an implementation as complete merely because it compiles.
+## Статус реализации
+
+Отдельно указывать `implemented`, `partial` и `planned`. Прототип не означает завершённость архитектурной функциональности.
+
+## Правила изменений
+
+Новая ответственность, направление зависимости или архитектурная граница должны быть обсуждены и одобрены до реализации.

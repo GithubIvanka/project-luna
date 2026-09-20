@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "local/ornith-1.5:9b",
+  "provider": {
+    "local": {
+      "name": "Local inference",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "{env:LUNA_LOCAL_LLM_URL}"
+      },
+      "models": {
+        "ornith-1.5:9b": {
+          "name": "Ornith-1.5:9b (local)",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
+    }
+  }
+}

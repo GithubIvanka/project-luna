@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT="${LUNA_DESKTOP_ROOT:-${REPO_ROOT}/dist/desktop-root}"
+ROOT="${LUNA_DESKTOP_ROOT:-${REPO_ROOT}/dist/.build/desktop-payload}"
 SRC="${LUNA_DESKTOP_SRC:-${REPO_ROOT}/dist/sources}"
 JOBS="${LUNA_BUILD_JOBS:-$(nproc)}"
 YAZI_TAG="${LUNA_YAZI_TAG:-v26.9.1}"
@@ -11,10 +11,18 @@ YAZI_COMMIT="${LUNA_YAZI_COMMIT:-8dd895c695a5950330c2623eb43debf323b60654}"
 mkdir -p "$ROOT" "$SRC"
 fetch_git() {
   local url="$1" ref="$2" dir="$3"
-  if [ ! -d "$dir/.git" ]; then git clone --filter=blob:none --no-tags "$url" "$dir"; fi
-  git -C "$dir" fetch --depth 1 origin "$ref"
-  git -C "$dir" checkout --force FETCH_HEAD
-  git -C "$dir" clean -fdx >/dev/null
+  if [ ! -d "$dir/.git" ]; then
+    git clone --filter=blob:none --no-tags "$url" "$dir"
+  fi
+  if [ "${LUNA_OFFLINE_SOURCES:-0}" = "1" ]; then
+    echo "using existing source checkout for $url at $(git -C "$dir" rev-parse HEAD)" >&2
+    return 0
+  fi
+  if git -C "$dir" fetch --depth 1 origin "$ref"; then
+    git -C "$dir" checkout --force FETCH_HEAD
+  else
+    echo "warning: unable to refresh $url at $ref; using existing checkout $(git -C "$dir" rev-parse HEAD)" >&2
+  fi
 }
 
 fetch_git https://github.com/sxyazi/yazi.git "$YAZI_TAG" "$SRC/yazi"
@@ -108,7 +116,7 @@ EOF
 # not depend on the CI host after boot.
 bundle_elf_deps() {
   local root="$1" pass=0
-  while [ "$pass" -lt 8 ]; do
+  while [ "$pass" -lt 32 ]; do
     pass=$((pass + 1)); local changed=0
     while IFS= read -r -d '' elf; do
       file "$elf" | grep -q 'ELF' || continue
@@ -116,14 +124,19 @@ bundle_elf_deps() {
         case "$dep" in
           /lib/*|/lib64/*|/usr/lib/*)
             [ -e "$dep" ] || continue
-            local rel="${dep#/}" dst="$root/$rel"
-            if [ ! -e "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
+            local rel="${dep#/}"
+            local dst="$root/$rel"
+            if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then mkdir -p "$(dirname "$dst")"; cp -a "$dep" "$dst"; changed=1; fi
             ;;
         esac
-      done < <(ldd "$elf" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib|usr\/lib)/ {print $1}')
+      done < <(ldd "$elf" 2>/dev/null | awk '/=> \/(lib|usr\/lib)/ {print $3} /^\/(lib64|lib|usr\/lib)/ {print $1}')
     done < <(find "$root" -type f -perm -0100 -print0)
-    [ "$changed" -eq 0 ] && break
+    if [ "$changed" -eq 0 ]; then
+      return 0
+    fi
   done
+  echo "dependency closure did not converge after $pass passes" >&2
+  return 1
 }
 
 command -v file >/dev/null

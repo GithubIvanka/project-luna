@@ -1,16 +1,32 @@
-# Application Launch Contract
+# Контракт запуска приложения
 
-**Status:** Draft implemented in `luna-app-runtime`
-**Scope:** `UserSession` → `ApplicationInstance`
+**Статус:** принятый архитектурный контракт
+**Область:** `UserSession` → `luna-app-runtime` → `ApplicationInstance`
 
-## Launch pipeline
+## 1. Общая модель
+
+`luna-app-runtime` получает запрос на запуск и строит один `ApplicationInstance`. Внутри жизненного цикла этого экземпляра выполняется:
 
 ```text
-Bundle declaration
-    ↓
+планирование
+  ↓
+mapping
+  ↓
+authorization
+  ↓
+materialization
+  ↓
+запуск
+```
+
+Конкретная последовательность:
+
+```text
 ApplicationPlan
     ↓
 MappingPlan
+    ↓
+luna-root-mapping
     ↓
 luna-security
     ↓
@@ -18,55 +34,95 @@ AuthorizedApplicationPlan
     ↓
 luna-namespace
     ↓
-process spawn / exec
-    ↓
 ApplicationInstance
+    ↓
+процесс приложения
 ```
 
-The application execution plan is validated before authorization. The authorized plan is a distinct type consumed by the process launcher.
+## 2. ApplicationPlan и MappingPlan
 
-## ApplicationPlan
+`ApplicationPlan` содержит identity Bundle/приложения, версию, `UserSession`, `RuntimeSpec`, executable, аргументы, требования к ресурсам, mappings и запросы разрешений. План не является разрешением.
 
-`ApplicationPlan` contains application identity/version, session identity, `RuntimeSpec`, executable path and arguments, resource declarations, mapping context, and explicit authorization requests.
+`MappingPlan` описывает логические пути и допустимые классы источников. `luna-root-mapping` владеет семантикой mapping, его валидацией и построением детерминированного представления.
 
-The plan is orchestration state owned by the application runtime boundary. It is not a Bundle codec, namespace implementation, or security policy store.
+Физические пути `LUNA-SYS/...` и `LUNA-DATA/...` не являются частью публичной семантики Bundle.
 
-## Mapping
+## 3. RuntimeSpec и выбор libc
 
-The plan verifies runtime compatibility, every declared logical resource, executable reachability through the `MappingTable`, and mapping consistency.
+`RuntimeSpec` является частью `ApplicationInstance`. Он определяет execution environment приложения.
 
-Mapping validation precedes security evaluation. `luna-root-mapping` remains responsible only for deterministic logical-to-physical mapping semantics.
+Для приложения выбирается ровно одна libc/runtime-среда:
 
-## Authorization
+```text
+musl
+или
+Glibc
+```
 
-`luna-security` evaluates the complete request set. `Deny`, policy errors, and unsupported `Constrained` decisions fail closed.
+`musl` — native runtime Luna. `glibc` — compatibility runtime для приложений, которым требуется glibc. Сам выбор libc не является отдельным daemon или runtime-компонентом.
 
-Successful authorization creates `AuthorizedApplicationPlan`. No namespace or process operation is performed as part of policy evaluation.
+`RuntimeProfile` отдельно описывает минимальный набор доверенных системных логических ресурсов, доступных приложению. Он не выбирает libc.
 
-## Process launch
+## 4. Авторизация
 
-The launcher accepts only `AuthorizedApplicationPlan`. It stages an execution root, materializes the logical root in the child, and creates the supervised process through `luna-system-runtime`.
+`luna-security` — единственная policy authority. Он проверяет application identity, mappings, capabilities и иные requests и создаёт sealed `AuthorizedApplicationPlan`.
 
-The executable must be absolute, traversal-free, and present in the authorized mapping. Spawn failure cleans the temporary staging root.
+```text
+request != grant
+```
 
-## ApplicationInstance
+Authorization должна завершиться до materialization. `Deny`, ошибка политики и неподдерживаемое ограниченное решение приводят к fail closed.
 
-`ApplicationInstance` records instance identity, application identity/version, session identity, runtime specification, lifecycle state, and supervised process identity.
+Trust, криптографическая подпись и authorization — разные решения. Доверие Bundle не означает автоматического предоставления прав приложению.
 
-The plan launcher marks the instance `Running` only after successful process creation and process attachment.
+## 5. Materialization и namespace
 
-## Tests
+`luna-namespace` получает только авторизованный результат и реализует Linux-specific materialization:
 
-Planning and authorization coverage includes inactive sessions, executable validation, executable mapping, runtime mismatch, principal binding, fail-closed denial, successful authorization, and the authorized launcher API surface.
+- отдельный mount namespace для каждого `ApplicationInstance`;
+- RAM-backed logical `/`;
+- разрешённые mappings;
+- `RuntimeProfile`;
+- необходимые runtime filesystems;
+- требуемые ограничения доступа;
+- финальная подготовка процесса.
 
-Privileged Linux namespace/process tests remain a separate integration stage.
+PID namespace по умолчанию не создаётся. Приложение остаётся обычным процессом в системном PID namespace и получает обычный PID, отличный от `1`.
 
-## Open decisions
+## 6. ApplicationInstance
 
-- Bundle executable declaration schema;
-- resource declaration → authorization request translation;
-- `Ask` and confirmation IPC;
-- `Constrained` enforcement;
-- cgroup/resource-limit contract;
-- restart policy;
-- final logical-root mount/portal set.
+`ApplicationInstance` принадлежит `luna-app-runtime` и хранит identity экземпляра, identity/версию приложения, session identity, `RuntimeSpec`, lifecycle state, PID/process identity после создания, результат завершения и диагностическую информацию об ошибке.
+
+Внешний caller не меняет lifecycle напрямую.
+
+Базовые состояния:
+
+```text
+Created → Starting → Running → Stopping → Stopped
+Starting → Failed
+Running → Crashed
+Stopping → Failed
+```
+
+## 7. Граница компонентов
+
+```text
+luna-app-manager   → установка и lifecycle Bundle
+luna-app-runtime   → ApplicationInstance и запуск
+luna-root-mapping  → mapping semantics / MappingPlan
+luna-security      → authorization / trust policy
+luna-namespace     → namespace/materialization
+luna-system-runtime → system-wide supervision
+```
+
+Новый application init/supervisor не создаётся.
+
+## 8. ELF dependency closure
+
+luna-app-runtime содержит этап планирования ELF-зависимостей, который не вызывает host dynamic loader. Анализатор извлекает класс ELF, endian, machine, PT_INTERP, DT_NEEDED, DT_RPATH и DT_RUNPATH.
+
+ElfDependencyClosure рекурсивно обходит interpreter и shared objects через явный ElfDependencyResolver. Циклы схлопываются в множество closure; несоответствие архитектуры приводит к fail closed.
+
+FilesystemElfResolver работает только с явно переданными доверенными источниками и не использует LD_LIBRARY_PATH, host ld.so.cache или host default directories. $ORIGIN нормализуется лексически.
+
+Этот этап пока является подготовкой dependency closure. Подключение closure к MappingPlan, provenance ресурсов и окончательной авторизации luna-security остаётся отдельной следующей стадией.

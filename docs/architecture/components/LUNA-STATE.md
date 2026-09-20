@@ -1,37 +1,30 @@
 # `luna-state`
 
-**Статус:** durable boundary реализована; первый backend — `redb`.
-
 ## Назначение
 
-Хранит долговечное состояние Luna транзакционно и отделяет его от конфигурации и disposable cache.
+Типизированная абстракция долговременного состояния с транзакционной реализацией.
 
 ## Владеет
 
-- model durable system state;
-- transactions;
-- persistence abstraction;
-- recovery/reconciliation state для долгих операций;
-- schema/migration boundary.
-
-Примеры состояния: зарегистрированные сущности, update operation state, activation metadata, durable system facts.
+- ключами и значениями состояния;
+- revision и transactions;
+- хранилищем в памяти для тестов;
+- persistent backend на `redb`.
 
 ## Не владеет
 
-Bundle payload, System Image filesystem, пользовательскими файлами или ephemeral cache.
+Смыслом конкретных доменных ключей. Владение схемой и policy остаётся у соответствующего manager, например `luna-system-manager`.
 
-## Backend
+## Контракт
 
-Первый принятый backend — синхронный `redb`. Backend является detail реализации storage boundary и не должен просачиваться во все верхние компоненты.
+Чтение, изменение и commit в рамках одной транзакции должны быть атомарными и учитывать revision.
 
-## Надёжность
+## Хранение
 
-Операция, признанная успешно записанной, должна сохраняться при штатном завершении процесса и корректно восстанавливаться после перезапуска. Частичная запись не должна оставлять неоднозначный lifecycle state.
+Текущее долговременное состояние системы находится под `LUNA-DATA/system/state`.
 
-## Связь с update
+Это состояние отделено от BootAttempt marker и от подробного progress загрузки в RAM.
 
-`luna-update-manager` оркестрирует checkpoint/rollback, а `luna-state` хранит durable operation/state data.
+## Статус
 
-## Открыто
-
-Миграции схемы, reconciliation после crash и окончательная граница между boot state, system state и recovery state.
+`redb` backend и тестовое хранилище существуют. Domain schema и policy реализуются более высокими компонентами.

@@ -1,27 +1,35 @@
 [workspace]
 resolver = "2"
 members = [
-  "components/luna-common",
-  "components/luna-fs",
-  "components/luna-root-mapping",
-  "components/luna-namespace",
-  "components/luna-config",
-  "components/luna-security",
-  "components/luna-state",
-  "components/luna-event",
-  "components/luna-bundle",
-  "components/luna-app-manager",
-  "components/luna-system-manager",
-  "components/luna-update-manager",
-  "components/luna-device-manager",
-  "components/luna-kernel-manager",
-  "components/luna-system-runtime",
-  "components/luna-user-session",
-  "components/luna-app-runtime",
-  "components/luna-login",
-  "components/luna-cli",
-  "components/luna-audio",
-  "components/luna-network",
-  "components/luna-bluetooth",
-  "components/luna-files",
+  "components/core/luna-common",
+  "components/core/luna-fs",
+  "components/core/luna-root-mapping",
+  "components/core/luna-namespace",
+  "components/core/luna-config",
+  "components/core/luna-security",
+  "components/core/luna-state",
+  "components/core/luna-event",
+  "components/core/luna-bundle",
+  "components/system/luna-app-manager",
+  "components/core/luna-system-manager",
+  "components/core/luna-update-manager",
+  "components/core/luna-device-manager",
+  "components/core/luna-kernel-manager",
+  "components/core/luna-system-runtime",
+  "components/core/luna-user-session",
+  "components/core/luna-app-runtime",
+  "components/core/luna-platform",
+  "components/system/luna-cli",
+  "components/external/providers/luna-audio",
+  "components/external/providers/luna-network",
+  "components/external/providers/luna-bluetooth",
+  "components/external/providers/luna-files",
+  "tools/build-progress",
 ]
+
+[workspace.metadata.luna.components]
+core = "OS foundation and boot/runtime infrastructure"
+system = "Luna-owned system applications and administration tools"
+apps = "Luna user applications"
+external.providers = "Luna-facing adapters backed by external providers"
+external.libraries = "Additional external/support libraries"

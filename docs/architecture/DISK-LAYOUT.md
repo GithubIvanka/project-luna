@@ -1,63 +1,72 @@
-# Project Luna — модель диска и хранения данных
+# Структура диска
 
-**Статус:** принятая архитектура; часть implementation details ещё открыта.  
-**Источник истины:** `docs/ARCHITECTURE.md` и принятые решения.
-
-## 1. Физическая модель
+## Физические разделы
 
 ```text
 Disk
 ├── EFI
-├── SYSTEM
-├── DATA
+├── LUNA-SYS
+├── LUNA-DATA
 └── SWAP
 ```
 
-`SWAP` необязателен и может быть разделом, файлом или ZRAM. EFI и SYSTEM управляются ОС. DATA является основной изменяемой и пользовательской областью.
+Метки `LUNA-SYS` и `LUNA-DATA` являются каноническими именами физических разделов.
 
-EFI/SYSTEM и DATA/SWAP допускается размещать на разных физических дисках.
+## Связь EFI и LUNA-SYS
 
-## 2. EFI
+EFI и `LUNA-SYS` образуют единую boot-пару и должны находиться на одном физическом диске. `luna-boot.efi` проверяет это и загружает Luna только из `LUNA-SYS` этого диска.
 
-Только UEFI boot infrastructure:
+## LUNA-SYS
 
-```text
-EFI/
-└── Luna/
-    └── luna-boot.efi
-```
-
-Пользователь не должен просматривать или редактировать EFI в штатной работе.
-
-## 3. SYSTEM
-
-Назначение: immutable/versioned OS payload и kernels.
+`LUNA-SYS` управляется ОС и не предоставляется как обычное пользовательское хранилище.
 
 ```text
-SYSTEM/
+LUNA-SYS/
 ├── images/
 │   ├── luna-X.Y.Z.squashfs
 │   ├── luna-X.Y.Z.toml
 │   └── ...
-└── kernels/
-    └── ...
+├── cores/
+│   ├── luna-X.Y.Z.init
+│   ├── luna-X.Y.Z.toml
+│   └── ...
+├── kernels/
+│   └── <kernel-id>/
+│       └── ...
+├── config/
+│   ├── boot-state.toml
+│   ├── luna-data.toml
+│   └── ...
+└── recovery/
+    ├── recovery.squashfs
+    └── recovery.toml
 ```
 
-Точная структура metadata внутри `kernels/` закрепляется Kernel Contract.
+Пути вроде `/images` и `/cores` в коде bootloader являются путями относительно корня подключённого `LUNA-SYS`, а не отдельными разделами. Используется именно `LUNA-SYS` того же физического диска, что и EFI.
 
-SYSTEM не является обычной пользовательской writable root filesystem.
+`LUNA-SYS/recovery/` содержит единственный канонический Recovery DATA Image и его manifest: `recovery.squashfs` + `recovery.toml`. Recovery DATA является общей GUI/recovery provider layer для набора версионированных System Images; отдельного Recovery System Image нет.
 
-## 4. DATA
+## LUNA-DATA
 
 ```text
-DATA/
+LUNA-DATA/
 ├── system/
 │   ├── apps/
 │   ├── drivers/
+│   ├── firmware/
 │   ├── libs/
-│   ├── volumes/
 │   ├── config/
-│   └── state/
+│   ├── resources/
+│   │   ├── fonts/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   ├── cursors/
+│   │   ├── sounds/
+│   │   ├── locales/
+│   │   └── translations/
+│   ├── state/
+│   ├── volumes/
+│   └── ...
 ├── users/
 │   └── <user>/
 │       ├── home/
@@ -66,58 +75,30 @@ DATA/
 └── cache/
 ```
 
-`DATA/system/apps/` — общие установленные immutable Bundles.  
-`DATA/system/drivers/` — OS-managed driver entities.  
-`DATA/system/libs/` — адресуемые shared dependencies.  
-`DATA/system/volumes/` — внутреннее состояние внешних томов.  
-`DATA/system/config/` — машинная конфигурация.  
-`DATA/system/state/` — durable state через `luna-state`.  
-`DATA/users/<user>/` — пользовательское содержимое.  
-`DATA/cache/` — disposable cache.
+`apps`, `drivers`, `firmware`, `libs`, `config` и `resources` являются каноническими областями `LUNA-DATA/system`. `resources/` использует ту же классификацию, что и System Image: `fonts/`, `icons/`, `themes/`, `cursors/`, `sounds/`, `locales/` и `translations/`. `drivers/` и `firmware/` относятся к разным классам и не объединяются. `state` и `volumes` остаются mutable-only областями DATA и отсутствуют в System Image. Новые каталоги верхнего уровня требуют явного архитектурного одобрения.
 
-## 5. Logical `/`
+## Расположение и привязка LUNA-DATA
 
-Физическая структура разделов не должна напрямую становиться root приложений.
+`LUNA-DATA` может находиться на том же физическом диске, что EFI/`LUNA-SYS`, либо на другом.
 
-```text
-physical storage
-      ↓
-controlled mapping
-      ↓
-logical Linux /
-      ↓
-per-application namespace
-```
+`LUNA-SYS/config/luna-data.toml` хранит GUID диска и GUID раздела целевой `LUNA-DATA` для быстрого подключения. Normal boot сначала использует эту стабильную привязку.
 
-Bundle declarations не должны раскрывать физические `DATA/system/...` пути.
+Если настроенный DATA недоступен, normal boot переходит в Recovery и не выбирает посторонний раздел молча. Recovery ищет и показывает кандидатов; при нескольких валидных кандидатах пользователь явно выбирает нужный. Выбранная GUID-пара может быть записана обратно в `luna-data.toml`.
 
-## 6. Filesystem implementation
+## Владение
 
-Текущий PC image builder использует ext4 для writable SYSTEM/DATA filesystem images, при этом сами System Images остаются SquashFS. Это implementation choice текущего bring-up и не меняет формат System Image.
+`LUNA-SYS` содержит неизменяемые и версионируемые артефакты загрузки и системные источники ОС, а также необходимую управляемую ОС конфигурацию и состояние. `LUNA-DATA` содержит долговременное изменяемое состояние. Пользовательский и application contract не должен требовать знания физических разделов.
 
-Btrfs может использоваться для checkpoint/rollback там, где это прямо предусмотрено соответствующим contract, но это не делает Btrfs обязательной файловой системой обычного DATA layout.
+## Выбор файловой системы
 
-## 7. Изменяемость
+Для текущей x86_64 PC-сборки:
+- EFI — FAT32;
+- LUNA-SYS — ext4;
+- LUNA-DATA — btrfs;
+- SWAP — swap.
 
-```text
-immutable/versioned:
-    SYSTEM images
-    boot-critical payload
+Это не меняет формат System Image: она остаётся непосредственно SquashFS.
 
-versioned/independent:
-    kernels
+## Граница безопасности
 
-mutable:
-    DATA
-```
-
-Пользовательские данные не зависят от версии System Image.
-
-## 8. Инварианты
-
-- System Images и kernels не хранятся в DATA.
-- DATA не превращается в традиционную Linux root hierarchy.
-- System Image immutable при обычной работе.
-- пользовательское и application state находится вне image.
-- EFI и SYSTEM являются OS-managed.
-- физические пути не являются частью Bundle mapping semantics.
+Обычные пользователи и приложения не получают запись в `LUNA-SYS`. Запись системных артефактов выполняет контролируемый update tooling. `LUNA-DATA` является persistent mutable boundary и разрешается явно при загрузке.

@@ -3,12 +3,38 @@
 
 extern crate alloc;
 
-use uefi::prelude::*;
 use uefi::boot::open_protocol_exclusive;
+use uefi::cstr16;
+use uefi::prelude::*;
 use uefi::proto::console::text::Output;
+
+#[entry]
+fn efi_main() -> Status {
+    uefi::helpers::init().expect("failed to initialize UEFI services");
+    if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Output>()
+        && let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle)
+    {
+        let _ = stdout.output_string(cstr16!("Luna: EFI entry\r\n"));
+    }
+    match boot::boot_flow() {
+        Ok(()) => Status::SUCCESS,
+        Err(error) => {
+            if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Output>()
+                && let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle)
+            {
+                let message =
+                    alloc::format!("{error}\r\n\r\nPress any key to return to firmware.\r\n");
+                menu::show_error(&mut stdout, &message);
+            }
+            log::error!("Luna boot failed: {error}");
+            Status::ABORTED
+        }
+    }
+}
 
 mod block;
 mod boot;
+mod boot_attempt;
 mod boot_key;
 mod boot_params;
 mod discovery;
@@ -25,21 +51,3 @@ mod menu;
 mod paging;
 mod splash;
 mod target;
-
-#[entry]
-fn efi_main() -> Status {
-    uefi::helpers::init().expect("failed to initialize UEFI services");
-    match boot::boot_flow() {
-        Ok(()) => Status::SUCCESS,
-        Err(error) => {
-            if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Output>() {
-                if let Ok(mut stdout) = open_protocol_exclusive::<Output>(handle) {
-                    let message = alloc::format!("{error}\r\n\r\nPress any key to return to firmware.\r\n");
-                    menu::show_error(&mut stdout, &message);
-                }
-            }
-            log::error!("Luna boot failed: {error}");
-            Status::ABORTED
-        }
-    }
-}

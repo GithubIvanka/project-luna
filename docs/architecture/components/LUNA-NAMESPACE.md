@@ -1,51 +1,67 @@
 # `luna-namespace`
 
-**Статус:** initial Linux materialization backend реализован; production security integration продолжается.
-
 ## Назначение
 
-Материализует уже разрешённый execution namespace приложения через Linux kernel primitives.
+Реализует Linux-specific namespace и materialization primitives для уже разрешённого запуска приложения.
 
 ## Владеет
 
-- создание и настройкой mount namespace;
-- controlled bind mounts;
-- подготовкой namespace filesystem view;
-- cleanup materialized resources;
-- низкоуровневой materialization части Root Mapping.
-
-## Обязательный порядок
-
-```text
-Bundle declaration
- ↓
-ApplicationPlan
- ↓
-MappingPlan
- ↓
-luna-security
- ↓
-luna-namespace
-```
-
-`luna-namespace` не должен обходить `luna-security` и сам выдавать приложению разрешения.
+- Linux mount namespace;
+- создание и настройкой изолированного namespace;
+- построением RAM-backed logical `/`;
+- подключением разрешённых mapping sources;
+- runtime pseudo-filesystems;
+- Linux-механизмами применения разрешённых ограничений;
+- низкоуровневой подготовкой процесса перед `execve()`.
 
 ## Не владеет
 
-Authorization policy, Bundle parsing, UserSession lifecycle, process supervision, UEFI или пользовательским UI.
+`luna-namespace` не принимает решения о разрешениях, не строит application policy, не устанавливает Bundles, не управляет `ApplicationInstance` и не становится application init/supervisor.
 
-## Linux mechanisms
+## Вход
 
-В основе используются существующие kernel primitives, прежде всего mount namespaces и bind mounts. Дополнительные namespaces/cgroups/seccomp подключаются только через соответствующие contracts.
+Компонент получает уже валидированный и авторизованный результат. Нельзя передавать ему произвольный `ApplicationPlan` как будто он уже разрешён.
 
-## Ошибки
+```text
+ApplicationPlan
+    ↓
+MappingPlan
+    ↓
+luna-root-mapping
+    ↓
+luna-security
+    ↓
+AuthorizedApplicationPlan
+    ↓
+luna-namespace
+```
 
-Если любой обязательный mount/materialization шаг не выполнен, namespace не считается готовым. Частично созданное окружение должно быть очищено.
+## Изоляция
 
-## Зависимости
+Для каждого `ApplicationInstance` mount namespace обязателен.
 
-`luna-root-mapping`, `luna-security`, `luna-fs` и Linux namespace APIs.
+PID namespace не создаётся по умолчанию. Приложение остаётся обычным non-1 процессом системного PID namespace.
 
-## Открыто
+User, network, IPC, UTS, time и другие namespaces создаются только когда это необходимо по разрешённой policy.
 
-Полная integration security enforcement, resource isolation, cleanup guarantees и production handling ошибок mount.
+## Logical root
+
+Рабочий `/` приложения — отдельная RAM-backed runtime-среда. Она собирается из `RuntimeProfile` и авторизованных mappings.
+
+Полный System Image не используется как готовый `/` приложения и не раскрывается приложению целиком.
+
+## Linux enforcement
+
+В зависимости от разрешённой policy применяются mount isolation, credentials, capabilities, Landlock, cgroups и другие Linux primitives. `CAP_SYS_ADMIN` и эквивалентный host-level доступ не выдаются приложению по умолчанию.
+
+## Материалиазация
+
+Компонент не добавляет ресурсы, которых нет в `AuthorizedApplicationPlan`. Ошибка materialization является отказом запуска, а не поводом расширить доступ.
+
+## Очистка
+
+После завершения запуска временные namespace/mount resources должны быть освобождены. Ошибка cleanup должна оставаться наблюдаемой отдельно от результата процесса.
+
+## Статус
+
+Базовые Linux namespace и mount primitives существуют. Полная production materialization, credential/capability enforcement и cleanup hardening продолжаются.

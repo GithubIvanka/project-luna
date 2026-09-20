@@ -1,127 +1,123 @@
 # `luna-app-runtime`
 
-**Статус:** `ApplicationInstance`, `ApplicationPlan` и authorized-process launch boundary реализованы; production lifecycle integration продолжается.
-
 ## Назначение
 
-Владеет выполнением и жизненным циклом запущенных приложений.
+Владеет выполнением и жизненным циклом запущенных приложений и состоянием `ApplicationInstance`.
 
-## Владеет
+`luna-app-runtime` находится между `UserSession` и конкретным `ApplicationInstance`. Внутри одного экземпляра он координирует планирование, mapping, authorization, materialization и запуск процесса.
 
-- identity и state `ApplicationInstance`;
-- `ApplicationPlan` и executable identity для конкретного запуска;
-- lifecycle процессов приложения;
-- подготовкой execution environment;
-- связью экземпляра с `UserSession`;
-- выбором runtime по `RuntimeSpec`;
-- границей между authorization и namespace/process enforcement.
-
-`RuntimeKind` является свойством `RuntimeSpec`, а не самостоятельным компонентом. Принятые semantics включают Luna, Glibc и Bundle runtime.
-
-## Поток запуска
+## Архитектура
 
 ```text
-Bundle declaration
-  ↓
-ApplicationPlan
-  ↓
-MappingPlan
-  ↓
-luna-security
-  ↓
-AuthorizedApplicationPlan
-  ↓
-luna-namespace
-  ↓
-process spawn / exec
-  ↓
-ApplicationInstance
-```
-
-План проходит валидацию до authorization. Authorization возвращает отдельный `AuthorizedApplicationPlan`; namespace materialization и process creation не выполняются во время policy evaluation.
-
-## Security boundary
-
-`ApplicationPlan` не является grant. Он содержит requests, mapping context и executable identity. Только `ApplicationPlan::authorize()` может создать `AuthorizedApplicationPlan`.
-
-```text
-request ≠ grant
-
-ApplicationPlan
-    ↓ validate
-luna-security
-    ↓ Allow
-AuthorizedApplicationPlan
-    ↓
-luna-namespace / process launch
-```
-
-`Deny`, policy errors и неподдержанные `Constrained` decisions являются fail-closed. Launcher не принимает обычный `ApplicationPlan`, только уже авторизованный тип.
-
-## Executable boundary
-
-Executable path является частью plan и должен:
-
-1. быть абсолютным;
-2. не содержать parent traversal;
-3. быть представлен в `MappingTable`.
-
-Это предотвращает замену разрешённого logical executable произвольным physical path на launch boundary.
-
-Полная спецификация схемы executable declaration в Bundle остаётся отдельным design question; текущий plan получает уже выбранный executable от orchestration layer.
-
-## Namespace materialization
-
-`luna-namespace` получает только authorized execution context. Физические пути DATA остаются внутренней реализацией. Приложение работает через logical root.
-
-Создание process staging и logical root происходит только после успешной authorization. При ошибке spawn временный staging root удаляется.
-
-## ApplicationInstance
-
-`ApplicationInstance` представляет один конкретный launched execution и хранит:
-
-- instance identity;
-- application identity/version;
-- session identity;
-- runtime specification;
-- lifecycle state;
-- supervised process identity, если процесс создан.
-
-Состояние `Running` выставляется только после успешного создания и attach supervised process для production launcher.
-
-## Ownership model
-
-```text
-luna-system-runtime
-    ↓
 UserSession
     ↓
 luna-app-runtime
     ↓
 ApplicationInstance
+    │
+    ├── ApplicationPlan
+    ├── MappingPlan
+    ├── RuntimeSpec
+    │     └── libc: musl | glibc
+    ├── luna-root-mapping
+    ├── luna-security
+    └── luna-namespace
 ```
 
-`luna-system-runtime` остаётся system-wide supervisor. `luna-app-runtime` владеет application execution lifecycle. Generic `luna-runtime` daemon отсутствует.
+Это структурная иерархия внутри lifecycle экземпляра, а не список отдельных daemon-процессов.
+
+## Владеет
+
+- identity и state `ApplicationInstance`;
+- `ApplicationPlan` и executable identity конкретного запуска;
+- `RuntimeSpec`;
+- lifecycle процесса приложения;
+- связь экземпляра с `UserSession`;
+- координацию остальных application-execution слоёв.
+
+## Поток запуска
+
+```text
+Application launch request
+        ↓
+luna-app-runtime
+        ↓
+ApplicationInstance
+        │
+        ├── plan: ApplicationPlan
+        ├── mapping: MappingPlan + luna-root-mapping
+        ├── authorization: luna-security
+        └── materialization: luna-namespace
+```
+
+Внутренняя последовательность:
+
+```text
+plan
+ ↓
+mapping
+ ↓
+authorization
+ ↓
+materialization
+ ↓
+process
+```
+
+`luna-app-runtime` не принимает security decisions и не создаёт физические mappings самостоятельно.
+
+## RuntimeSpec и libc
+
+`RuntimeSpec` описывает execution environment. Для одного процесса выбирается ровно одна libc:
+
+```text
+musl
+или
+glibc
+```
+
+`musl` — native Luna userspace. `glibc` — compatibility environment для приложений, которым требуется glibc.
+
+`RuntimeProfile` — отдельное описание доверенных системных логических ресурсов. Он не определяет libc.
+
+## ApplicationInstance
+
+Экземпляр хранит:
+
+- instance identity;
+- application identity и версию;
+- session identity;
+- `RuntimeSpec`;
+- lifecycle state;
+- process identity/PID после создания;
+- итог завершения (`exit code`, signal или abnormal outcome);
+- типизированную стадию и сообщение ошибки запуска/управления.
+
+Внешний caller может наблюдать instance, но не изменяет его lifecycle напрямую.
+
+## Жизненный цикл
+
+```text
+Created → Starting → Running → Stopping → Stopped
+Starting → Failed
+Running → Crashed
+Stopping → Failed
+```
+
+`Stopped`, `Crashed` и `Failed` — конечные состояния.
+
+## Session boundary
+
+Перед созданием staging и процесса runtime повторно проверяет, что переданный `UserSession` активен и соответствует session identity авторизованного плана.
+
+## Очистка
+
+После завершения процесса runtime освобождает временные resources namespace/staging. Ошибка очистки наблюдаема отдельно и не заменяет результат работы процесса.
 
 ## Не владеет
 
-Bundle install/remove, созданием UserSession, system-wide supervision, authorization policy, raw filesystem primitives или UEFI boot.
+Установкой Bundle, system-wide supervision, глобальной security policy, физическим storage discovery или отдельным application init/supervisor.
 
-## Тестовый контракт
+## Статус
 
-План проверяется отдельно от Linux mount/exec tests:
-
-- inactive session отклоняется;
-- невалидный bundle отклоняется;
-- runtime/mapping mismatch отклоняется до authorization;
-- executable вне mapping отклоняется;
-- foreign principal отклоняется;
-- `Deny` не создаёт authorized plan;
-- `Allow` создаёт typed `AuthorizedApplicationPlan`;
-- launcher принимает только authorized plan type.
-
-Linux integration дополнительно проверяет cleanup staging root и lifecycle процесса.
-
-## Открыто
-
-Production integration с IPC, полноценным lifecycle reconciliation, resource limits/cgroups, restart policy, user confirmation IPC и полным kernel enforcement.
+Домен `ApplicationInstance`, планирование, authorization pipeline и базовый Linux runtime backend реализованы; полная production integration и kernel/provider enforcement продолжаются.

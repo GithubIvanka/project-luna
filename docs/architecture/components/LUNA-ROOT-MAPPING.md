@@ -1,42 +1,29 @@
 # `luna-root-mapping`
 
-**Статус:** foundation реализован; integration с logical root/materialization продолжается.
-
 ## Назначение
 
-Определяет логическую модель filesystem mapping и строит проверяемый `MappingPlan` для конкретной execution environment.
+Определяет логическую модель filesystem/resource mapping и строит проверяемый `MappingPlan` для конкретной execution environment.
 
 ## Владеет
 
-- logical paths;
+- логическими путями;
 - mapping declarations;
-- Root Mapping semantics;
+- семантикой Root Mapping;
 - построением и валидацией `MappingPlan`;
-- связыванием Bundle/resource declarations с runtime/user/system context.
+- связыванием Bundle/resource declarations с runtime, user и system context;
+- разрешением допустимого источника для логического ресурса.
 
 ## Не владеет
 
-Authorization policy, namespace creation, raw filesystem I/O, Bundle container codec или process lifecycle.
+`luna-root-mapping` не принимает security decisions, не создаёт Linux namespaces, не выполняет raw filesystem I/O, не устанавливает Bundles и не управляет lifecycle процессов.
 
-## Принцип
+## MappingPlan
 
-Физические пути DATA не являются публичной семантикой Bundle. Приложение получает логический view:
-
-```text
-/
-├── app
-├── lib
-├── data
-└── tmp
-```
-
-а реальное physical mapping остаётся внутренней реализацией.
-
-## Security boundary
-
-`MappingPlan` описывает требуемое отображение, но не выдаёт право на его materialization.
+`MappingPlan` описывает требуемое логическое отображение. Он не является security grant.
 
 ```text
+ApplicationPlan
+    ↓
 MappingPlan
     ↓
 luna-security
@@ -44,14 +31,32 @@ luna-security
 luna-namespace
 ```
 
-## Ошибки
+Физические пути `LUNA-SYS/...` и `LUNA-DATA/...` остаются внутренней деталью реализации.
 
-Неполный, неоднозначный или внутренне противоречивый mapping должен отклоняться до security decision.
+## Правила
 
-## Зависимости
+Каждое `ApplicationInstance` получает собственную mapping table. Глобальной таблицы для всех приложений нет.
 
-`luna-common`, `luna-fs` и domain resource descriptions.
+Базовая гранулярность mapping — отдельный файл. Subtree/directory mapping разрешён, когда это соответствует семантике ресурса, например для общей библиотеки или набора ресурсов.
 
-## Открыто
+При конфликте двух mappings внутри одного namespace результатом является ошибка; молчаливое перезаписывание недопустимо.
 
-Полная logical-root contract, lazy materialization и mapping rules для user files/external volumes.
+Таблица активного экземпляра после принятия не меняется на месте. Изменение создаёт новое валидированное состояние и при необходимости повторяет authorization.
+
+Для resource classes, где существует несколько уровней источников, используется согласованная для этого класса семантика приоритета; универсального filesystem precedence для всех типов ресурсов нет.
+
+## Runtime
+
+Mapping должен быть совместим с выбранной для экземпляра libc/runtime environment. Несовместимость обнаруживается до authorization.
+
+## Граница безопасности
+
+`luna-root-mapping` отвечает на вопрос «какое логическое отображение требуется и как оно может быть построено». `luna-security` отдельно отвечает на вопрос «разрешено ли это». `luna-namespace` реализует уже разрешённый результат.
+
+## Хранение
+
+Активные mapping tables являются runtime state и находятся в RAM. Одинаковые неизменяемые определения могут безопасно переиспользоваться между экземплярами, но состояние конкретного экземпляра остаётся независимым.
+
+## Статус
+
+Базовая модель mapping и тесты существуют. Полная production containment и разрешение всех system/user/volume sources продолжают разрабатываться.

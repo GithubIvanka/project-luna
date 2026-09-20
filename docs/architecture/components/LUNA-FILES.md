@@ -1,35 +1,25 @@
 # `luna-files`
 
-**Статус:** GTK4 GUI присутствует; filesystem/volume integration ещё неполная.
-
 ## Назначение
 
-Пользовательский file-manager client Luna. Он предоставляет удобный интерфейс к logical user files и подключённым volumes.
+Luna-owned граница файлового менеджера: модель файловых объектов и операции над ними.
 
 ## Владеет
 
-- навигацией по доступному пользователю logical filesystem;
-- отображением файлов и каталогов;
-- стандартными file operations;
-- отображением volumes;
-- presentation ошибок и permissions.
+Представлением файловых записей, жизненным циклом файловых операций и backend interface для пользовательского файлового окружения.
 
 ## Не владеет
 
-Raw device discovery, mount policy, application authorization, Bundle lifecycle или kernel/storage backend.
+Политикой физических разделов, авторизацией application sandbox или низкоуровневыми filesystem primitives.
 
-## Внешние носители
+## Зависимости
 
-File manager получает volume state от Luna device/volume boundary и не должен самостоятельно управлять `/dev` или изобретать mount policy.
+Текущий crate использует GTK4 для binary/UI поверхности.
 
-## Application file access
+## Пользовательская модель
 
-Наличие file manager не является реализацией application portal. Доступ приложения к конкретному файлу должен быть отдельным security/portal contract.
+Файловый менеджер не должен показывать пользователю физическую структуру `LUNA-SYS` или требовать ручных mount-команд для обычных внешних томов.
 
-## Provider
+## Статус
 
-Yazi может поставляться как пользовательский инструмент, но факт его упаковки не доказывает прямую интеграцию `yazi-core` в Luna Files.
-
-## Открыто
-
-Полные file operations, navigation, volume integration, permissions/error UX и дальнейшая backend integration.
+Базовые domain types и UI-facing слой существуют. Полная desktop-реализация ещё не завершена.

@@ -6,13 +6,13 @@
 
 use alloc::vec::Vec;
 
-use uefi::boot::{self, open_protocol_exclusive, LoadImageSource, SearchType};
+use uefi::boot::{self, LoadImageSource, SearchType, open_protocol_exclusive};
+use uefi::proto::BootPolicy;
 use uefi::proto::device_path::build::{self, DevicePathBuilder};
 use uefi::proto::device_path::{DevicePath, DeviceSubType, DeviceType};
 use uefi::proto::loaded_image::LoadedImage;
 use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::proto::BootPolicy;
-use uefi::{cstr16, Handle, Identify};
+use uefi::{Handle, Identify, cstr16};
 
 use crate::error::{BootError, BootResult};
 
@@ -30,7 +30,9 @@ pub fn boot_first_external() -> BootResult<()> {
         }
     }
 
-    Err(BootError::Unsupported("no external EFI/BOOT/BOOTX64.EFI was found"))
+    Err(BootError::Unsupported(
+        "no external EFI/BOOT/BOOTX64.EFI was found",
+    ))
 }
 
 fn current_device_handle() -> BootResult<Option<Handle>> {

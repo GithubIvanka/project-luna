@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROGRESS_BIN="${REPO_ROOT}/target/release/build-progress"
+LOG_DIR="${REPO_ROOT}/dist/logs"
 
 component="${1:-}"
 if [ -z "$component" ]; then
@@ -22,12 +24,40 @@ case "$component" in
         ;;
 esac
 
+ensure_progress_tool() {
+    local root_manifest="${REPO_ROOT}/Cargo.toml"
+    local tool_manifest="${REPO_ROOT}/tools/build-progress/Cargo.toml"
+    if [ ! -x "$PROGRESS_BIN" ] \
+        || [ "$tool_manifest" -nt "$PROGRESS_BIN" ] \
+        || [ "$root_manifest" -nt "$PROGRESS_BIN" ] \
+        || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
+        echo "Building Luna build-progress tool..."
+        cargo build --quiet --release -p luna-build-progress
+    fi
+    [ -x "$PROGRESS_BIN" ] || {
+        echo "Ошибка: не найден build progress executable: $PROGRESS_BIN" >&2
+        exit 1
+    }
+}
+
 cd "$REPO_ROOT"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LUNA_COMPONENT_LOG:-${LOG_DIR}/${component}-$(date +%Y%m%d-%H%M%S).log}"
+
 echo "Сборка workspace crate: $component"
+
 if [ "$#" -eq 0 ]; then
-    cargo build -p "$component"
+    COMMAND=(cargo build -p "$component")
 else
-    cargo build -p "$component" "$@"
+    COMMAND=(cargo build -p "$component" "$@")
 fi
+
+ensure_progress_tool
+"$PROGRESS_BIN" \
+    --label "Cargo ${component}" \
+    --log "$LOG_FILE" \
+    --action "Finished" \
+    -- \
+    "${COMMAND[@]}"
 
 echo "Готово: crate $component"

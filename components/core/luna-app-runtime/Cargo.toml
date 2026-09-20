@@ -1,0 +1,24 @@
+[package]
+name = "luna-app-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib_entry.rs"
+
+[[bin]]
+name = "luna-app-runtime"
+path = "src/main.rs"
+
+[dependencies]
+luna-common = { path = "../luna-common" }
+luna-bundle = { path = "../luna-bundle" }
+luna-root-mapping = { path = "../luna-root-mapping" }
+luna-namespace = { path = "../luna-namespace" }
+luna-security = { path = "../luna-security" }
+luna-system-runtime = { path = "../luna-system-runtime" }
+luna-user-session = { path = "../luna-user-session" }
+
+[dev-dependencies]
+libc = "0.2"

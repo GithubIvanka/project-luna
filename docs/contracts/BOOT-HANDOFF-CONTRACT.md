@@ -1,51 +1,17 @@
-# Контракт передачи управления из `luna-boot`
+# Контракт Boot Handoff
 
-**Статус:** черновик для Phase 0.
-
-## 1. Цель
-
-После работы UEFI-загрузчика Linux kernel должен получить самодостаточный набор данных для перехода в ранний userspace без обращения к UEFI Boot Services.
-
-## 2. Что передаётся
-
-В handoff должны быть однозначно представлены:
-
-- выбранный System Image;
-- выбранный kernel;
-- командная строка ядра;
-- initramfs с `luna-init`;
-- сведения о памяти, доступные после `ExitBootServices`;
-- необходимые данные для определения SYSTEM/DATA;
-- boot metadata, которые нужны `luna-init` для выбора logical root.
-
-Точный ABI handoff фиксируется отдельным boot implementation contract.
-
-## 3. Граница ответственности
-
-До `ExitBootServices` отвечает `luna-boot.efi`. После передачи управления kernel и ранний userspace отвечают за дальнейшую загрузку.
+Каноническая граница:
 
 ```text
-UEFI Boot Services
-      ↓
 luna-boot.efi
-      ↓ ExitBootServices
-Linux kernel
-      ↓
-luna-init
-      ↓
-logical Linux root
+  ↓
+Linux boot protocol + LunaBootHandoffV1
+  ↓
+Linux kernel direct-init path
 ```
 
-## 4. SYSTEM Image
+Bootloader подготавливает все данные, которые потребуются после `ExitBootServices`, до выхода из UEFI Boot Services.
 
-`luna-boot.efi` не обязан монтировать SquashFS. Выбранный image передаётся kernel/`luna-init` как boot context, а `luna-init` открывает SYSTEM, получает `.squashfs` и строит логический `/`.
+Handoff использует физическую identity разделов и артефактов, а не имена Linux device nodes как архитектурный ABI.
 
-## 5. Post-ExitBootServices invariant
-
-После `ExitBootServices` запрещены обращения к UEFI Boot Services, UEFI filesystem protocols, firmware allocator и console APIs, если соответствующий интерфейс не относится к уже сохранённым данным/другому допустимому runtime protocol.
-
-Все данные, необходимые kernel handoff, должны быть подготовлены заранее.
-
-## 6. Ошибки
-
-Если handoff нельзя безопасно сформировать, загрузчик должен остановить текущую попытку загрузки и перейти к предусмотренному fallback/recovery пути. Нельзя передавать частично заполненный или неоднозначный boot context.
+`LUNA-SYS` — управляемый ОС системный раздел, связанный с EFI на одном физическом диске. `luna-boot.efi` проверяет эту связь и загружает ОС только из `LUNA-SYS` этого диска. `LUNA-DATA` может находиться на том же или другом физическом диске. Его обычная привязка определяется GUID диска и GUID раздела из `LUNA-SYS/config/luna-data.toml`. Recovery может запускаться без физического DATA.

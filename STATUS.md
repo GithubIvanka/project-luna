@@ -1,169 +1,73 @@
-# Project Luna — текущее состояние
+# Project Luna — текущий статус
 
-**Последнее обновление:** 2026-09-03
+**Revision:** 2026-09-19
 
-> `docs/ARCHITECTURE.md` является архитектурным Source of Truth. Принятые решения до Phase 1.6-HZ и последующие принятые решения консолидированы там; исторические записи в `docs/decisions/` сохраняют трассируемость.
+Статус отражает фактическое состояние локальной ветки `alpha-development` и подтверждённые проверки. Архитектурный источник истины: `docs/ARCHITECTURE.md`.
 
-## Общее состояние
+## Текущая стадия
 
-Архитектурный цикл завершён через **Phase 1.1–1.6-HZ**. Сейчас Project Luna находится в **Phase 2: runtime/boot integration, PC bring-up, desktop integration и hardening**.
+Project Luna находится на стадии **Alpha integration / bring-up**. Архитектурная модель и основные Rust-компоненты уже сформированы; текущая работа сосредоточена на сборке воспроизводимого bootable образа и замыкании end-to-end пути.
 
-## Состояние областей
+## Подтверждено
 
-| Область | Состояние |
-|---|---|
-| Architecture 1.1–1.6-HZ | принято и консолидировано |
-| Post-1.6 architecture decisions | консолидированы в SoT и decision records |
-| Foundation/domain APIs | baseline реализован |
-| Runtime hierarchy | `luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance` |
-| Typed runtime contract | `RuntimeKind` / `RuntimeSpec` реализованы как properties execution environment |
-| Generic `luna-runtime` | явно отклонён и удалён |
-| Runtime ↔ mapping ↔ Security | contract реализован; authorization предшествует namespace materialization |
-| Linux namespace/materialization | development backend реализован; production child-creation hardening продолжается |
-| Persistent state | durable `redb` backend в `DATA/system/state` реализован |
-| Update/checkpoint/rollback | durable orchestration реализована; конкретные mutation backends продолжаются |
-| Bundle Format v1 | **RFC-0002 принят 2026-08-30; LBP1 проходит conformance/security hardening** |
-| `luna-system-runtime` | real child supervision и UserSession lifecycle ownership реализованы |
-| `luna-app-runtime` | ApplicationInstance lifecycle и execution setup реализованы |
-| `luna-init` | native musl early-userspace реализован и упаковывается как `/init` |
-| `luna-boot.efi` | GUI splash; dynamic image/kernel discovery; manifest validation; compatible kernel selection; soft fallback; ordered Boot Menu |
-| Recovery / Factory boot | discovery и target execution реализованы; repair tooling/UX ещё не завершены |
-| External/USB boot | UEFI `EFI/BOOT/BOOTX64.EFI` chainload development backend реализован |
-| x86_64 PC image | воспроизводимый GPT/UEFI development image builder реализован |
-| Graphical desktop | login boundary существует; финальная niri + Noctalia + seat/device integration продолжается |
+- Rust workspace из 23 пакетов проходит `cargo check --workspace`.
+- Workspace tests проходят; privileged namespace/Landlock checks остаются `ignored`, когда окружение не предоставляет необходимые права.
+- `cargo clippy --workspace --all-targets -- -D warnings` проходит.
+- `cargo fmt --all -- --check` и `git diff --check` проходят.
+- `luna-boot.efi` собирается для `x86_64-unknown-uefi`.
+- Компонентный OVMF smoke на свежем kernel artifact подтверждает `UEFI -> luna-boot -> Linux kernel -> LunaBootHandoffV1 -> luna-init -> luna-system-runtime`.
+- Kernel принимает handoff и memory-resident `luna-init`; direct-PID1 путь подтверждён на свежем собранном artifact. Это ещё не E2E-проверка полного `luna-pc.img`.
+- PC image builder создаёт GPT с `EFI`, `LUNA-SYS`, `LUNA-DATA` и `SWAP`; System Image является непосредственным SquashFS с соседним TOML manifest.
 
-## Нормальная загрузка
+## Текущие блокеры
 
-```text
-Power
- ↓
-UEFI
- ↓
-luna-boot.efi
- ↓
-Luna GUI boot splash
- ↓
-Linux kernel
- ↓
-luna-init
- ↓
-System Image + DATA
- ↓
-luna-system-runtime
- ↓
-UserSession
- ↓
-GUI login
- ↓
-authentication
- ↓
-Active UserSession
- ↓
-Wayland
- ↓
-niri
- ↓
-Noctalia Shell
-```
+- Свежий kernel artifact из текущего `alpha-development` HEAD уже собран и прошёл компонентный OVMF smoke; следующий обязательный шаг — загрузить через OVMF именно собранный `luna-pc.img`.
+- Полный graphical path и настоящий E2E для собранного `luna-pc.img` ещё не закрыты. Предыдущий компонентный OVMF fixture доходил до `luna-system-runtime`, после чего получал `greetd backend is missing`, потому что в fixture не входили реальные desktop-пакеты.
+- Полный PC image теперь является обязательной основой для настоящего end-to-end OVMF smoke path; старые `dist` artifacts больше не используются как доказательство current HEAD.
+- Production hardening `luna-app-runtime`, полноценное enforcement security, update/rollback, recovery и hardware validation остаются следующими этапами.
 
-Обычный вход не использует TTY, console shell или `luna-session`.
+## Исправлено в текущей уборке
 
-`B` открывает исключительное текстовое Boot Menu:
+- Удалён неиспользуемый `luna-init/src/bootstrap.rs`; bootstrap semantics теперь находятся в одном implementation path.
+- Удалён пустой `components/system/luna-login` и соответствующая битая документационная ссылка.
+- `dist/` очищен от старых kernel worktrees, старых PC images, QEMU logs и повторных build trees; сохранён только актуальный cache/source слой, необходимый для пересборки.
+- Дальнейшая проверка строится на fresh artifacts, а не на старых вариантах из `dist`.
+
+## Следующий вертикальный slice
+
+Физическая структура компонентов теперь разделена по архитектурной роли:
 
 ```text
-1. Continue to Luna
-2. Verbose Boot
-3. System Image selection
-4. Recovery Environment
-5. Factory Environment
-6. Boot from USB / External Device
+components/core/
+components/system/
+components/apps/
+components/external/providers/
+components/external/libraries/
 ```
 
-## Обнаружение boot targets
-
-`luna-boot.efi` использует реальное содержимое SYSTEM:
+Для boot/GUI следующий vertical slice:
 
 ```text
-SYSTEM/images/*.squashfs + adjacent *.toml
-              ↓
-       manifest validation
-              ↓
-SYSTEM/kernels/<version>/bzImage
-              ↓
-   compatible kernel filter
-              ↓
-      version ordering
-              ↓
-       BootTarget catalog
+current HEAD
+  -> kernel
+  -> luna-boot
+  -> luna-init
+  -> System Image
+  -> LUNA-DATA
+  -> luna-pc.img
+  -> QEMU/OVMF
+  -> luna-system-runtime
+  -> UserSession
+      -> native InputBackend
+      -> native SeatController
+      -> native DRM/KMS backend
+      -> minimal graphical SessionUI/compositor
+  -> optional DATA desktop provider (Niri + Noctalia)
 ```
 
-Recovery и Factory являются специальными ролями System Image и не входят в обычный список выбора. External boot — отдельный UEFI chainload path.
+Niri/Noctalia остаются полноценными DATA providers; их не требуется урезать до размеров boot-critical GUI.
+## Agent infrastructure
 
-## Runtime
+Luna Agent использует sequential task queue, Git-tree guard и allow-listed verification. Локальный Graphify graph используется как навигация и impact-analysis; source code и current contracts остаются нормативными.
 
-Владение:
-
-```text
-luna-system-runtime
-├── UserSession
-│   └── luna-app-runtime
-│       └── ApplicationInstance
-```
-
-Execution pipeline:
-
-```text
-ApplicationPlan
-    ↓
-MappingPlan
-    ↓
-luna-security
-    ↓
-luna-namespace
-    ↓
-process execution
-```
-
-`RuntimeKind` — только тип execution environment; generic `luna-runtime` отсутствует.
-
-## System initialization
-
-```text
-Linux kernel
-    ↓
-initramfs
-    ↓
-/init = luna-init
-    ↓
-prepare SYSTEM + DATA + selected System Image
-    ↓
-switch_root
-    ↓
-/sbin/init = luna-system-runtime
-```
-
-## Ближайшие технические приоритеты
-
-1. Довести PC image до воспроизводимой полной загрузки в QEMU/OVMF и проверить на реальном UEFI hardware.
-2. Завершить graphical login + niri + Noctalia integration.
-3. Расширить `luna-app-runtime` runtime-specific loader/library mapping без нарушения security/mapping boundaries.
-4. Закончить fine-grained security и filtered `/dev` population.
-5. Завершить durable boot/update success/failure state.
-6. Завершить LBP1 conformance и Ed25519 trust binding.
-7. Реализовать IPC/event transport, resource enforcement и device/volume integration.
-8. Завершить `.lbp` install → ApplicationInstance launch/recovery loop.
-9. Заменить prototype `pre_exec` namespace setup production-safe child-creation primitive.
-
-## Phase 0 documentation
-
-Черновики новых архитектурных контрактов находятся в `docs/contracts/`:
-
-```text
-SYSTEM-IMAGE-CONTRACT.md
-KERNEL-CONTRACT.md
-BOOT-STATE-CONTRACT.md
-BOOT-HANDOFF-CONTRACT.md
-FAILURE-RECOVERY-CONTRACT.md
-```
-
-Они уточняют существующие архитектурные границы и не считаются принятыми до отдельного решения.
+Текущая задача очереди — `DESKTOP-000`; autonomous runner должен возобновляться только после фиксации текущих repository changes в Git.

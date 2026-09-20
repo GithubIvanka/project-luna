@@ -8,58 +8,91 @@ mkdir -p "$OUT"
 : "${OVMF_CODE:?Set OVMF_CODE to OVMF_CODE.fd}"
 : "${OVMF_VARS:?Set OVMF_VARS to a writable OVMF_VARS.fd copy}"
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"
-: "${LUNA_TEST_INITRD:?Set LUNA_TEST_INITRD to an initramfs image}"
-: "${LUNA_TEST_SQUASHFS:?Set LUNA_TEST_SQUASHFS to a Luna SquashFS image}"
 
-command -v cargo >/dev/null
-command -v qemu-system-x86_64 >/dev/null
-command -v sgdisk >/dev/null
-command -v mkfs.ext4 >/dev/null
-command -v mkfs.fat >/dev/null
-command -v mcopy >/dev/null
-command -v mmd >/dev/null
-command -v dd >/dev/null
+for tool in cargo qemu-system-x86_64 sgdisk mkfs.ext4 mkfs.fat mkfs.btrfs mkswap mcopy mmd dd; do
+    command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
+done
 
+bash "$ROOT_DIR/tests/ovmf/build-userspace.sh"
 cargo build --release --target x86_64-unknown-uefi --manifest-path "$ROOT_DIR/Cargo.toml"
 EFI="$ROOT_DIR/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
-rm -f "$OUT"/disk.img "$OUT"/esp.img "$OUT"/system.img "$OUT"/data.img
+rm -f "$OUT/disk.img" "$OUT/esp.img" "$OUT/system.img" "$OUT/data.img" "$OUT/swap.img" "$OUT/qemu.log"
 truncate -s 64M "$OUT/esp.img"
 mkfs.fat -F 32 "$OUT/esp.img" >/dev/null
 mmd -i "$OUT/esp.img" ::/EFI
 mmd -i "$OUT/esp.img" ::/EFI/LUNA
+mmd -i "$OUT/esp.img" ::/EFI/BOOT
 mcopy -i "$OUT/esp.img" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI
+mcopy -i "$OUT/esp.img" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
 
 rm -rf "$OUT/system-root"
-mkdir -p "$OUT/system-root/images" "$OUT/system-root/kernels/test"
+mkdir -p "$OUT/system-root/images" "$OUT/system-root/cores" "$OUT/system-root/kernels/test" \
+         "$OUT/system-root/config" "$OUT/system-root/recovery"
 cp "$LUNA_TEST_KERNEL" "$OUT/system-root/kernels/test/bzImage"
-cp "$LUNA_TEST_INITRD" "$OUT/system-root/kernels/test/initramfs.img"
-cp "$LUNA_TEST_SQUASHFS" "$OUT/system-root/images/luna-test.squashfs"
-mkfs.ext4 -q -F -L LUNA-SYSTEM -d "$OUT/system-root" "$OUT/system.img" 256M
+cp "$OUT/luna-0.1.0.squashfs" "$OUT/system-root/images/luna-0.1.0.squashfs"
+cp "$OUT/luna-0.1.0.toml" "$OUT/system-root/images/luna-0.1.0.toml"
+cp "$OUT/luna-test.init" "$OUT/system-root/cores/luna-0.1.0.init"
+cat > "$OUT/system-root/cores/luna-0.1.0.toml" <<'EOF'
+[init]
+name = "luna-init"
+version = "0.1.0"
+
+[architecture]
+arch = "x86_64"
+
+[kernels]
+compatible = ["test"]
+EOF
+
+mkfs.ext4 -q -F -L LUNA-SYS -d "$OUT/system-root" "$OUT/system.img" 256M
 
 rm -rf "$OUT/data-root"
-mkdir -p "$OUT/data-root/system" "$OUT/data-root/users/luna" "$OUT/data-root/cache"
-mkfs.ext4 -q -F -L LUNA-DATA -d "$OUT/data-root" "$OUT/data.img" 128M
+mkdir -p "$OUT/data-root/system"/{apps,drivers,firmware,libs,config,resources,state,volumes}
+mkdir -p "$OUT/data-root/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
+mkdir -p "$OUT/data-root/users/luna"/{home,data,config}
+mkdir -p "$OUT/data-root/cache"
+truncate -s 128M "$OUT/data.img"
+mkfs.btrfs -q -f -L LUNA-DATA --rootdir "$OUT/data-root" "$OUT/data.img"
 
-# GPT: ESP at 1 MiB, SYSTEM at 65 MiB, DATA immediately after SYSTEM.
-# SYSTEM starts at sector 133120 and is 256 MiB (524288 sectors).
-# DATA therefore starts at sector 657408.
-truncate -s 449M "$OUT/disk.img"
+rm -f "$OUT/swap.img"
+fallocate -l 64M "$OUT/swap.img"
+chmod 0600 "$OUT/swap.img"
+mkswap -L SWAP "$OUT/swap.img" >/dev/null
+
+# GPT: ESP at 1 MiB, then LUNA-SYS, LUNA-DATA, and SWAP.
+# Keep disk.img larger than the final partition end plus GPT backup-table slack.
+truncate -s 520M "$OUT/disk.img"
 sgdisk --zap-all "$OUT/disk.img" >/dev/null
-sgdisk -n 1:2048:+64M -t 1:ef00 -c 1:EFI \
-       -n 2:133120:+256M -t 2:8300 -c 2:SYSTEM \
-       -n 3:657408:+128M -t 3:8300 -c 3:DATA "$OUT/disk.img" >/dev/null
+sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B \
+       --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 \
+       --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D \
+       --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 \
+       --partition-guid=4:7A6D5A7A-0004-4C55-4E41-535741502020 \
+       -n 1:2048:+64M -t 1:ef00 -c 1:EFI \
+       -n 2:133120:+256M -t 2:8300 -c 2:LUNA-SYS \
+       -n 3:657408:+128M -t 3:8300 -c 3:LUNA-DATA \
+       -n 4:919552:+64M -t 4:8200 -c 4:SWAP "$OUT/disk.img" >/dev/null
 
 dd if="$OUT/esp.img" of="$OUT/disk.img" bs=512 seek=2048 conv=notrunc status=none
 dd if="$OUT/system.img" of="$OUT/disk.img" bs=512 seek=133120 conv=notrunc status=none
 dd if="$OUT/data.img" of="$OUT/disk.img" bs=512 seek=657408 conv=notrunc status=none
+dd if="$OUT/swap.img" of="$OUT/disk.img" bs=512 seek=919552 conv=notrunc status=none
 
 cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
+if [ -n "${LUNA_QEMU_SERIAL_LOG:-}" ]; then
+    SERIAL_ARGS=(-serial "file:${LUNA_QEMU_SERIAL_LOG}")
+else
+    SERIAL_ARGS=(-serial stdio)
+fi
 exec qemu-system-x86_64 \
   -machine q35 \
   -m 2G \
   -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" \
   -drive format=raw,file="$OUT/disk.img" \
-  -serial stdio \
-  -no-reboot
+  "${SERIAL_ARGS[@]}" \
+  -display "${LUNA_QEMU_DISPLAY:-none}" \
+  -no-reboot \
+  -no-shutdown \
+  -D "$OUT/qemu.log"

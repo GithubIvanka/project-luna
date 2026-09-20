@@ -1,163 +1,65 @@
 # Project Luna
 
-**Design first. Code second.**
+Project Luna is a custom operating-system project built around the Linux kernel, with its own boot, immutable System Image, runtime, application and recovery architecture.
 
-> Современная неизменяемая операционная система поверх Linux kernel.
+## Source of Truth
 
-Project Luna — открытый проект ОС с небольшой неизменяемой системной основой, предсказуемой архитектурой, самостоятельными приложениями и чистой пользовательской файловой моделью.
+The architectural source of truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Start there, then follow the linked detailed architecture, accepted-decision summary and component documents.
 
-## Текущее состояние
-
-Архитектурный цикл завершён до **Phase 1.6-HZ**, после чего проект перешёл в **Phase 2: интеграция runtime/boot, PC bring-up, desktop integration и hardening**.
-
-Текущий Source of Truth — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Принятые решения после Phase 1.6 консолидированы там и сохраняются в decision records.
-
-Уже реализованы важные части:
-
-- Linux namespace/materialization primitives в `luna-namespace`;
-- durable system state на `redb` в `luna-state`;
-- checkpointed update/rollback orchestration в `luna-update-manager`;
-- RFC-0002/LBP1 codec в `luna-bundle`;
-- supervision реальных Linux child processes и UserSession lifecycle в `luna-system-runtime`;
-- lifecycle `ApplicationInstance` в `luna-app-runtime`;
-- standalone musl early userspace `luna-init`;
-- dynamic System Image/kernel discovery, manifest validation, compatible-kernel selection, soft fallback и ordered Boot Menu в `luna-boot.efi`;
-- воспроизводимый x86_64 UEFI/GPT development image с QEMU/OVMF bring-up path;
-- graphical payload с niri/Noctalia, login, Ghostty, fish, Yazi, audio, network, Bluetooth и removable-media infrastructure.
-
-Hardware seat/input/GPU и часть production integration ещё находятся в разработке.
-
-## Архитектурная модель
+## Canonical boot chain
 
 ```text
 UEFI
   ↓
 luna-boot.efi
   ↓
-SYSTEM
-  ├── versioned System Images (direct SquashFS)
-  └── versioned kernels
-  ↓
-luna-init
-  ↓
-logical Linux root + DATA
-  ↓
-luna-system-runtime
-  ├── UserSession A
-  │   └── luna-app-runtime
-  │       └── ApplicationInstance(s)
-  └── UserSession B
-      └── luna-app-runtime
-          └── ApplicationInstance(s)
-```
-
-Физическая модель: **EFI / SYSTEM / DATA / SWAP**.
-
-System Image — непосредственно `luna-X.Y.Z.squashfs`. DATA содержит изменяемое системное, пользовательское, application и cache состояние.
-
-## Запуск приложения
-
-Иерархия владения и security pipeline разделены:
-
-```text
-luna-system-runtime
-    ↓
-UserSession
-    ↓
-luna-app-runtime
-    ↓
-ApplicationInstance
-```
-
-Путь запуска:
-
-```text
-Bundle declaration
-    ↓
-ApplicationPlan
-    ↓
-MappingPlan
-    ↓
-luna-security
-    ↓
-luna-namespace materialization
-    ↓
-process execution
-```
-
-`RuntimeKind`/`RuntimeSpec` являются типизированными свойствами execution environment. Отдельного generic `luna-runtime` компонента нет.
-
-## Boot и пользовательский интерфейс
-
-Нормальная загрузка графическая и тихая:
-
-```text
-Power
- ↓
-UEFI
- ↓
-luna-boot.efi
- ↓
-GUI boot splash
- ↓
 Linux kernel
- ↓
+  ↓
 luna-init
- ↓
-System Image + DATA
- ↓
+  ↓
 luna-system-runtime
- ↓
+  ↓
 UserSession
- ↓
-GUI login
- ↓
-authentication
- ↓
-Wayland
- ↓
-niri
- ↓
-Noctalia Shell
+  ↓
+luna-app-runtime
 ```
 
-Обычный пользовательский вход не использует TTY. Клавиша `B` открывает исключительное текстовое Boot Menu:
+`luna-init` performs early bootstrap, remains PID 1 for the normal system lifetime, and starts `luna-system-runtime` as a child process.
+
+## Canonical storage
 
 ```text
-1. Continue to Luna
-2. Verbose Boot
-3. System Image selection
-4. Recovery Environment
-5. Factory Environment
-6. Boot from USB / External Device
+Disk
+├── EFI
+├── LUNA-SYS
+├── LUNA-DATA
+└── SWAP
 ```
 
-## Bundles
+`LUNA-SYS` is OS-managed. `LUNA-DATA` is persistent mutable storage.
 
-Приложения используют Luna Bundle Format:
+A System Image is directly `luna-X.Y.Z.squashfs` with an adjacent `luna-X.Y.Z.toml` manifest. `.lbp` is the Luna Bundle Format and is unrelated to System Image storage.
+
+## Runtime
 
 ```text
-application.lbp
-    ↓
-RFC-0002 / LBP1
+luna-init (PID 1)
+└── luna-system-runtime
+    └── UserSession
+        └── luna-app-runtime
+            └── ApplicationInstance
 ```
 
-`.lbp` — транспортное/archive представление Bundle. Это не System Image.
+Application launch is authorization-first: Bundle → ApplicationPlan → MappingPlan → `luna-security` → AuthorizedApplicationPlan → trusted setup → `luna-namespace` → process.
 
-## Разработка
+Mount namespace isolation is mandatory. A PID namespace is not required for ordinary applications.
 
-Ключевой план находится в [`docs/architecture/DEVELOPMENT-ROADMAP.md`](docs/architecture/DEVELOPMENT-ROADMAP.md).
+## Development
 
-Перед реализацией Phase 0 используются черновики контрактов в [`docs/contracts/`](docs/contracts/).
+Luna components are written in Rust. The Luna kernel integration is maintained separately under `kernel/`.
 
-PC image builder:
+Development changes follow [`docs/development/AI-DEVELOPMENT-RULES.md`](docs/development/AI-DEVELOPMENT-RULES.md).
 
-```bash
-tools/build-pc-image.sh
-```
+## Archive
 
-Подробности: [`docs/development/PC-BUILD.md`](docs/development/PC-BUILD.md).
-
-## Правило проекта
-
-`docs/ARCHITECTURE.md` — главный и текущий архитектурный Source of Truth. Реализация не должна молча менять принятые решения. При обнаружении конфликта сначала меняется архитектурный документ/решение, затем код.
+Pre-audit documentation is temporarily retained under `docs/archive/2026-09-14-pre-audit/`. It is non-normative reference material and must not be used to infer current architecture.

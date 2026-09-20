@@ -1,31 +1,25 @@
 # `luna-network`
 
-**Статус:** domain boundary реализована; provider integration продолжается.
-
 ## Назначение
 
-Предоставляет Luna network domain независимо от конкретного network daemon.
+Luna-owned доменная граница сетевой подсистемы.
 
 ## Владеет
 
-- model network interfaces/connections;
-- connection state;
-- профильными настройками на границе Luna;
-- запросами connect/disconnect;
-- provider abstraction и событиями сети.
+Представлением network devices и их состоянием, а также backend interface для подключения и отключения сетевых устройств.
 
 ## Не владеет
 
-Низкоуровневым kernel networking, общей device discovery, GUI widgets, authorization policy или UserSession lifecycle.
+Desktop UI или общей process supervision.
 
-## Provider
+## Внешний provider
 
-Текущий PC image использует NetworkManager как Linux provider infrastructure. Это не означает, что его внутренний API становится частью Luna architecture.
+В качестве внешнего backend может использоваться NetworkManager. Он не становится Luna-owned архитектурным компонентом.
 
-## Security
+## Безопасность
 
-Policy доступа приложения к сети задаётся через `luna-security`; наличие network interface не означает автоматический доступ каждого приложения.
+Доступ приложения к сети является отдельным capability/permission и не означает доступа к физической файловой системе.
 
-## Открыто
+## Статус
 
-NetworkManager/D-Bus integration, network state events, connection UI и policy enforcement.
+Доменная модель и backend interface существуют. Полная платформенная интеграция ещё не завершена.

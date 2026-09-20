@@ -1,0 +1,21 @@
+[Unit]
+Description=Project Luna autonomous development agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sibitti/source/project-luna
+Environment=PATH=/home/sibitti/.local/bin:/home/sibitti/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=LUNA_AGENT_BACKEND=free
+EnvironmentFile=-%h/.config/project-luna/luna-agent.env
+EnvironmentFile=-%h/.config/project-luna/luna-agent/providers.env
+ExecStart=/usr/bin/python3 /home/sibitti/source/project-luna/automation/luna-agent/runner.py --continuous
+Restart=always
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

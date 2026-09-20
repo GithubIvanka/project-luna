@@ -1,34 +1,48 @@
 # `luna-system-manager`
 
-**Статус:** boundary/scaffold; durable system model ещё развивается.
-
 ## Назначение
 
-Предоставляет domain model и запросы к состоянию установленной Luna, не исполняя сами state-changing transactions.
+Владеет смыслом persistent system targets и связями между ними.
+
+Полные targets имеют identity:
+
+```text
+current  = System Image + luna-init + kernel
+factory  = System Image + luna-init + kernel
+fallback = System Image + luna-init + kernel
+recovery = System Image + luna-init + kernel + Recovery DATA Image
+```
 
 ## Владеет
 
-- System Image inventory semantics;
-- system status/query model;
-- представлением current/factory и доступных версий;
-- системными metadata operations, не принадлежащими bootloader.
+- моделями `current`, `factory`, `fallback`, `recovery`;
+- domain meaning System State;
+- загрузкой и изменением durable state через `luna-state`;
+- типизированными query/mutation для runtime и update orchestration;
+- сохранением атомарной identity полного target.
 
 ## Не владеет
 
-UEFI boot, kernel process loading, application lifecycle, Bundle codec или update transaction execution.
+UEFI boot selection, непосредственным kernel loading или произвольной записью kernel artifacts.
 
-## Update boundary
+## Совместимость
 
-`luna-update-manager` меняет состояние. `luna-system-manager` предоставляет domain-level view этого состояния.
+Фактическая цепочка разрешается так:
 
-## Зависимости
+```text
+System Image manifest
+  ↓ compatible luna-init
+luna-init manifest
+  ↓ compatible kernel
+kernel
+```
 
-`luna-state`, image/kernel domain contracts и необходимые shared types.
+`luna-system-manager` хранит смысл target; `luna-boot.efi` выполняет фактическое boot-time resolution.
 
-## Ошибки
+## Взаимодействие
 
-Запрос неизвестной сущности должен давать typed not-found/error semantics, а не скрываться пустым результатом, если отсутствие означает нарушение ожидаемого contract.
+`luna-system-runtime` читает состояние для работы системы. `luna-update-manager` владеет выполнением update transactions и использует этот компонент для semantics system targets.
 
-## Открыто
+## Статус
 
-Полная system inventory model, activation semantics и reconciliation с Boot State.
+Durable `redb`-backed state model существует. Полная валидация mutation/install backends ещё разрабатывается.
