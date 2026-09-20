@@ -7,6 +7,7 @@ docs/archive/
 graphify-out/
 automation/luna-agent/providers.env
 
+.tmp/
 .idea/
 .vscode/
 
