@@ -116,3 +116,13 @@ luna-system-runtime → system-wide supervision
 ```
 
 Новый application init/supervisor не создаётся.
+
+## 8. ELF dependency closure
+
+luna-app-runtime содержит этап планирования ELF-зависимостей, который не вызывает host dynamic loader. Анализатор извлекает класс ELF, endian, machine, PT_INTERP, DT_NEEDED, DT_RPATH и DT_RUNPATH.
+
+ElfDependencyClosure рекурсивно обходит interpreter и shared objects через явный ElfDependencyResolver. Циклы схлопываются в множество closure; несоответствие архитектуры приводит к fail closed.
+
+FilesystemElfResolver работает только с явно переданными доверенными источниками и не использует LD_LIBRARY_PATH, host ld.so.cache или host default directories. $ORIGIN нормализуется лексически.
+
+Этот этап пока является подготовкой dependency closure. Подключение closure к MappingPlan, provenance ресурсов и окончательной авторизации luna-security остаётся отдельной следующей стадией.
