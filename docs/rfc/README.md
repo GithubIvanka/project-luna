@@ -9,7 +9,8 @@
 |---|---|---|---|
 | 0001 | Architecture Baseline | Accepted | `RFC-0001.md` |
 | 0002 | Bundle Format v1 (`.lbp`) | Accepted, 2026-08-30 | `RFC-0002.md` |
-| 0003 | Luna Platform | Draft | `RFC-0003.md` |
+| 0003 | Local AI Mesh для Luna Agent | Proposed | `RFC-0003.md` |
+| 0004 | Luna Platform | Draft | `RFC-0004.md` |
 
 There is currently **one RFC-0002**. The file `docs/decisions/0007-rfc-0002-bundle-format-v1.md` is an ADR recording acceptance of RFC-0002, not a second RFC. `RFC-0002-BUNDLE-FORMAT-V1-IMPLEMENTATION-NOTES.md` is non-normative implementation history.
 
