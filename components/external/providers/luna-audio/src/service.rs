@@ -36,11 +36,7 @@ impl<B: AudioBackend> AudioService<B> {
         self.backend.endpoints()
     }
 
-    pub fn set_volume(
-        &mut self,
-        endpoint_id: &str,
-        volume: Volume,
-    ) -> Result<(), B::Error> {
+    pub fn set_volume(&mut self, endpoint_id: &str, volume: Volume) -> Result<(), B::Error> {
         self.backend.set_volume(endpoint_id, volume)
     }
 

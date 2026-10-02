@@ -43,11 +43,7 @@ pub struct AudioEndpoint {
 }
 
 impl AudioEndpoint {
-    pub fn new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        direction: AudioDirection,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, direction: AudioDirection) -> Self {
         Self {
             id: id.into(),
             name: name.into(),

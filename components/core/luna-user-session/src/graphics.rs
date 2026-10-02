@@ -36,7 +36,9 @@ const DRM_IOCTL_SET_MASTER: libc::c_ulong = drm_io(0x1e);
 const DRM_IOCTL_DROP_MASTER: libc::c_ulong = drm_io(0x1f);
 const DRM_IOCTL_GET_CAP: libc::c_ulong = drm_iowr(0x0c, size_of::<DrmGetCap>());
 const DRM_IOCTL_MODE_GETRESOURCES: libc::c_ulong = drm_iowr(0xA0, size_of::<DrmModeCardRes>());
+const DRM_IOCTL_MODE_GETCRTC: libc::c_ulong = drm_iowr(0xA1, size_of::<DrmModeCrtc>());
 const DRM_IOCTL_MODE_SETCRTC: libc::c_ulong = drm_iowr(0xA2, size_of::<DrmModeCrtc>());
+const DRM_IOCTL_MODE_DIRTYFB: libc::c_ulong = drm_iowr(0xB1, size_of::<DrmModeFbDirtyCmd>());
 const DRM_IOCTL_MODE_GETENCODER: libc::c_ulong = drm_iowr(0xA6, size_of::<DrmModeGetEncoder>());
 const DRM_IOCTL_MODE_GETCONNECTOR: libc::c_ulong = drm_iowr(0xA7, size_of::<DrmModeGetConnector>());
 const DRM_IOCTL_MODE_ADDFB: libc::c_ulong = drm_iowr(0xAE, size_of::<DrmModeFbCmd>());
@@ -160,6 +162,16 @@ struct DrmModeMapDumb {
 #[derive(Clone, Copy, Default)]
 struct DrmModeDestroyDumb {
     handle: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct DrmModeFbDirtyCmd {
+    fb_id: u32,
+    flags: u32,
+    color: u32,
+    num_clips: u32,
+    clips_ptr: u64,
 }
 
 #[repr(C)]
@@ -324,6 +336,17 @@ pub struct DisplayTarget {
     pub mode: DrmMode,
 }
 
+pub(crate) struct DrmCrtcState {
+    crtc_id: u32,
+    fb_id: u32,
+    x: u32,
+    y: u32,
+    gamma_size: u32,
+    mode_valid: u32,
+    mode: DrmModeModeInfo,
+    connectors: Vec<u32>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrmProbe {
     pub dumb_buffer: bool,
@@ -422,6 +445,81 @@ impl DrmHandle {
             return Err(io::Error::last_os_error());
         }
         Ok(DrmMaster { drm: self })
+    }
+
+    pub(crate) fn capture_crtc_state(&self, crtc_id: u32) -> io::Result<DrmCrtcState> {
+        let mut request = DrmModeCrtc {
+            crtc_id,
+            ..Default::default()
+        };
+        ioctl(self.fd(), DRM_IOCTL_MODE_GETCRTC, &mut request)?;
+
+        let mut connectors = Vec::new();
+        if request.mode_valid != 0 {
+            let resources = self.get_resources()?;
+            for connector_id in resources.connector_ids {
+                let connector = self.get_connector(connector_id)?;
+                if !connector.connected {
+                    continue;
+                }
+                let encoder_id = if connector.encoder_id != 0 {
+                    connector.encoder_id
+                } else if let Some(&id) = connector.encoders.first() {
+                    id
+                } else {
+                    continue;
+                };
+                if self.get_encoder(encoder_id)?.crtc_id == crtc_id {
+                    connectors.push(connector.id);
+                }
+            }
+        }
+
+        Ok(DrmCrtcState {
+            crtc_id,
+            fb_id: request.fb_id,
+            x: request.x,
+            y: request.y,
+            gamma_size: request.gamma_size,
+            mode_valid: request.mode_valid,
+            mode: request.mode,
+            connectors,
+        })
+    }
+
+    pub(crate) fn restore_crtc_state(&self, state: &DrmCrtcState) -> io::Result<()> {
+        let connectors = if state.mode_valid != 0 {
+            state.connectors.as_slice()
+        } else {
+            &[]
+        };
+        let mut request = DrmModeCrtc {
+            set_connectors_ptr: if connectors.is_empty() {
+                0
+            } else {
+                connectors.as_ptr() as u64
+            },
+            count_connectors: connectors.len() as u32,
+            crtc_id: state.crtc_id,
+            fb_id: state.fb_id,
+            x: state.x,
+            y: state.y,
+            gamma_size: state.gamma_size,
+            mode_valid: state.mode_valid,
+            mode: state.mode,
+        };
+        ioctl(self.fd(), DRM_IOCTL_MODE_SETCRTC, &mut request)
+    }
+
+    pub(crate) fn mark_framebuffer_dirty(
+        &self,
+        framebuffer: &DrmFramebuffer<'_>,
+    ) -> io::Result<()> {
+        let mut request = DrmModeFbDirtyCmd {
+            fb_id: framebuffer.id,
+            ..Default::default()
+        };
+        ioctl(self.fd(), DRM_IOCTL_MODE_DIRTYFB, &mut request)
     }
 
     pub fn set_crtc(
@@ -694,7 +792,8 @@ fn ioctl<T>(fd: RawFd, request: libc::c_ulong, data: &mut T) -> io::Result<()> {
 mod tests {
     use super::{
         DRM_CAP_DUMB_BUFFER, DRM_MODE_CONNECTED, DRM_MODE_TYPE_PREFERRED, DrmDevice, DrmGetCap,
-        DrmModeCardRes, DrmModeGetConnector, DrmModeGetEncoder, DrmModeModeInfo, drm_iowr,
+        DrmModeCardRes, DrmModeCrtc, DrmModeFbDirtyCmd, DrmModeGetConnector, DrmModeGetEncoder,
+        DrmModeModeInfo, drm_iowr,
     };
 
     #[test]
@@ -710,10 +809,15 @@ mod tests {
         assert_eq!(std::mem::size_of::<DrmModeModeInfo>(), 68);
         assert_eq!(std::mem::size_of::<DrmModeGetConnector>(), 80);
         assert_eq!(std::mem::size_of::<DrmModeGetEncoder>(), 20);
+        assert_eq!(std::mem::size_of::<DrmModeFbDirtyCmd>(), 24);
         assert_eq!(drm_iowr(0x0c, std::mem::size_of::<DrmGetCap>()), 0xc010640c);
         assert_eq!(
             drm_iowr(0xA0, std::mem::size_of::<DrmModeCardRes>()),
             0xc04064a0
+        );
+        assert_eq!(
+            drm_iowr(0xA1, std::mem::size_of::<DrmModeCrtc>()),
+            0xc06864a1
         );
         assert_eq!(
             drm_iowr(0xA6, std::mem::size_of::<DrmModeGetEncoder>()),
@@ -722,6 +826,10 @@ mod tests {
         assert_eq!(
             drm_iowr(0xA7, std::mem::size_of::<DrmModeGetConnector>()),
             0xc05064a7
+        );
+        assert_eq!(
+            drm_iowr(0xB1, std::mem::size_of::<DrmModeFbDirtyCmd>()),
+            0xc01864b1
         );
         assert_eq!(DRM_CAP_DUMB_BUFFER, 0x1);
         assert_eq!(DRM_MODE_CONNECTED, 1);

@@ -9,7 +9,7 @@ LLVM_MODE="${LUNA_KERNEL_LLVM:-1}"
 SRC="${OUT}/linux-${VERSION}"
 TARBALL="${OUT}/linux-${VERSION}.tar.xz"
 URL="https://www.kernel.org/pub/linux/kernel/v7.x/linux-${VERSION}.tar.xz"
-CONFIG_FRAGMENT="${REPO_ROOT}/kernel/luna-x86_64.config"
+CONFIG_FRAGMENT="${LUNA_KERNEL_CONFIG:-${REPO_ROOT}/kernel/luna-x86_64.config}"
 OVERLAY="${REPO_ROOT}/tools/apply-luna-kernel-overlay.sh"
 PROGRESS_BIN="${REPO_ROOT}/target/release/build-progress"
 LOG_DIR="${OUT}/logs"
@@ -58,7 +58,7 @@ ensure_progress_tool() {
     local tool_manifest="${REPO_ROOT}/tools/build-progress/Cargo.toml"
     if [ ! -x "$PROGRESS_BIN" ] || [ "$tool_manifest" -nt "$PROGRESS_BIN" ] || [ "$root_manifest" -nt "$PROGRESS_BIN" ] || find "${REPO_ROOT}/tools/build-progress/src" -type f -newer "$PROGRESS_BIN" -print -quit | grep -q .; then
         echo "Building Luna build-progress tool..."
-        cargo build --quiet --release -p luna-build-progress
+        cargo build --quiet --release --manifest-path "$root_manifest" -p luna-build-progress
     fi
     [ -x "$PROGRESS_BIN" ] || { echo "missing build progress executable: $PROGRESS_BIN" >&2; exit 1; }
 }

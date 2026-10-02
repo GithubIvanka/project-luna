@@ -8,7 +8,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use luna_event::{EventPublisher, EventType};
 use luna_state::RedbStateStore;
 use luna_system_manager::{PersistentSystemManager, SystemState};
-use luna_user_session::{SessionId, SessionState, UserSession};
+use luna_user_session::{SessionId, SessionState, SessionUiError, UserSession};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeState {
@@ -130,6 +130,24 @@ impl ProcessSupervisor {
         F: FnMut() -> std::io::Result<()> + Send + Sync + 'static,
     {
         self.spawn_command_with_env(program, args, false, env, Some(setup))
+    }
+
+    #[cfg(unix)]
+    pub fn spawn_with_env_and_pre_exec_inherited_stdio<I, S, K, V, F>(
+        &mut self,
+        program: &str,
+        args: I,
+        env: impl IntoIterator<Item = (K, V)>,
+        setup: F,
+    ) -> Result<ProcessId, ProcessError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+        F: FnMut() -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        self.spawn_command_with_env(program, args, true, env, Some(setup))
     }
 
     #[cfg(unix)]
@@ -363,6 +381,48 @@ impl SystemRuntimeService {
             .authenticate()
             .map_err(|e| RuntimeError::Authentication(e.to_string()))
     }
+    pub fn authenticate_session_interactive(
+        &mut self,
+        id: SessionId,
+    ) -> Result<luna_user_session::UserCredentials, RuntimeError> {
+        let initial_username = self
+            .sessions
+            .get(&id)
+            .ok_or(RuntimeError::UnknownSession(id))?
+            .user()
+            .as_str()
+            .to_owned();
+
+        self.sessions
+            .get_mut(&id)
+            .ok_or(RuntimeError::UnknownSession(id))?
+            .begin_authentication()
+            .map_err(|error| RuntimeError::Session(error.to_string()))?;
+
+        let credentials =
+            match luna_user_session::SessionUi::new(Some(initial_username)).authenticate() {
+                Ok(credentials) => credentials,
+                Err(error) => {
+                    if let Some(session) = self.sessions.get_mut(&id) {
+                        if matches!(&error, SessionUiError::Cancelled) {
+                            session.login_cancelled();
+                        } else {
+                            session.login_failed();
+                        }
+                    }
+                    return Err(RuntimeError::Authentication(error.to_string()));
+                }
+            };
+
+        self.sessions
+            .get_mut(&id)
+            .ok_or(RuntimeError::UnknownSession(id))?
+            .activate_authenticated_identity(credentials.clone())
+            .map_err(|error| RuntimeError::Session(error.to_string()))?;
+
+        Ok(credentials)
+    }
+
     pub fn cancel_login(&mut self, id: SessionId) -> Result<(), RuntimeError> {
         let session = self
             .sessions
@@ -446,6 +506,26 @@ impl SystemRuntimeService {
         Ok(self
             .supervisor
             .spawn_with_env_and_pre_exec(program, args, env, setup)?)
+    }
+
+    #[cfg(unix)]
+    pub fn spawn_process_with_env_and_pre_exec_inherited_stdio<I, S, K, V, F>(
+        &mut self,
+        program: &str,
+        args: I,
+        env: impl IntoIterator<Item = (K, V)>,
+        setup: F,
+    ) -> Result<ProcessId, RuntimeError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+        F: FnMut() -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        Ok(self
+            .supervisor
+            .spawn_with_env_and_pre_exec_inherited_stdio(program, args, env, setup)?)
     }
 
     #[cfg(unix)]

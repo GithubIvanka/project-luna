@@ -8,6 +8,13 @@ description = "Minimal UEFI bootloader for Project Luna"
 
 [workspace]
 
+[features]
+default = []
+alpine-test = []
+alpine-debug = ["alpine-test"]
+alpine-luna-kernel = ["alpine-test"]
+alpine-direct-root = ["alpine-luna-kernel"]
+
 [dependencies]
 uefi = { version = "0.40", features = ["alloc", "global_allocator", "logger", "panic_handler", "log-debugcon"] }
 log = "0.4"

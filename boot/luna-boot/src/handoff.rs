@@ -360,6 +360,12 @@ pub fn transition_entry_address() -> u64 {
 }
 
 /// Read the stack pointer that the final transition will continue using.
+/// Enter a Linux x86_64 kernel through the same post-ExitBootServices
+/// transition used by the normal Luna handoff, without requiring the Luna ABI.
+pub unsafe fn enter_standard_linux(kernel_entry: u64, boot_params: u64, page_table: u64) -> ! {
+    unsafe { luna_linux_entry(kernel_entry, boot_params, page_table) }
+}
+
 pub fn current_stack_pointer() -> u64 {
     let stack: u64;
     unsafe {

@@ -43,6 +43,10 @@ impl InputEvent {
     pub const ABS: u16 = 0x03;
     pub const SYN: u16 = 0x00;
 
+    pub const REL_X: u16 = 0;
+    pub const REL_Y: u16 = 1;
+    pub const BTN_LEFT: u16 = 272;
+
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != std::mem::size_of::<Self>() {
             return None;
@@ -78,6 +82,10 @@ impl std::fmt::Debug for InputDeviceHandle {
 impl InputDeviceHandle {
     pub fn device(&self) -> &InputDevice {
         &self.device
+    }
+
+    pub fn fd(&self) -> std::os::fd::RawFd {
+        self.file.as_raw_fd()
     }
 
     pub fn set_nonblocking(&self, enabled: bool) -> io::Result<()> {

@@ -26,6 +26,11 @@ use crate::paging::prepare_identity_map;
 use crate::splash;
 
 pub fn boot_flow() -> BootResult<()> {
+    #[cfg(feature = "alpine-test")]
+    {
+        return crate::alpine_test::boot_flow();
+    }
+
     debug_stage("Luna: flow 1 input\r\n");
     let input_handle = boot::get_handle_for_protocol::<Input>()?;
     let mut input_protocol = unsafe {

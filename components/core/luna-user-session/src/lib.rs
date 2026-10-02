@@ -7,17 +7,23 @@ use std::fmt;
 
 use luna_common::UserId;
 
+mod accounts;
 mod auth;
 mod credentials;
 mod graphics;
 mod input;
+mod keymap;
+mod renderer;
 mod seat;
+mod session_ui;
 
+pub use accounts::{AccountDirectory, LocalAccount};
 pub use auth::{AuthenticationError, handoff_current_identity};
 pub use credentials::UserCredentials;
 pub use graphics::{DrmDevice, DrmHandle};
 pub use input::{InputBackend, InputDevice, InputDeviceHandle, InputDeviceKind, InputEvent};
 pub use seat::{GraphicsDevice, SeatController, SeatResources};
+pub use session_ui::{SessionUi, SessionUiError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u128);
@@ -82,24 +88,58 @@ impl UserSession {
     }
 
     pub fn authenticate(&mut self) -> Result<(), AuthenticationError> {
-        if self.state != SessionState::Starting {
-            return Err(AuthenticationError::Session(
-                SessionError::InvalidTransition {
-                    from: self.state,
-                    to: SessionState::Authenticating,
-                },
-            ));
-        }
-
-        self.transition(SessionState::Authenticating)
+        self.begin_authentication()
             .map_err(AuthenticationError::Session)?;
-
         match auth::authenticate_preselected_identity(self.user().as_str()) {
             Ok(identity) => {
                 self.user = identity.username.into();
                 self.login_state = LoginState::Succeeded;
                 self.transition(SessionState::Active)
                     .map_err(AuthenticationError::Session)
+            }
+            Err(error) => {
+                self.login_state = LoginState::Failed;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn begin_authentication(&mut self) -> Result<(), SessionError> {
+        if self.state != SessionState::Starting {
+            return Err(SessionError::InvalidTransition {
+                from: self.state,
+                to: SessionState::Authenticating,
+            });
+        }
+        self.transition(SessionState::Authenticating)
+    }
+
+    pub fn activate_authenticated_identity(
+        &mut self,
+        credentials: UserCredentials,
+    ) -> Result<(), SessionError> {
+        if self.state != SessionState::Authenticating {
+            return Err(SessionError::InvalidTransition {
+                from: self.state,
+                to: SessionState::Active,
+            });
+        }
+        self.user = credentials.username.clone().into();
+        self.login_state = LoginState::Succeeded;
+        self.transition(SessionState::Active)
+    }
+
+    pub fn authenticate_with_password(
+        &mut self,
+        password: &str,
+    ) -> Result<UserCredentials, AuthenticationError> {
+        self.begin_authentication()
+            .map_err(AuthenticationError::Session)?;
+        match auth::authenticate(self.user().as_str(), password) {
+            Ok(credentials) => {
+                self.activate_authenticated_identity(credentials.clone())
+                    .map_err(AuthenticationError::Session)?;
+                Ok(credentials)
             }
             Err(error) => {
                 self.login_state = LoginState::Failed;

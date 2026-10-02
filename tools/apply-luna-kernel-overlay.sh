@@ -14,158 +14,121 @@ INIT_C="${SRC}/init/main.c"
 EXEC_C="${SRC}/fs/exec.c"
 BINFMT_H="${SRC}/include/linux/binfmts.h"
 
-[ -f "$RUST_SRC" ] || { echo "missing Luna Rust source: $RUST_SRC" >&2; exit 1; }
-[ -f "$EXEC_SRC" ] || { echo "missing Luna Rust launcher: $EXEC_SRC" >&2; exit 1; }
-[ -f "$MAKEFILE" ] || { echo "missing Linux x86 kernel Makefile: $MAKEFILE" >&2; exit 1; }
-[ -f "$SETUP_C" ] || { echo "missing Linux x86 setup.c: $SETUP_C" >&2; exit 1; }
-[ -f "$INIT_C" ] || { echo "missing Linux init/main.c: $INIT_C" >&2; exit 1; }
-[ -f "$EXEC_C" ] || { echo "missing Linux fs/exec.c: $EXEC_C" >&2; exit 1; }
-[ -f "$BINFMT_H" ] || { echo "missing Linux include/linux/binfmts.h: $BINFMT_H" >&2; exit 1; }
-
-for pair in "$RUST_SRC:$RUST_DST" "$EXEC_SRC:$EXEC_DST"; do
-    SRC_FILE="${pair%%:*}"
-    DST_FILE="${pair#*:}"
-    if [ -e "$DST_FILE" ]; then
-        cmp -s "$SRC_FILE" "$DST_FILE" || {
-            echo "refusing to overwrite existing different $DST_FILE" >&2
-            exit 1
-        }
-    else
-        cp "$SRC_FILE" "$DST_FILE"
-    fi
+for file in "$RUST_SRC" "$EXEC_SRC" "$MAKEFILE" "$SETUP_C" "$INIT_C" "$EXEC_C" "$BINFMT_H"; do
+    test -f "$file" || { echo "missing kernel overlay input: $file" >&2; exit 1; }
 done
 
-if ! grep -Fq 'obj-$(CONFIG_RUST) += luna_boot.o' "$MAKEFILE"; then
+if test -e "$RUST_DST" && ! cmp -s "$RUST_SRC" "$RUST_DST"; then
+    echo "refusing to overwrite existing different $RUST_DST" >&2
+    exit 1
+fi
+if test -e "$EXEC_DST" && ! cmp -s "$EXEC_SRC" "$EXEC_DST"; then
+    echo "refusing to overwrite existing different $EXEC_DST" >&2
+    exit 1
+fi
+test -e "$RUST_DST" || cp "$RUST_SRC" "$RUST_DST"
+test -e "$EXEC_DST" || cp "$EXEC_SRC" "$EXEC_DST"
+
+grep -Fq 'obj-$(CONFIG_RUST) += luna_boot.o' "$MAKEFILE" ||
     printf '%s\n' 'obj-$(CONFIG_RUST) += luna_boot.o' >> "$MAKEFILE"
-fi
-if ! grep -Fq 'obj-$(CONFIG_RUST) += luna_exec.o' "$MAKEFILE"; then
+grep -Fq 'obj-$(CONFIG_RUST) += luna_exec.o' "$MAKEFILE" ||
     printf '%s\n' 'obj-$(CONFIG_RUST) += luna_exec.o' >> "$MAKEFILE"
-fi
 
-setup_snippet=''
-init_include_snippet=''
-init_call_snippet=''
-exec_bridge=''
-cleanup() {
-    rm -f "${setup_snippet:-}" "${init_include_snippet:-}" "${init_call_snippet:-}" "${exec_bridge:-}"
-}
-trap cleanup EXIT
+python3 - "$SETUP_C" "$INIT_C" "$EXEC_C" "$BINFMT_H" <<'PY'
+from pathlib import Path
+import sys
 
-if ! grep -Fq 'x86_luna_boot_parse(boot_params.hdr.setup_data);' "$SETUP_C"; then
-    setup_snippet="$(mktemp)"
-    cat > "$setup_snippet" <<'EOF'
+setup_c, init_c, exec_c, binfmt_h = map(Path, sys.argv[1:])
+
+def once(path: Path, old: str, new: str, marker: str) -> None:
+    s = path.read_text()
+    if marker in s:
+        return
+    if old not in s:
+        raise SystemExit(f"overlay insertion point not found in {path}: {old!r}")
+    path.write_text(s.replace(old, new, 1))
+
+once(
+    setup_c,
+    "parse_setup_data();\n",
+    """parse_setup_data();
 #ifdef CONFIG_RUST
-extern void x86_luna_boot_parse(u64 setup_data_phys);
-x86_luna_boot_parse(boot_params.hdr.setup_data);
-#else
-#error "Project Luna requires CONFIG_RUST"
+\textern void x86_luna_boot_parse(u64 setup_data_phys);
+\tx86_luna_boot_parse(boot_params.hdr.setup_data);
 #endif
-EOF
-    awk -v snippet="$setup_snippet" '
-        /^[[:space:]]*parse_setup_data\(\);[[:space:]]*$/ {
-            while ((getline line < snippet) > 0) print line
-            close(snippet)
-        }
-        { print }
-    ' "$SETUP_C" > "$SETUP_C.tmp"
-    mv "$SETUP_C.tmp" "$SETUP_C"
-fi
+""",
+    "x86_luna_boot_parse(boot_params.hdr.setup_data);",
+)
 
-if ! grep -Fq 'extern int x86_luna_exec_init(void);' "$INIT_C"; then
-    init_include_snippet="$(mktemp)"
-    cat > "$init_include_snippet" <<'EOF'
+once(
+    init_c,
+    "#include <linux/binfmts.h>\n",
+    """#include <linux/binfmts.h>
 #ifdef CONFIG_RUST
 extern int x86_luna_exec_init(void);
+extern bool x86_luna_boot_available(void);
 static bool luna_init_started;
 #endif
-EOF
-    awk -v snippet="$init_include_snippet" '
-        /#include <linux\/binfmts\.h>/ {
-            print
-            while ((getline line < snippet) > 0) print line
-            close(snippet)
-            next
-        }
-        { print }
-    ' "$INIT_C" > "$INIT_C.tmp"
-    mv "$INIT_C.tmp" "$INIT_C"
-fi
+""",
+    "extern int x86_luna_exec_init(void);",
+)
 
-if ! grep -Fq 'x86_luna_exec_init();' "$INIT_C"; then
-    init_call_snippet="$(mktemp)"
-    cat > "$init_call_snippet" <<'EOF'
+once(
+    init_c,
+    """\twait_for_initramfs();
+\tconsole_on_rootfs();
+""",
+    """\twait_for_initramfs();
+#ifdef CONFIG_RUST
+\t/* Direct-init mode needs devtmpfs before console_on_rootfs(). */
+\tif (x86_luna_boot_available())
+\t\tdevtmpfs_mount();
+#endif
+\tconsole_on_rootfs();
+#ifdef CONFIG_RUST
+\tif (x86_luna_boot_available()) {
+\t\tint luna_ret = x86_luna_exec_init();
+\t\tif (!luna_ret) {
+\t\t\tluna_init_started = true;
+\t\t\treturn;
+\t\t}
+\t\tpanic("Luna: direct init execution failed (error %d).", luna_ret);
+\t}
+#endif
+""",
+    "Luna: direct init execution failed",
+)
+
+once(
+    init_c,
+    """\tdo_sysctl_args();
+
+\tif (ramdisk_execute_command) {
+""",
+    """\tdo_sysctl_args();
 
 #ifdef CONFIG_RUST
-	if (IS_ENABLED(CONFIG_RUST)) {
-		int luna_ret = x86_luna_exec_init();
-		if (!luna_ret) {
-			luna_init_started = true;
-			return;
-		}
-		panic("Luna: direct luna-init execution failed (error %d).", luna_ret);
-	}
+\tif (luna_init_started)
+\t\treturn 0;
 #endif
-EOF
-    awk -v snippet="$init_call_snippet" '
-        /^[[:space:]]*console_on_rootfs\(\);[[:space:]]*$/ {
-            print
-            while ((getline line < snippet) > 0) print line
-            close(snippet)
-            next
-        }
-        { print }
-    ' "$INIT_C" > "$INIT_C.tmp"
-    mv "$INIT_C.tmp" "$INIT_C"
-fi
 
-if ! grep -Fq 'luna_init_started)' "$INIT_C"; then
-    init_return_snippet="$(mktemp)"
-    cat > "$init_return_snippet" <<'EOF'
+\tif (ramdisk_execute_command) {
+""",
+    "if (luna_init_started)",
+)
 
-#ifdef CONFIG_RUST
-	if (IS_ENABLED(CONFIG_RUST) && luna_init_started)
-		return 0;
-#endif
-EOF
-    awk -v snippet="$init_return_snippet" '
-        /^[[:space:]]*do_sysctl_args\(\);[[:space:]]*$/ {
-            print
-            while ((getline line < snippet) > 0) print line
-            close(snippet)
-            next
-        }
-        { print }
-    ' "$INIT_C" > "$INIT_C.tmp"
-    mv "$INIT_C.tmp" "$INIT_C"
-fi
-
-# Keep the Luna-specific execution policy in Rust while adding only the
-# smallest generic bridge needed to feed a kernel-created anonymous file into
-# Linux's existing kernel_execve/binfmt machinery. No Luna storage, rootfs, or
-# bootstrap policy belongs in this C hook.
-if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$EXEC_C"; then
-    exec_bridge="$(mktemp)"
-    cat > "$exec_bridge" <<'EOF'
-
-/*
- * Luna-only kernel-internal adapter. The caller supplies an already-created
- * memory-backed executable object; this helper only feeds it through the
- * existing kernel exec path so Linux keeps ownership of ELF loading, VM
- * construction, credentials and process setup. The object is never opened by
- * pathname.
- */
+exec_marker = "int kernel_execve_file(struct file *file,"
+exec_snippet = r'''/* Project Luna: execute a kernel-created memory-backed executable object. */
 int kernel_execve_file(struct file *file,
-			       struct file *handoff,
-			       const char *const *argv,
-			       const char *const *envp)
+		       struct file *handoff,
+		       const char *const *argv,
+		       const char *const *envp)
 {
 	int fd, retval;
 
 	if (!file || !handoff)
 		return -EINVAL;
 
-	/* FD 3 is the stable Luna PID 1 handoff channel. Standard descriptors
-	 * 0..2 are installed by console_on_rootfs() before this hook runs. */
 	fd = get_unused_fd_flags(0);
 	if (fd < 0)
 		return fd;
@@ -177,8 +140,6 @@ int kernel_execve_file(struct file *file,
 	get_file(handoff);
 	fd_install(fd, handoff);
 
-	/* The anonymous shmem object is kernel-created and trusted by Luna.
-	 * Give the VFS execute permission required by do_open_execat(). */
 	inode_lock(file_inode(file));
 	file_inode(file)->i_mode = (file_inode(file)->i_mode & S_IFMT) | 0700;
 	inode_unlock(file_inode(file));
@@ -204,15 +165,10 @@ int kernel_execve_file(struct file *file,
 		}
 
 		retval = count_strings_kernel(argv);
-		if (WARN_ON_ONCE(retval == 0)) {
+		if (retval <= 0) {
 			close_fd(fd);
 			close_fd(3);
-			return -EINVAL;
-		}
-		if (retval < 0) {
-			close_fd(fd);
-			close_fd(3);
-			return retval;
+			return retval < 0 ? retval : -EINVAL;
 		}
 		bprm->argc = retval;
 
@@ -245,7 +201,6 @@ int kernel_execve_file(struct file *file,
 			close_fd(3);
 			return retval;
 		}
-
 		retval = copy_strings_kernel(bprm->argc, argv, bprm);
 		if (retval < 0) {
 			close_fd(fd);
@@ -256,8 +211,6 @@ int kernel_execve_file(struct file *file,
 		retval = bprm_execve(bprm);
 	}
 
-	/* Keep FD 3 alive across a successful exec; only the temporary exec fd
-	 * is closed here. On failure the handoff fd is closed as well. */
 	close_fd(fd);
 	if (retval)
 		close_fd(3);
@@ -265,26 +218,31 @@ int kernel_execve_file(struct file *file,
 }
 EXPORT_SYMBOL_GPL(kernel_execve_file);
 
-EOF
-    awk -v snippet="$exec_bridge" '
-        /^void set_binfmt\(struct linux_binfmt \*new\)/ {
-            while ((getline line < snippet) > 0) print line
-            close(snippet)
-        }
-        { print }
-    ' "$EXEC_C" > "$EXEC_C.tmp"
-    mv "$EXEC_C.tmp" "$EXEC_C"
-fi
+'''
+def insert_before(path: Path, marker: str, snippet: str) -> None:
+    s = path.read_text()
+    if marker in s:
+        return
+    pivot = "void set_binfmt(struct linux_binfmt *new)"
+    if pivot not in s:
+        raise SystemExit(f"binfmt insertion point not found in {path}")
+    path.write_text(s.replace(pivot, snippet + pivot, 1))
 
-if ! grep -Fq 'int kernel_execve_file(struct file *file,' "$BINFMT_H"; then
-    cat >> "$BINFMT_H" <<'EOF'
+insert_before(exec_c, exec_marker, exec_snippet)
 
-/* Project Luna: execute a kernel-created memory-backed file. */
-int kernel_execve_file(struct file *file,
-			       struct file *handoff,
-			       const char *const *argv,
-			       const char *const *envp);
-EOF
-fi
+once(
+    binfmt_h,
+    "int kernel_execve(const char *filename,\n",
+    "int kernel_execve_file(struct file *file, struct file *handoff,\n"
+    "\t\t\t       const char *const *argv,\n"
+    "\t\t\t       const char *const *envp);\n\n"
+    "int kernel_execve(const char *filename,\n",
+    "int kernel_execve_file(struct file *file",
+)
+PY
 
-echo "Applied Luna kernel overlay to: $SRC"
+echo "Applied Luna direct-init kernel overlay: $SRC"
+
+# Alpine foundation experiment: attach the selected real root filesystem
+# directly over the initial namespace root and skip rootfs pivoting.
+python3 "${REPO_ROOT}/tools/apply-luna-direct-root-overlay.py" "$SRC"

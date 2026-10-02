@@ -39,6 +39,8 @@ pub struct PreparedKernel {
     pub command_line_address: u64,
     pub boot_params: BootParams,
     pub allocations: Vec<(u64, usize)>,
+    pub initrd_address: Option<u64>,
+    pub initrd_size: Option<usize>,
 }
 
 pub struct KernelLoader<'a> {
@@ -51,6 +53,23 @@ impl<'a> KernelLoader<'a> {
     }
 
     pub fn prepare(&mut self, target: &BootTarget) -> BootResult<PreparedKernel> {
+        self.prepare_inner(target, None)
+    }
+
+    pub fn prepare_with_initrd(
+        &mut self,
+        target: &BootTarget,
+        initrd_path: &str,
+    ) -> BootResult<PreparedKernel> {
+        let initrd = self.filesystem.read_file(initrd_path)?;
+        self.prepare_inner(target, Some(initrd.as_slice()))
+    }
+
+    fn prepare_inner(
+        &mut self,
+        target: &BootTarget,
+        initrd: Option<&[u8]>,
+    ) -> BootResult<PreparedKernel> {
         debug_stage("Luna: kernel 1 read start\r\n");
         let kernel = self.filesystem.read_file(&target.kernel_path)?;
         debug_stage("Luna: kernel 2 read done\r\n");
@@ -92,30 +111,42 @@ impl<'a> KernelLoader<'a> {
         }
         debug_stage("Luna: kernel 7 kernel copy done\r\n");
 
-        debug_stage("Luna: kernel 8 init read start\r\n");
-        let init = self.filesystem.read_file(&target.init_path)?;
-        debug_stage("Luna: kernel 9 init read done\r\n");
-        validate_luna_init(&init)?;
-        debug_stage("Luna: kernel 10 init validate done\r\n");
-        let init_digest = *blake3::hash(&init).as_bytes();
-        debug_stage("Luna: kernel 11 init digest done\r\n");
-        let init_size = init.len();
-        let init_pages = div_ceil(init_size, PAGE_SIZE);
-        debug_stage("Luna: kernel 12 init alloc start\r\n");
-        let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
-        debug_stage("Luna: kernel 13 init alloc done\r\n");
-        debug_stage(&format!(
-            "Luna: init phys=0x{init_address:x} size={init_size}\r\n"
-        ));
-        unsafe {
-            ptr::write_bytes(init_address as *mut u8, 0, init_pages * PAGE_SIZE);
-            ptr::copy_nonoverlapping(init.as_ptr(), init_address as *mut u8, init_size);
-        }
+        let (init_address, init_size, init_digest, init_pages) =
+            if initrd.is_some() || target.init_path.is_empty() {
+                (0, 0, [0u8; 32], 0)
+            } else {
+                debug_stage("Luna: kernel 8 init read start\r\n");
+                let init = self.filesystem.read_file(&target.init_path)?;
+                debug_stage("Luna: kernel 9 init read done\r\n");
+                validate_luna_init(&init)?;
+                debug_stage("Luna: kernel 10 init validate done\r\n");
+                let init_digest = *blake3::hash(&init).as_bytes();
+                debug_stage("Luna: kernel 11 init digest done\r\n");
+                let init_size = init.len();
+                let init_pages = div_ceil(init_size, PAGE_SIZE);
+                debug_stage("Luna: kernel 12 init alloc start\r\n");
+                let init_address = allocate_pages(init_pages, 0xffff_ffff)?;
+                debug_stage("Luna: kernel 13 init alloc done\r\n");
+                debug_stage(&format!(
+                    "Luna: init phys=0x{init_address:x} size={init_size}\r\n"
+                ));
+                unsafe {
+                    ptr::write_bytes(init_address as *mut u8, 0, init_pages * PAGE_SIZE);
+                    ptr::copy_nonoverlapping(init.as_ptr(), init_address as *mut u8, init_size);
+                }
+                (init_address, init_size, init_digest, init_pages)
+            };
 
         let mut boot_params = BootParams::zeroed();
         debug_stage("Luna: kernel 14 boot params zeroed\r\n");
         boot_params.copy_setup_header(&kernel)?;
         debug_stage("Luna: kernel 15 setup copied\r\n");
+        if let Some(address) = firmware_acpi_rsdp() {
+            boot_params.set_acpi_rsdp(address);
+            debug_stage("Luna: kernel 15a ACPI RSDP handed off\r\n");
+        } else {
+            debug_stage("Luna: kernel 15a ACPI RSDP unavailable\r\n");
+        }
         boot_params.set_loader_type(0xff);
         boot_params.set_loadflags(setup.loadflags | 0x01);
         boot_params.enable_setup_heap();
@@ -145,6 +176,28 @@ impl<'a> KernelLoader<'a> {
         boot_params.set_cmdline(cmdline_addr)?;
         debug_stage("Luna: kernel 21 cmdline set\r\n");
 
+        let mut initrd_address = None;
+        let mut initrd_size = None;
+        if let Some(initrd) = initrd {
+            if initrd.is_empty() {
+                return Err(BootError::InvalidKernel);
+            }
+            let max_address = (setup.initrd_addr_max as u64).min(u32::MAX as u64);
+            let pages = div_ceil(initrd.len(), PAGE_SIZE);
+            let address = allocate_pages(pages, max_address)?;
+            debug_stage(&format!(
+                "Luna: initrd phys=0x{address:x} size={}\r\n",
+                initrd.len()
+            ));
+            unsafe {
+                ptr::write_bytes(address as *mut u8, 0, pages * PAGE_SIZE);
+                ptr::copy_nonoverlapping(initrd.as_ptr(), address as *mut u8, initrd.len());
+            }
+            boot_params.set_initrd(address, initrd.len())?;
+            initrd_address = Some(address);
+            initrd_size = Some(initrd.len());
+        }
+
         let e820 = Vec::<E820Entry>::new();
         debug_stage("Luna: kernel 22 e820 start\r\n");
         boot_params.set_e820(&e820)?;
@@ -158,12 +211,17 @@ impl<'a> KernelLoader<'a> {
         }
 
         debug_stage("Luna: kernel 24 boot params copy\r\n");
-        let allocations = vec![
+        let mut allocations = vec![
             (kernel_address, div_ceil(kernel_size, PAGE_SIZE)),
-            (init_address, init_pages),
             (bp_addr, 1),
             (cmdline_addr, 1),
         ];
+        if init_pages != 0 {
+            allocations.push((init_address, init_pages));
+        }
+        if let (Some(address), Some(size)) = (initrd_address, initrd_size) {
+            allocations.push((address, div_ceil(size, PAGE_SIZE)));
+        }
 
         Ok(PreparedKernel {
             setup,
@@ -177,6 +235,8 @@ impl<'a> KernelLoader<'a> {
             command_line_address: cmdline_addr,
             boot_params,
             allocations,
+            initrd_address,
+            initrd_size,
         })
     }
 }
@@ -335,6 +395,21 @@ fn read_u64(bytes: &[u8], offset: usize) -> BootResult<u64> {
     Ok(u64::from_le_bytes([
         value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
     ]))
+}
+
+fn firmware_acpi_rsdp() -> Option<u64> {
+    let mut legacy = None;
+    let mut modern = None;
+    uefi::system::with_config_table(|entries| {
+        for entry in entries {
+            if entry.guid == uefi::table::cfg::ConfigTableEntry::ACPI2_GUID {
+                modern = Some(entry.address as u64);
+            } else if entry.guid == uefi::table::cfg::ConfigTableEntry::ACPI_GUID {
+                legacy = Some(entry.address as u64);
+            }
+        }
+    });
+    modern.or(legacy).filter(|address| *address != 0)
 }
 
 fn allocate_kernel(_preferred: u64, size: usize, alignment: u64) -> BootResult<u64> {

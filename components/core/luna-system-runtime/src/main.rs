@@ -9,7 +9,7 @@ use luna_system_manager::{
     InitRef, KernelRef, PersistentSystemManager, RecoveryDataImageRef, RecoveryTarget,
     SystemImageRef, SystemState, SystemTarget,
 };
-use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeService};
+use luna_system_runtime::{ProcessId, SystemRuntime, SystemRuntimeService};
 use luna_user_session::SessionState;
 use luna_user_session::UserCredentials;
 
@@ -121,13 +121,34 @@ fn default_development_system_state() -> SystemState {
 }
 
 fn graphical_session_command() -> &'static str {
-    // Luna owns the graphical-session lifecycle. There is only one supported
-    // compositor, so provider selection is not a runtime protocol or config
-    // lookup: the native UserSession launches Niri directly.
-    "/usr/bin/niri --session"
+    // Keep the proven Alpine/Luna desktop launcher intact while the canonical
+    // disk transition is being completed. The launcher creates the user D-Bus
+    // session and starts PipeWire/WirePlumber before Niri.
+    "/usr/bin/luna-graphical-session"
 }
 
-fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
+fn start_openrc() -> Result<(), luna_system_runtime::RuntimeError> {
+    for runlevel in ["sysinit", "boot", "default"] {
+        eprintln!("luna-system-runtime: OpenRC starting {runlevel} runlevel");
+        let status = std::process::Command::new("/usr/bin/openrc")
+            .arg(runlevel)
+            .status()
+            .map_err(|error| {
+                luna_system_runtime::RuntimeError::Session(format!(
+                    "start OpenRC {runlevel}: {error}"
+                ))
+            })?;
+        if !status.success() {
+            return Err(luna_system_runtime::RuntimeError::Session(format!(
+                "OpenRC {runlevel} returned {status}"
+            )));
+        }
+        eprintln!("luna-system-runtime: OpenRC {runlevel} runlevel ready");
+    }
+    Ok(())
+}
+
+fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<(ProcessId, &'static str)> {
     if std::env::var_os("LUNA_SKIP_SYSTEM_SERVICES").is_some() || !nix_like_root() {
         return Vec::new();
     }
@@ -145,11 +166,17 @@ fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
     // libinput/udisks, and the system D-Bus bus must exist before services that
     // register objects on it. Luna has no external service manager providing
     // these dependency edges for us.
-    let ordered: [(&str, &[&str], Option<&str>); 5] = [
+    let ordered: [(&str, &[&str], Option<&str>); 7] = [
+        ("/usr/bin/udevd", &[], None),
         (
             "/usr/bin/luna-device-manager",
             &[],
             Some("/run/luna/device-manager.ready"),
+        ),
+        (
+            "/usr/bin/seatd",
+            &["-g", "seat", "-l", "info"],
+            Some("/run/seatd.sock"),
         ),
         (
             "/usr/bin/dbus-daemon",
@@ -163,7 +190,10 @@ fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
 
     let mut services = Vec::new();
     for (program, args, ready_socket) in ordered {
-        let spawn = if program == "/usr/bin/luna-device-manager" {
+        let spawn = if program == "/usr/bin/luna-device-manager"
+            || program == "/usr/bin/udisksd"
+            || program == "/usr/bin/seatd"
+        {
             runtime.spawn_process_inherited_stdio(program, args.iter().copied())
         } else {
             runtime.spawn_process(program, args.iter().copied())
@@ -174,7 +204,71 @@ fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<ProcessId> {
                     "luna-system-runtime: started system service {program} (pid {})",
                     id.get()
                 );
-                services.push(id);
+                services.push((id, program));
+                if program == "/usr/bin/udevd" {
+                    std::thread::sleep(Duration::from_millis(150));
+                    match std::process::Command::new("/usr/bin/udevadm")
+                        .args(["trigger", "--subsystem-match=input", "--action=add"])
+                        .status()
+                    {
+                        Ok(status) if status.success() => {
+                            eprintln!("luna-system-runtime: udev input coldplug triggered");
+                        }
+                        Ok(status) => {
+                            eprintln!(
+                                "luna-system-runtime: udev input coldplug failed with {status}"
+                            );
+                        }
+                        Err(error) => {
+                            eprintln!("luna-system-runtime: udev input coldplug failed: {error}");
+                        }
+                    }
+                    match std::process::Command::new("/usr/bin/udevadm")
+                        .arg("settle")
+                        .status()
+                    {
+                        Ok(status) if status.success() => {}
+                        Ok(status) => {
+                            eprintln!("luna-system-runtime: udev settle returned {status}");
+                        }
+                        Err(error) => {
+                            eprintln!("luna-system-runtime: udev settle failed: {error}");
+                        }
+                    }
+                    for event in ["event0", "event1", "event2"] {
+                        match std::process::Command::new("/usr/bin/udevadm")
+                            .args([
+                                "info",
+                                "--query=property",
+                                "--name",
+                                &format!("/dev/input/{event}"),
+                            ])
+                            .output()
+                        {
+                            Ok(output) if output.status.success() => {
+                                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                                    if line.starts_with("ID_INPUT_")
+                                        || line.starts_with("ID_SEAT=")
+                                        || line.starts_with("TAGS=")
+                                        || line.starts_with("NAME=")
+                                        || line.starts_with("SUBSYSTEM=")
+                                    {
+                                        eprintln!("luna-system-runtime: udev {event} {line}");
+                                    }
+                                }
+                            }
+                            Ok(output) => {
+                                eprintln!(
+                                    "luna-system-runtime: udev {event} info returned {}",
+                                    output.status
+                                );
+                            }
+                            Err(error) => {
+                                eprintln!("luna-system-runtime: udev {event} info failed: {error}");
+                            }
+                        }
+                    }
+                }
                 if let Some(path) = ready_socket {
                     let readiness = if program == "/usr/bin/luna-device-manager" {
                         wait_for_path(path, Duration::from_secs(5))
@@ -244,8 +338,8 @@ fn launch_graphical_user_session(
     let executable = command_parts.next().ok_or_else(|| {
         luna_system_runtime::RuntimeError::Session("graphical session command is empty".into())
     })?;
-    if executable == "/usr/bin/niri" {
-        prepare_niri_config(&home)?;
+    if executable == "/usr/bin/niri" || executable == "/usr/bin/luna-graphical-session" {
+        prepare_niri_config(&home, &username)?;
     }
     let args: Vec<OsString> = command_parts.map(OsString::from).collect();
     let env = [
@@ -261,6 +355,8 @@ fn launch_graphical_user_session(
             OsString::from("XDG_SESSION_TYPE"),
             OsString::from("wayland"),
         ),
+        (OsString::from("XDG_SEAT"), OsString::from("seat0")),
+        (OsString::from("XDG_VTNR"), OsString::from("1")),
         (
             OsString::from("XDG_CURRENT_DESKTOP"),
             OsString::from("niri"),
@@ -276,25 +372,84 @@ fn launch_graphical_user_session(
             OsString::from("XDG_DATA_DIRS"),
             OsString::from("/usr/local/share:/usr/share"),
         ),
-        (OsString::from("LIBSEAT_BACKEND"), OsString::from("builtin")),
+        (
+            OsString::from("FONTCONFIG_FILE"),
+            OsString::from("/etc/fonts/fonts.conf"),
+        ),
+        (
+            OsString::from("FONTCONFIG_PATH"),
+            OsString::from("/etc/fonts"),
+        ),
+        (
+            OsString::from("XCURSOR_PATH"),
+            OsString::from("/usr/share/icons:/usr/share/cursors:/usr/share/pixmaps"),
+        ),
+        (OsString::from("XCURSOR_THEME"), OsString::from("Adwaita")),
+        (OsString::from("XCURSOR_SIZE"), OsString::from("24")),
+        (
+            OsString::from("NOCTALIA_LOG_LEVEL"),
+            OsString::from("debug"),
+        ),
+        (
+            OsString::from("LD_LIBRARY_PATH"),
+            OsString::from("/usr/lib/niri-compat:/usr/lib:/usr/local/lib"),
+        ),
+        (OsString::from("LIBSEAT_BACKEND"), OsString::from("seatd")),
+        (
+            OsString::from("RUST_LOG"),
+            OsString::from(
+                "smithay::backend::session::libseat=debug,smithay::backend::udev=debug,smithay::backend::libinput=debug,backend_session=debug,backend_udev=debug,backend_libinput=debug,input_seat=debug,niri::input=debug,niri::backend::tty=debug",
+            ),
+        ),
     ];
     let credentials = UserCredentials::new(uid, gid, username);
-    runtime.spawn_process_with_env_and_pre_exec(executable, args, env, move || credentials.apply())
+    runtime.spawn_process_with_env_and_pre_exec_inherited_stdio(executable, args, env, move || {
+        credentials.apply()
+    })
 }
 
-fn prepare_niri_config(home: &str) -> Result<(), luna_system_runtime::RuntimeError> {
-    let config_dir = std::path::Path::new(home).join(".config/niri");
-    fs::create_dir_all(&config_dir).map_err(|error| {
+fn prepare_niri_config(
+    home: &str,
+    username: &str,
+) -> Result<(), luna_system_runtime::RuntimeError> {
+    let config_dir = std::path::Path::new(home).join(".config");
+    if config_dir.is_symlink() || config_dir.is_file() {
+        fs::remove_file(&config_dir).map_err(|error| {
+            luna_system_runtime::RuntimeError::Session(format!(
+                "replace user config link {}: {error}",
+                config_dir.display()
+            ))
+        })?;
+    } else if config_dir.is_dir() {
+        fs::remove_dir_all(&config_dir).map_err(|error| {
+            luna_system_runtime::RuntimeError::Session(format!(
+                "replace user config directory {}: {error}",
+                config_dir.display()
+            ))
+        })?;
+    }
+
+    let data_config = format!("/data/users/{username}/config");
+    std::os::unix::fs::symlink(&data_config, &config_dir).map_err(|error| {
         luna_system_runtime::RuntimeError::Session(format!(
-            "create Niri config directory {}: {error}",
-            config_dir.display()
+            "link user config {} -> {}: {error}",
+            config_dir.display(),
+            data_config
         ))
     })?;
-    let target = config_dir.join("config.kdl");
+
+    let niri_dir = config_dir.join("niri");
+    fs::create_dir_all(&niri_dir).map_err(|error| {
+        luna_system_runtime::RuntimeError::Session(format!(
+            "create Niri config directory {}: {error}",
+            niri_dir.display()
+        ))
+    })?;
+    let target = niri_dir.join("config.kdl");
     if !target.exists() {
         fs::copy("/etc/luna/niri-config.kdl", &target).map_err(|error| {
             luna_system_runtime::RuntimeError::Session(format!(
-                "materialize Niri config {}: {error}",
+                "initialize DATA Niri config {}: {error}",
                 target.display()
             ))
         })?;
@@ -403,7 +558,13 @@ fn main() {
     }
 
     runtime.start();
-    let system_services = start_system_services(&mut runtime);
+    let recovery_mode = std::env::var(BOOT_MODE_ENV).is_ok_and(|value| value == "2");
+    if !recovery_mode {
+        if let Err(error) = start_openrc() {
+            eprintln!("luna-system-runtime: OpenRC bootstrap failed: {error}");
+            std::process::exit(1);
+        }
+    }
 
     if let Err(error) = boot_success::confirm_boot_success() {
         eprintln!("luna-system-runtime: boot success confirmation failed: {error}");
@@ -412,7 +573,6 @@ fn main() {
     eprintln!("luna-system-runtime: boot success confirmed");
 
     let login_user = std::env::var(SESSION_USER_ENV).unwrap_or_else(|_| "luna".to_owned());
-    let recovery_mode = std::env::var(BOOT_MODE_ENV).is_ok_and(|value| value == "2");
 
     loop {
         let session = if recovery_mode {
@@ -439,7 +599,7 @@ fn main() {
                 }
             };
 
-            if let Err(error) = runtime.authenticate_session(session) {
+            if let Err(error) = runtime.authenticate_session_interactive(session) {
                 eprintln!("luna-system-runtime: graphical authentication failed: {error}");
                 let _ = runtime.cancel_login(session);
                 if !respawn {
@@ -474,14 +634,6 @@ fn main() {
             if let Err(error) = runtime.supervise() {
                 eprintln!("luna-system-runtime: supervision error: {error}");
                 std::process::exit(1);
-            }
-
-            for service in &system_services {
-                if matches!(runtime.poll_process(*service), Ok(ProcessState::Exited(_))) {
-                    eprintln!(
-                        "luna-system-runtime: a supervised host service exited; continuing in degraded mode"
-                    );
-                }
             }
 
             if runtime

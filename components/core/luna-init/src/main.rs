@@ -392,8 +392,13 @@ impl SystemMounts {
             .map_err(|error| format!("create /usr/bin: {error}"))?;
         std::fs::create_dir_all(root.join("usr/lib"))
             .map_err(|error| format!("create /usr/lib: {error}"))?;
+        std::fs::create_dir_all(root.join("usr/local/lib"))
+            .map_err(|error| format!("create /usr/local/lib: {error}"))?;
         std::fs::create_dir_all(root.join("usr/share"))
             .map_err(|error| format!("create /usr/share: {error}"))?;
+        std::fs::create_dir_all(root.join("resources"))
+            .map_err(|error| format!("create /resources: {error}"))?;
+        bind_mount(&self.image.join("resources"), &root.join("resources"))?;
         std::fs::create_dir_all(root.join("lib64"))
             .map_err(|error| format!("create /lib64: {error}"))?;
         std::fs::create_dir_all(root.join("lib"))
@@ -496,7 +501,38 @@ impl SystemMounts {
         // Luna core binaries remain in the System Image, while DATA libraries
         // and applications are exposed through the logical runtime namespace.
         Self::materialize_data_apps(&self.data, root, shadow_gid)?;
+        for shell_name in ["sh", "ash"] {
+            let target = root.join("usr/bin").join(shell_name);
+            if target.exists() || target.is_symlink() {
+                std::fs::remove_file(&target)
+                    .map_err(|error| format!("replace /usr/bin/{shell_name}: {error}"))?;
+            }
+            std::os::unix::fs::symlink("busybox", &target)
+                .map_err(|error| format!("link /usr/bin/{shell_name}: {error}"))?;
+        }
         bind_mount(&self.data.join("system/libs"), &root.join("usr/lib"))?;
+        bind_mount(
+            &self.data.join("system/libs"),
+            &root.join("usr/local/lib"),
+        )?;
+        std::fs::create_dir_all(root.join("usr/lib/udev"))
+            .map_err(|error| format!("create /usr/lib/udev: {error}"))?;
+        let udev_resources = self.data.join("system/apps/udevd/resources/udev");
+        if udev_resources.is_dir() {
+            bind_mount(&udev_resources, &root.join("usr/lib/udev"))?;
+        }
+
+        // DATA-owned musl applications keep their normal ELF interpreter path.
+        // The provider libraries remain mounted under /usr/lib, so expose only
+        // the loader itself at the ABI-defined /lib location.
+        let musl_loader = root.join("lib/ld-musl-x86_64.so.1");
+        if musl_loader.exists() || musl_loader.is_symlink() {
+            std::fs::remove_file(&musl_loader)
+                .map_err(|error| format!("replace musl loader mapping: {error}"))?;
+        }
+        std::os::unix::fs::symlink("/usr/lib/ld-musl-x86_64.so.1", &musl_loader)
+            .map_err(|error| format!("map DATA musl loader: {error}"))?;
+
         let compat_lib = root.join("lib/x86_64-linux-gnu");
         if compat_lib.is_symlink() || compat_lib.exists() {
             std::fs::remove_file(&compat_lib)
@@ -553,6 +589,8 @@ impl SystemMounts {
             std::fs::set_permissions(&machine_id, std::fs::Permissions::from_mode(0o444))
                 .map_err(|error| format!("set machine-id permissions: {error}"))?;
         }
+        std::fs::create_dir_all(root.join("usr/libexec"))
+            .map_err(|error| format!("create /usr/libexec: {error}"))?;
         let loader = self
             .data
             .join("system/libs/loader/ld-linux-x86-64.so.2");
@@ -560,12 +598,39 @@ impl SystemMounts {
             std::fs::copy(&loader, root.join("lib64/ld-linux-x86-64.so.2"))
                 .map_err(|error| format!("materialize DATA ELF loader: {error}"))?;
         }
-        if root.join("bin").exists() || root.join("bin").is_symlink() {
-            std::fs::remove_file(root.join("bin"))
-                .map_err(|error| format!("replace /bin: {error}"))?;
+        for name in ["bin", "sbin", "usr/sbin"] {
+            std::fs::create_dir_all(root.join(name))
+                .map_err(|error| format!("create /{name}: {error}"))?;
         }
-        std::os::unix::fs::symlink("/usr/bin", root.join("bin"))
-            .map_err(|error| format!("create /bin compatibility link: {error}"))?;
+
+        // DATA providers are materialized in /usr/bin. Preserve Alpine's
+        // traditional /sbin namespace for OpenRC and core compatibility,
+        // but never replace the real directory with a single symlink.
+        for name in [
+            "luna-system-runtime",
+            "openrc",
+            "openrc-run",
+            "rc-service",
+            "rc-sstat",
+            "rc-update",
+            "start-stop-daemon",
+            "supervise-daemon",
+            "mdev",
+            "getty",
+            "mount",
+            "umount",
+            "mknod",
+        ] {
+            let source = root.join("usr/bin").join(name);
+            let target = root.join("sbin").join(name);
+            if source.exists() && !target.exists() && !target.is_symlink() {
+                std::os::unix::fs::symlink(
+                    format!("/usr/bin/{name}"),
+                    &target,
+                )
+                .map_err(|error| format!("link /sbin/{name}: {error}"))?;
+            }
+        }
 
         std::fs::create_dir_all(root.join("etc"))
             .map_err(|error| format!("create /etc: {error}"))?;
@@ -653,10 +718,44 @@ impl SystemMounts {
             .map_err(|error| format!("create persistent {username} data: {error}"))?;
         std::fs::create_dir_all(self.data.join("users").join(username).join("config"))
             .map_err(|error| format!("create persistent {username} config: {error}"))?;
-        std::fs::create_dir_all(self.data.join("system/state/auth"))
+        std::fs::create_dir_all(self.data.join("system/config/auth"))
             .map_err(|error| format!("create persistent auth state: {error}"))?;
 
         Self::materialize_data_apps(&self.data, root, shadow_gid)?;
+
+        for name in ["sh", "ash", "busybox"] {
+            let source = root.join("usr/bin").join(name);
+            let target = root.join("bin").join(name);
+            if source.exists() && !target.exists() && !target.is_symlink() {
+                std::os::unix::fs::symlink(format!("/usr/bin/{name}"), &target)
+                    .map_err(|error| format!("link /bin/{name}: {error}"))?;
+            }
+        }
+        for name in [
+            "openrc",
+            "openrc-run",
+            "rc-service",
+            "rc-sstat",
+            "rc-update",
+            "start-stop-daemon",
+            "supervise-daemon",
+        ] {
+            let source = root.join("usr/bin").join(name);
+            let target = root.join("sbin").join(name);
+            if source.exists() && !target.exists() && !target.is_symlink() {
+                std::os::unix::fs::symlink(format!("/usr/bin/{name}"), &target)
+                    .map_err(|error| format!("link /sbin/{name}: {error}"))?;
+            }
+        }
+        if root.join("usr/bin/NetworkManager").exists()
+            && !root.join("usr/sbin/NetworkManager").exists()
+        {
+            std::os::unix::fs::symlink(
+                "/usr/bin/NetworkManager",
+                root.join("usr/sbin/NetworkManager"),
+            )
+            .map_err(|error| format!("link /usr/sbin/NetworkManager: {error}"))?;
+        }
 
         replace_with_symlink(
             &root.join(format!("home/{username}")),
@@ -664,18 +763,18 @@ impl SystemMounts {
         )?;
         replace_with_symlink(
             &root.join("etc/passwd"),
-            std::path::Path::new("/data/system/state/auth/passwd"),
+            std::path::Path::new("/data/system/config/auth/passwd"),
         )?;
         replace_with_symlink(
             &root.join("etc/group"),
-            std::path::Path::new("/data/system/state/auth/group"),
+            std::path::Path::new("/data/system/config/auth/group"),
         )?;
         replace_with_symlink(
             &root.join("etc/shadow"),
-            std::path::Path::new("/data/system/state/auth/shadow"),
+            std::path::Path::new("/data/system/config/auth/shadow"),
         )?;
         for name in ["passwd", "group", "shadow"] {
-            let target = self.data.join("system/state/auth").join(name);
+            let target = self.data.join("system/config/auth").join(name);
             if !target.exists() {
                 let source = self.image.join("config").join(name);
                 std::fs::copy(&source, &target)
@@ -731,6 +830,22 @@ impl SystemMounts {
                             resource.map_err(|error| format!("read DATA resource entry: {error}"))?;
                         let resource_source = resource.path();
                         let resource_name = resource.file_name();
+
+                        if app.file_name().and_then(|value| value.to_str()) == Some("openrc")
+                            && resource_name.to_str() == Some("rc")
+                        {
+                            let target = root.join("usr/libexec/rc");
+                            if target.is_symlink() {
+                                std::fs::remove_file(&target).map_err(|error| {
+                                    format!("replace OpenRC runtime link: {error}")
+                                })?;
+                            }
+                            std::fs::create_dir_all(&target)
+                                .map_err(|error| format!("create OpenRC runtime tree: {error}"))?;
+                            bind_mount(&resource_source, &target)?;
+                            continue;
+                        }
+
                         let resource_target = root.join("usr/share").join(&resource_name);
                         let resource_meta = std::fs::symlink_metadata(&resource_source)
                             .map_err(|error| format!("inspect DATA resource: {error}"))?;
@@ -855,13 +970,20 @@ fn prepare_drm_device_access() -> Result<(), String> {
 fn prepare_boot_devices() -> Result<(), String> {
     std::fs::create_dir_all("/dev").map_err(|error| format!("create early /dev: {error}"))?;
     std::fs::create_dir_all("/sys").map_err(|error| format!("create early /sys: {error}"))?;
-    mount_fs(
+    match mount_fs(
         "devtmpfs",
         "devtmpfs",
         std::path::Path::new("/dev"),
         libc::MS_NOSUID | libc::MS_NOEXEC,
         Some("mode=0755"),
-    )?;
+    ) {
+        Err(error)
+            if error.contains("Device or resource busy") || error.contains("Resource busy") =>
+        {
+            // CONFIG_DEVTMPFS_MOUNT may already have mounted /dev before PID 1.
+        }
+        result => result?,
+    }
     std::fs::create_dir_all("/dev/shm")
         .map_err(|error| format!("create early /dev/shm: {error}"))?;
     mount_fs(

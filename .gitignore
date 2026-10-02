@@ -7,6 +7,9 @@ docs/archive/
 graphify-out/
 automation/luna-agent/providers.env
 
+boot/luna-boot/tests/ovmf/out*
+experiments/
+
 .tmp/
 .idea/
 .vscode/

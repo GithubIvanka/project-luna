@@ -10,6 +10,6 @@ pub use application_plan::{
 };
 pub use application_plan_runtime::{ApplicationLaunchContext, ApplicationPlanLauncher};
 pub use elf_closure::{
-    parse_elf, ElfClass, ElfDependencyClosure, ElfDependencyNode, ElfDependencyResolver,
-    ElfEndian, ElfError, ElfMachine, ElfMetadata, FilesystemElfResolver, TrustedElfSource,
+    ElfClass, ElfDependencyClosure, ElfDependencyNode, ElfDependencyResolver, ElfEndian, ElfError,
+    ElfMachine, ElfMetadata, FilesystemElfResolver, TrustedElfSource, parse_elf,
 };

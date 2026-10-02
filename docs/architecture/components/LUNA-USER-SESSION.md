@@ -34,7 +34,7 @@ RESTRICTED
 TERMINATED
 ```
 
-До перехода в `ACTIVE` UserSession переводит `LoginState` из `VISIBLE` в `AUTHENTICATING` и выполняет native authentication boundary. В текущем Alpha выбранная boot/session identity валидируется внутри `luna-user-session`; отдельный greeter/login daemon не запускается. После успешной аутентификации `LoginState` становится `SUCCEEDED`, а `SessionState` — `ACTIVE`. Поле для интерактивного ввода credentials остаётся задачей будущего native SessionUI.
+До перехода в `ACTIVE` UserSession переводит `LoginState` из `VISIBLE` в `AUTHENTICATING` и выполняет native authentication boundary. В текущем Alpha интерактивный native `SessionUI` получает keyboard/pointer input через seat/input boundary, выполняет проверку credentials внутри `luna-user-session` и после успеха передаёт `UserCredentials` в session lifecycle. Отдельный greeter/login daemon не запускается. После успешной аутентификации `LoginState` становится `SUCCEEDED`, а `SessionState` — `ACTIVE`. В normal login flow `AccountDirectory` предоставляет eligible local accounts. При единственном аккаунте он автоматически выбирается и UI сразу показывает только пароль. При нескольких аккаунтах `SessionUI` сначала показывает selectable avatar cards с display name и username; после выбора вводится только пароль выбранной identity. Rendering login UI изолирован в отдельном renderer module того же crate и не является отдельным daemon.
 
 `RESTRICTED` означает, что сессия сохраняется как управляемый контекст, но доступ и выполнение приложений ограничиваются согласно policy. Конкретная session policy может вместо этого разрешить продолжение или потребовать завершение приложений.
 
@@ -85,6 +85,7 @@ UserSession
 ├── seat
 ├── input
 ├── graphics
+├── renderer
 ├── compositor
 └── session_ui
 ```
@@ -93,4 +94,4 @@ UserSession
 
 ## Статус
 
-State model, session identity и базовый session lifecycle уже объединены в одном компоненте. Login flow, seat, input, graphics и compositor постепенно переносятся из transitional external providers в эти внутренние модули. Пока provider backend ещё используется, это явно помечается как переходный слой.
+State model, session identity и базовый session lifecycle уже объединены в одном компоненте. Login flow, seat, input, graphics, renderer и compositor постепенно переносятся из transitional external providers в эти внутренние модули. Пока provider backend ещё используется, это явно помечается как переходный слой.

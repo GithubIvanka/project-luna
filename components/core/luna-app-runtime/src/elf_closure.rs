@@ -238,7 +238,11 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
         range(bytes, offset, filesz)?;
 
         match p_type {
-            1 => segments.push(Segment { vaddr, offset, filesz }),
+            1 => segments.push(Segment {
+                vaddr,
+                offset,
+                filesz,
+            }),
             2 => dynamic = Some((offset, filesz)),
             3 => {
                 let raw = slice(bytes, offset, filesz)?;
@@ -398,10 +402,9 @@ fn read_dyn_string(table: &[u8], offset: u64) -> Result<String, ElfError> {
 }
 
 fn range(bytes: &[u8], offset: u64, size: u64) -> Result<(), ElfError> {
-    let start = usize::try_from(offset)
-        .map_err(|_| ElfError::MalformedHeader("offset overflow"))?;
-    let size = usize::try_from(size)
-        .map_err(|_| ElfError::MalformedHeader("size overflow"))?;
+    let start =
+        usize::try_from(offset).map_err(|_| ElfError::MalformedHeader("offset overflow"))?;
+    let size = usize::try_from(size).map_err(|_| ElfError::MalformedHeader("size overflow"))?;
     start
         .checked_add(size)
         .filter(|end| *end <= bytes.len())
@@ -453,9 +456,8 @@ fn read_i64(bytes: &[u8], offset: usize, endian: ElfEndian) -> Result<i64, ElfEr
 }
 
 fn has_navigation_components(path: &Path) -> bool {
-    path.components().any(|component| {
-        matches!(component, Component::CurDir | Component::ParentDir)
-    })
+    path.components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -506,10 +508,7 @@ impl FilesystemElfResolver {
         self
     }
 
-    pub fn with_default_search_path(
-        mut self,
-        path: impl Into<PathBuf>,
-    ) -> Result<Self, ElfError> {
+    pub fn with_default_search_path(mut self, path: impl Into<PathBuf>) -> Result<Self, ElfError> {
         let path = path.into();
         validate_absolute_normalized(&path)?;
         self.default_search_paths.push(path);
@@ -523,8 +522,8 @@ impl FilesystemElfResolver {
                     .strip_prefix(&source.logical_prefix)
                     .map_err(|_| ElfError::DependencyNotFound(logical.display().to_string()))?;
                 let candidate = source.physical_root.join(relative);
-                let canonical =
-                    fs::canonicalize(&candidate).map_err(|error| ElfError::Io(error.to_string()))?;
+                let canonical = fs::canonicalize(&candidate)
+                    .map_err(|error| ElfError::Io(error.to_string()))?;
                 let trusted_root = fs::canonicalize(&source.physical_root)
                     .map_err(|error| ElfError::Io(error.to_string()))?;
                 if !canonical.starts_with(&trusted_root) {
@@ -608,14 +607,18 @@ impl ElfDependencyResolver for FilesystemElfResolver {
 
 fn validate_absolute_normalized(path: &Path) -> Result<(), ElfError> {
     if !path.is_absolute() || has_navigation_components(path) {
-        return Err(ElfError::UnsupportedDependencyPath(path.display().to_string()));
+        return Err(ElfError::UnsupportedDependencyPath(
+            path.display().to_string(),
+        ));
     }
     Ok(())
 }
 
 fn normalize_absolute_path(path: &Path) -> Result<PathBuf, ElfError> {
     if !path.is_absolute() {
-        return Err(ElfError::UnsupportedDependencyPath(path.display().to_string()));
+        return Err(ElfError::UnsupportedDependencyPath(
+            path.display().to_string(),
+        ));
     }
     let mut normalized = PathBuf::from("/");
     for component in path.components() {
@@ -623,12 +626,16 @@ fn normalize_absolute_path(path: &Path) -> Result<PathBuf, ElfError> {
             Component::RootDir | Component::CurDir => {}
             Component::ParentDir => {
                 if !normalized.pop() {
-                    return Err(ElfError::UnsupportedDependencyPath(path.display().to_string()));
+                    return Err(ElfError::UnsupportedDependencyPath(
+                        path.display().to_string(),
+                    ));
                 }
             }
             Component::Normal(value) => normalized.push(value),
             Component::Prefix(_) => {
-                return Err(ElfError::UnsupportedDependencyPath(path.display().to_string()))
+                return Err(ElfError::UnsupportedDependencyPath(
+                    path.display().to_string(),
+                ));
             }
         }
     }
@@ -726,10 +733,9 @@ impl ElfDependencyClosure {
                 }
             }
 
-            closure.nodes.insert(
-                path.clone(),
-                ElfDependencyNode { path, metadata },
-            );
+            closure
+                .nodes
+                .insert(path.clone(), ElfDependencyNode { path, metadata });
         }
 
         Ok(closure)
@@ -810,14 +816,7 @@ mod tests {
             let raw = interpreter.as_bytes();
             bytes[0x200..0x200 + raw.len()].copy_from_slice(raw);
             bytes[0x200 + raw.len()] = 0;
-            phdr(
-                &mut bytes,
-                120,
-                3,
-                0x200,
-                0x400200,
-                (raw.len() + 1) as u64,
-            );
+            phdr(&mut bytes, 120, 3, 0x200, 0x400200, (raw.len() + 1) as u64);
         }
         phdr(&mut bytes, 176, 2, 0x300, 0x400300, 0x100);
 
@@ -845,14 +844,7 @@ mod tests {
         bytes
     }
 
-    fn phdr(
-        bytes: &mut [u8],
-        offset: usize,
-        kind: u32,
-        file_offset: u64,
-        vaddr: u64,
-        filesz: u64,
-    ) {
+    fn phdr(bytes: &mut [u8], offset: usize, kind: u32, file_offset: u64, vaddr: u64, filesz: u64) {
         write_u32(bytes, offset, kind);
         write_u64(bytes, offset + 8, file_offset);
         write_u64(bytes, offset + 16, vaddr);
@@ -941,18 +933,14 @@ mod tests {
         resolver
             .files
             .insert(root.clone(), fixture(&["libloop.so"], None));
-        resolver
-            .files
-            .insert(lib.clone(), fixture(&["app"], None));
+        resolver.files.insert(lib.clone(), fixture(&["app"], None));
         resolver
             .files
             .insert(PathBuf::from("/bin/app2"), fixture(&[], None));
         resolver
             .needed
             .insert((root.clone(), "libloop.so".into()), lib.clone());
-        resolver
-            .needed
-            .insert((lib, "app".into()), root.clone());
+        resolver.needed.insert((lib, "app".into()), root.clone());
 
         let closure = ElfDependencyClosure::build(root, &resolver).unwrap();
         assert_eq!(closure.len(), 2);
@@ -969,9 +957,7 @@ mod tests {
         let mut bytes = fixture(&[], None);
         write_u16(&mut bytes, 18, 183);
         resolver.files.insert(other.clone(), bytes);
-        resolver
-            .needed
-            .insert((root, "libx.so".into()), other);
+        resolver.needed.insert((root, "libx.so".into()), other);
         assert!(matches!(
             ElfDependencyClosure::build("/bin/app", &resolver),
             Err(ElfError::ArchitectureMismatch { .. })
@@ -990,10 +976,8 @@ mod tests {
 
     #[test]
     fn traversal_beyond_logical_root_is_rejected() {
-        let result = FilesystemElfResolver::expand_search_entry(
-            "$ORIGIN/../../..",
-            Path::new("/apps"),
-        );
+        let result =
+            FilesystemElfResolver::expand_search_entry("$ORIGIN/../../..", Path::new("/apps"));
         assert!(result.is_err());
     }
 }

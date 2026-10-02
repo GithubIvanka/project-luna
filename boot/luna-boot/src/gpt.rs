@@ -168,6 +168,17 @@ fn find_named_partitions<D: BlockDevice>(
     Ok(found)
 }
 
+pub fn find_partition_by_label<D: BlockDevice>(
+    device: &mut D,
+    wanted: &str,
+) -> BootResult<Partition> {
+    let partitions = find_named_partitions(device, wanted)?;
+    if partitions.len() != 1 {
+        return Err(BootError::InvalidFilesystem);
+    }
+    Ok(partitions.into_iter().next().unwrap())
+}
+
 fn partition_name_is(entry: &[u8], wanted: &str) -> bool {
     partition_name(entry).eq_ignore_ascii_case(wanted)
 }

@@ -7,3 +7,5 @@ license = "Apache-2.0"
 [dependencies]
 luna-common = { path = "../luna-common" }
 libc = "0.2"
+fontdue = { version = "0.9.4", default-features = false, features = ["std"] }
+png = { version = "0.18.1", default-features = false }

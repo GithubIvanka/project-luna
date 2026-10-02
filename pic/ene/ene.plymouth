@@ -1,0 +1,12 @@
+[Plymouth Theme]
+Name=Ene theme
+ModuleName=two-step
+
+[two-step]
+ImageDir=/usr/share/plymouth/themes/ene
+HorizontalAlignment=.5
+VerticalAlignment=.5
+Transition=none
+TransitionDuration=0.0
+BackgroundStartColor=0x181c2f
+BackgroundEndColor=0x181c2f

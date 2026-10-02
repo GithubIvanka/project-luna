@@ -44,6 +44,11 @@ impl BootParams {
         self.bytes[0x210] = value;
     }
 
+    /// Pass the physical address of the firmware ACPI RSDP to Linux.
+    pub fn set_acpi_rsdp(&mut self, address: u64) {
+        self.bytes[0x70..0x78].copy_from_slice(&address.to_le_bytes());
+    }
+
     pub fn set_loadflags(&mut self, value: u8) {
         self.bytes[LOADFLAGS_OFFSET] = value;
     }
@@ -55,6 +60,75 @@ impl BootParams {
         self.bytes[LOADFLAGS_OFFSET] |= CAN_USE_HEAP;
         self.bytes[HEAP_END_PTR_OFFSET..HEAP_END_PTR_OFFSET + 2]
             .copy_from_slice(&0xde00u16.to_le_bytes());
+    }
+
+    pub fn set_initrd(&mut self, address: u64, size: usize) -> BootResult<()> {
+        if address > u32::MAX as u64 || size > u32::MAX as usize {
+            return Err(BootError::Unsupported(
+                "Linux initrd must fit in the x86 boot protocol 32-bit fields",
+            ));
+        }
+        self.bytes[0x218..0x21c].copy_from_slice(&(address as u32).to_le_bytes());
+        self.bytes[0x21c..0x220].copy_from_slice(&(size as u32).to_le_bytes());
+        Ok(())
+    }
+
+    /// Seed the Linux x86 boot protocol screen_info for a firmware GOP
+    /// framebuffer preserved across the direct Linux handoff.
+    pub fn set_efi_framebuffer(
+        &mut self,
+        base: u64,
+        size: usize,
+        width: usize,
+        height: usize,
+        stride: usize,
+        red_pos: u8,
+        red_size: u8,
+        green_pos: u8,
+        green_size: u8,
+        blue_pos: u8,
+        blue_size: u8,
+        reserved_pos: u8,
+        reserved_size: u8,
+    ) -> BootResult<()> {
+        if width > u16::MAX as usize
+            || height > u16::MAX as usize
+            || stride > u16::MAX as usize
+            || size > u32::MAX as usize
+        {
+            return Err(BootError::Unsupported(
+                "EFI framebuffer geometry is invalid",
+            ));
+        }
+
+        self.bytes[0x0f] = 0x70; // VIDEO_TYPE_EFI
+        self.bytes[0x12..0x14].copy_from_slice(&(width as u16).to_le_bytes());
+        self.bytes[0x14..0x16].copy_from_slice(&(height as u16).to_le_bytes());
+        self.bytes[0x16] = red_size
+            .saturating_add(green_size)
+            .saturating_add(blue_size)
+            .saturating_add(reserved_size);
+        self.bytes[0x18..0x1c].copy_from_slice(&(base as u32).to_le_bytes());
+        self.bytes[0x1c..0x20].copy_from_slice(&(size as u32).to_le_bytes());
+        self.bytes[0x24..0x26].copy_from_slice(&(stride as u16).to_le_bytes());
+        self.bytes[0x26] = red_size;
+        self.bytes[0x27] = red_pos;
+        self.bytes[0x28] = green_size;
+        self.bytes[0x29] = green_pos;
+        self.bytes[0x2a] = blue_size;
+        self.bytes[0x2b] = blue_pos;
+        self.bytes[0x2c] = reserved_size;
+        self.bytes[0x2d] = reserved_pos;
+        self.bytes[0x32..0x34].copy_from_slice(&1u16.to_le_bytes()); // pages
+        self.bytes[0x36..0x3a].copy_from_slice(&1u32.to_le_bytes()); // skip quirks
+
+        if base > u32::MAX as u64 {
+            self.bytes[0x3a..0x3e].copy_from_slice(&((base >> 32) as u32).to_le_bytes());
+            self.bytes[0x36..0x3a].copy_from_slice(&3u32.to_le_bytes());
+        } else {
+            self.bytes[0x3a..0x3e].fill(0);
+        }
+        Ok(())
     }
 
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
@@ -201,6 +275,16 @@ impl BootParams {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acpi_rsdp_is_written_at_linux_zero_page_offset() {
+        let mut params = super::BootParams::zeroed();
+        params.set_acpi_rsdp(0x1234_5678_9abc_def0);
+        assert_eq!(
+            &params.as_bytes()[0x70..0x78],
+            &0x1234_5678_9abc_def0u64.to_le_bytes()
+        );
+    }
+
     #[test]
     fn reservation_state_does_not_modify_address_bits() {
         let start = u64::MAX - 0x1000;

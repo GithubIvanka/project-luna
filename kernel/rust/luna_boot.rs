@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #![allow(unsafe_op_in_unsafe_fn)]
+#![allow(static_mut_refs)]
 
 //! Project Luna kernel-side LunaBootHandoffV1 parser.
 //!
@@ -525,7 +526,7 @@ unsafe fn parse_handoff(phys: u64, node_len: u32) {
                 }
                 let version_len = read_u16(base, payload) as usize;
                 let filename_len = read_u16(base, payload + 2) as usize;
-                let strings = match payload.checked_add(40) {
+                let _strings = match payload.checked_add(40) {
                     Some(value) => value,
                     None => {
                         reject(base, len);
@@ -733,7 +734,16 @@ pub unsafe extern "C" fn x86_luna_boot_parse(setup_data_phys: u64) {
 /// Return whether a valid Luna boot handoff and init image were parsed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn x86_luna_boot_available() -> bool {
-    HANDOFF_VALID && INIT_VALID
+    let handoff_valid = HANDOFF_VALID;
+    let init_valid = INIT_VALID;
+    kernel::pr_info!(
+        "Luna: boot availability handoff={} init={} phys={:#x}+{}\n",
+        handoff_valid as u8,
+        init_valid as u8,
+        INIT_PHYS,
+        INIT_SIZE
+    );
+    handoff_valid && init_valid
 }
 
 /// Advance the RAM-resident boot progress record shared with `luna-boot.efi`.

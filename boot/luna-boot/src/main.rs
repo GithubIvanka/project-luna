@@ -32,6 +32,8 @@ fn efi_main() -> Status {
     }
 }
 
+#[cfg(feature = "alpine-test")]
+mod alpine_test;
 mod block;
 mod boot;
 mod boot_attempt;
