@@ -83,3 +83,16 @@ LUNA-READY
 ```
 
 and then remain alive without starting any distribution service manager.
+
+## Stage 0 results — 2026-10-06
+
+The first boot experiments established the following:
+
+1. Linux kernel + embedded initramfs reaches `Run /init as init process`.
+2. A minimal raw-syscall C `_start` reaches `LUNA-C-READY`, proving the kernel/initramfs execution path works.
+3. Rust `std` as PID 1 caused a general-protection fault in this environment, so it is deliberately not part of the Stage 0 critical path.
+4. The working Luna PID 1 is now a Rust `no_std` static library entered by a minimal C `_start`, with no libc or Rust `std` runtime before `luna_main()`.
+5. The accepted Stage 0 artifact is a Linux EFI-stub `bzImage` with the Luna initramfs embedded. Direct QEMU boot is the current automated acceptance path.
+6. OVMF was able to discover and start the EFI-stub image, but this environment did not complete kernel handoff reliably; that UEFI-specific issue remains a follow-up and is not being conflated with the successful direct kernel boot.
+
+The failure mode was useful: it established a hard boundary between the Linux kernel substrate and the userspace runtime we control. Future stages should keep that boundary explicit.

@@ -12,29 +12,24 @@ INITRAMFS_LIST="${OUT}/initramfs.list"
 INIT="${ROOTFS}/init"
 JOBS="${LUNA_EXPERIMENT_JOBS:-$(nproc)}"
 
-mkdir -p "$OUT" "$ROOTFS/bin"
+mkdir -p "$OUT" "$ROOTFS"
 
-for tool in curl tar cargo make; do
+for tool in curl tar cargo make cc rustup; do
     command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 
-command -v busybox >/dev/null 2>&1 || {
-    echo "missing required bootstrap tool: busybox" >&2
-    exit 1
-}
-
-printf '[1/4] Building luna-init (musl)\n'
+printf '[1/4] Building luna-init (Rust no_std)\n'
 if ! rustup target list --installed | grep -qx 'x86_64-unknown-linux-musl'; then
     echo 'Rust musl target is not installed; attempting to install it.'
     rustup target add x86_64-unknown-linux-musl
 fi
-cargo build --manifest-path "$ROOT/Cargo.toml" --release --target x86_64-unknown-linux-musl
-install -Dm755 "$ROOT/target/x86_64-unknown-linux-musl/release/luna-experimental-init" "$INIT"
-
-# BusyBox is temporary Stage 0 bootstrap material only. It provides /bin/sh
-# and sleep so PID 1 can prove a stable boot without a service manager.
-install -Dm755 "$(command -v busybox)" "$ROOTFS/bin/busybox"
-ln -sfn /bin/busybox "$ROOTFS/bin/sh"
+RUSTFLAGS="${RUSTFLAGS:-} -C relocation-model=static" \
+    cargo build --manifest-path "$ROOT/Cargo.toml" --release --target x86_64-unknown-linux-musl
+cc -nostdlib -static -fno-pie -no-pie -Wl,-e,_start -O2 -s \
+    -o "$INIT" \
+    "$ROOT/start.c" \
+    "$ROOT/target/x86_64-unknown-linux-musl/release/libluna_experimental_init.a"
+file "$INIT"
 
 printf '[2/4] Preparing Linux kernel\n'
 if [ ! -f "$KERNEL_TARBALL" ]; then
@@ -48,8 +43,6 @@ cd "$KERNEL_SRC"
 make mrproper
 make O="$KERNEL_SRC/build" ARCH=x86_64 x86_64_defconfig
 
-# Stage 0 needs only EFI loading, initramfs execution, a console, and the
-# minimal pseudo-filesystems required by a normal Linux PID 1.
 ./scripts/config --file "$KERNEL_SRC/build/.config" \
     -e CONFIG_EFI \
     -e CONFIG_EFI_STUB \
@@ -66,7 +59,12 @@ make O="$KERNEL_SRC/build" ARCH=x86_64 x86_64_defconfig
     -e CONFIG_SERIAL_8250 \
     -e CONFIG_SERIAL_8250_CONSOLE \
     -e CONFIG_SERIAL_CORE \
-    -e CONFIG_SERIAL_CORE_CONSOLE
+    -e CONFIG_SERIAL_CORE_CONSOLE \
+    -e CONFIG_CMDLINE_BOOL \
+    --set-str CONFIG_CMDLINE "console=ttyS0 rdinit=/init"
+
+make O="$KERNEL_SRC/build" ARCH=x86_64 olddefconfig
+cc -O2 -o "$KERNEL_SRC/usr/gen_init_cpio" "$KERNEL_SRC/usr/gen_init_cpio.c"
 
 printf '[3/4] Building embedded initramfs\n'
 cat > "$INITRAMFS_LIST" <<EOF
@@ -74,12 +72,12 @@ dir /dev 0755 0 0
 dir /proc 0555 0 0
 dir /sys 0555 0 0
 dir /tmp 1777 0 0
+nod /dev/console 0600 0 0 c 5 1
+nod /dev/null 0666 0 0 c 1 3
 file /init $INIT 0755 0 0
-file /bin/busybox $ROOTFS/bin/busybox 0755 0 0
-slink /bin/sh /bin/busybox 0777 0 0
 EOF
 
-./usr/gen_initramfs_list.sh "$INITRAMFS_LIST" > "$OUT/initramfs.cpio"
+PATH="$KERNEL_SRC/usr:$PATH" ./usr/gen_initramfs.sh "$INITRAMFS_LIST" > "$OUT/initramfs.cpio"
 ./scripts/config --file "$KERNEL_SRC/build/.config" --set-str CONFIG_INITRAMFS_SOURCE "$OUT/initramfs.cpio"
 make O="$KERNEL_SRC/build" ARCH=x86_64 olddefconfig
 
@@ -88,4 +86,4 @@ make O="$KERNEL_SRC/build" ARCH=x86_64 -j"$JOBS" bzImage
 install -Dm644 "$KERNEL_SRC/build/arch/x86/boot/bzImage" "$OUT/luna-onefile.efi"
 
 printf '\nBuilt: %s\n' "$OUT/luna-onefile.efi"
-printf 'QEMU: qemu-system-x86_64 -nographic -kernel %s\n' "$OUT/luna-onefile.efi"
+printf 'QEMU: qemu-system-x86_64 -nographic -kernel %s -append "console=ttyS0 rdinit=/init"\n' "$OUT/luna-onefile.efi"
