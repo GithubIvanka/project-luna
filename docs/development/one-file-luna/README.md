@@ -96,3 +96,29 @@ The first boot experiments established the following:
 6. OVMF was able to discover and start the EFI-stub image, but this environment did not complete kernel handoff reliably; that UEFI-specific issue remains a follow-up and is not being conflated with the successful direct kernel boot.
 
 The failure mode was useful: it established a hard boundary between the Linux kernel substrate and the userspace runtime we control. Future stages should keep that boundary explicit.
+
+## Stage 0.1 results — 2026-10-06
+
+The kernel baseline was reduced from upstream x86_64_defconfig to x86_64 tinyconfig plus the explicit Luna Stage 0.1 requirements.
+
+The reproducible builder now:
+
+1. builds the static no_std Rust PID 1;
+2. builds a minimal kernel from tinyconfig;
+3. applies the Luna kernel requirements with scripts/config;
+4. embeds the initramfs directly into the kernel;
+5. publishes one EFI-stub bzImage artifact.
+
+Observed artifact characteristics:
+
+- luna-onefile.efi: approximately 1.3 MB;
+- static PID 1: approximately 9 KB;
+- kernel configuration: approximately 660 defined symbols after Kconfig resolution.
+
+Acceptance is implemented in experiments/luna-onefile/test-stage0.sh.
+
+The current accepted path is direct QEMU kernel loading. UEFI/OVMF handoff remains a separate integration problem for Stage 1 and is intentionally not hidden by this acceptance test.
+
+## Immediate next work
+
+Stage 1 begins by introducing the Luna-owned bootloader while preserving the Stage 0 artifact as a known-good reference. The bootloader must eventually own EFI discovery, disk identity, kernel selection and verification without bringing back a distribution boot stack.
