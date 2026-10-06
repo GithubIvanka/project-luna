@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-OVMF_DIR="${REPO_ROOT}/boot/luna-boot/tests/ovmf"
+OVMF_DIR="${REPO_ROOT}/components/core/luna-boot/tests/ovmf"
 OUT="${OVMF_DIR}/out"
 
 "${OVMF_DIR}/build-userspace.sh"

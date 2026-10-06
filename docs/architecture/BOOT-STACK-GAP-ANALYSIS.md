@@ -52,7 +52,7 @@ UEFI загружает UEFI application, предоставляя Boot Services
 
 Luna status: реализовано.
 
-boot/luna-boot — отдельный Rust UEFI application на crate uefi. Он проверяет
+components/core/luna-boot — отдельный Rust UEFI application на crate uefi. Он проверяет
 EFI/LUNA-SYS identity, выбирает target, загружает kernel/init, строит
 LunaBootHandoffV1 и ведёт BootAttempt.
 

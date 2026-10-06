@@ -31,7 +31,7 @@ KERNEL="$DIST/kernel/current/bzImage"
 LUNA_VERSION="${LUNA_VERSION:-0.1.0}"
 VERSION="$LUNA_VERSION"
 OUT="$DIST/luna-$VERSION.img"
-EFI="$REPO_ROOT/boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
+EFI="$REPO_ROOT/components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
 for tool in fakeroot cargo rustup sgdisk mkfs.ext4 mkfs.fat mkswap mcopy mmd dd mksquashfs file truncate blkid; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
@@ -65,7 +65,7 @@ rm -f "$DIST/luna-$VERSION.squashfs"
 mkdir -p "$SYS_ROOT" "$DATA_ROOT" "$PARTS"
 
 echo "==> Build luna-boot.efi"
-cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/boot/luna-boot/Cargo.toml"
+cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/components/core/luna-boot/Cargo.toml"
 [ -f "$EFI" ] || { echo "missing luna-boot.efi" >&2; exit 1; }
 
 echo "==> Base system -> LUNA-SYS"
@@ -506,7 +506,7 @@ for provider_config in dbus-1 NetworkManager bluetooth udisks2 libblockdev/3 ude
 done
 
 echo "==> User content -> LUNA-DATA"
-bash "$REPO_ROOT/boot/luna-boot/tests/ovmf/configure-alpine-test-user.sh" "$SYS_ROOT"
+bash "$REPO_ROOT/components/core/luna-boot/tests/ovmf/configure-alpine-test-user.sh" "$SYS_ROOT"
 if grep -q "^seat:" "$SYS_ROOT/etc/group"; then
     sed -i -E "s/^(seat:x:[^:]*:).*/\1luna/" "$SYS_ROOT/etc/group"
 else

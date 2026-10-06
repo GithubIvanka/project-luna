@@ -21,10 +21,10 @@ done
 
 cd "$REPO_ROOT"
 bash tools/build-luna-boot.sh
-SERIAL_LOG="$REPO_ROOT/boot/luna-boot/tests/ovmf/out/serial.log"
+SERIAL_LOG="$REPO_ROOT/components/core/luna-boot/tests/ovmf/out/serial.log"
 rm -f "$SERIAL_LOG"
 set +e
-LUNA_QEMU_SERIAL_LOG="$SERIAL_LOG" timeout 20s bash boot/luna-boot/tests/ovmf/run.sh
+LUNA_QEMU_SERIAL_LOG="$SERIAL_LOG" timeout 20s bash components/core/luna-boot/tests/ovmf/run.sh
 rc=$?
 set -e
 if [ "$rc" -ne 124 ]; then

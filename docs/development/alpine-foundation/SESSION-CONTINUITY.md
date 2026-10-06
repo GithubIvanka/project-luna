@@ -118,10 +118,10 @@ Do not add a display manager, GNOME portals, a full desktop stack, or the old gl
 ## Files of record
 
 Direct-root launcher:
-`boot/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
+`components/core/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
 
 Login helper:
-`boot/luna-boot/tests/ovmf/configure-alpine-test-user.sh`
+`components/core/luna-boot/tests/ovmf/configure-alpine-test-user.sh`
 
 Direct-root kernel overlay:
 `tools/apply-luna-direct-root-overlay.py`
@@ -133,10 +133,10 @@ Niri cache:
 `dist/.build/alpine-niri-apk-cache/`
 
 Direct-root output:
-`boot/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/`
+`components/core/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/`
 
 Successful serial log:
-`boot/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/serial.log`
+`components/core/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/serial.log`
 
 ## Continuity rule
 
@@ -181,7 +181,7 @@ Known non-blocking warnings in this minimal test environment:
 - The host/QEMU test still reports the expected unrelated ACPI/WMI and missing optional logind properties.
 
 Current direct-root graphical test plumbing:
-- `boot/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
+- `components/core/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
 - `dist/.build/mesa-virgl-build/direct/`
 - `dist/.build/noctalia-build/`
 - `dist/.build/noctalia-runtime-apks/`

@@ -68,8 +68,8 @@ jobs:
 
       - name: Install Luna Ghostty defaults
         run: |
-          install -Dm0644 config/ghostty/luna.conf dist/desktop-root/etc/luna/ghostty.conf
-          install -Dm0644 config/ghostty/luna.conf dist/desktop-root/etc/ghostty/config
+          install -Dm0644 tools/alpine-foundation/ghostty-luna.conf dist/desktop-root/etc/luna/ghostty.conf
+          install -Dm0644 tools/alpine-foundation/ghostty-luna.conf dist/desktop-root/etc/ghostty/config
 
       - name: Add current Yazi file engine and Luna Files GUI
         env:

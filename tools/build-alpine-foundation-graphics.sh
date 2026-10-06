@@ -9,7 +9,7 @@ RUNTIME_APKS="$BUILD_ROOT/noctalia-runtime-apks"
 NOCTALIA_PACKAGES="$REPO_ROOT/tools/alpine-foundation/noctalia-runtime-packages.txt"
 
 MESA_VERSION="${LUNA_MESA_VERSION:-26.1.6}"
-NOCTALIA_REF="${LUNA_NOCTALIA_REF:-v5.1.0}"
+NOCTALIA_REF="${LUNA_NOCTALIA_REF:-v5.2.0}"
 ALPINE_IMAGE="${LUNA_ALPINE_IMAGE:-alpine:3.24}"
 
 for tool in docker sha256sum git; do

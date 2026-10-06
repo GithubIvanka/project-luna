@@ -129,18 +129,18 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            boot/luna-boot/target
-          key: ${{ runner.os }}-luna-boot-${{ hashFiles('boot/luna-boot/Cargo.lock', 'boot/luna-boot/Cargo.toml') }}
+            components/core/luna-boot/target
+          key: ${{ runner.os }}-luna-boot-${{ hashFiles('components/core/luna-boot/Cargo.lock', 'components/core/luna-boot/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-luna-boot-
       - name: Check bootloader
         run: cargo check --target x86_64-unknown-uefi
-        working-directory: boot/luna-boot
+        working-directory: components/core/luna-boot
       - name: Build bootloader
         run: cargo build --release --target x86_64-unknown-uefi
-        working-directory: boot/luna-boot
+        working-directory: components/core/luna-boot
       - name: Verify bootloader artifact
-        run: test -f boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
+        run: test -f components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
       - name: Verify kernel integration files
         run: |
           test -f kernel/rust/luna_boot.rs

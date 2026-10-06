@@ -7,7 +7,7 @@ RUN apk add --no-cache \
     pipewire-dev wireplumber-dev curl-dev libqalculate-dev libxml2-dev libjxl-dev libsndfile-dev md4c-dev \
     nlohmann-json tomlplusplus-dev libical-dev linux-pam-dev \
     stb_image_resize2-devel stb_image_write-devel sdbus-cpp-dev
-ARG NOCTALIA_REF=v5.1.0
+ARG NOCTALIA_REF=v5.2.0
 RUN git clone --depth 1 --branch "$NOCTALIA_REF" https://github.com/noctalia-dev/noctalia.git /src/noctalia
 WORKDIR /src/noctalia
 RUN meson setup build-release \

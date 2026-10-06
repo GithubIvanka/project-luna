@@ -13,7 +13,7 @@ tools/build-component.sh luna-system-runtime --release
 tools/build-luna-boot.sh
 ```
 
-The bootloader result is `boot/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi`.
+The bootloader result is `components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi`.
 
 ## PC image
 
@@ -28,10 +28,6 @@ The current builder assembles separate EFI, `LUNA-SYS` and `LUNA-DATA` partition
 ## QEMU/OVMF
 
 Use the current Luna kernel and actual boot artifacts. A script or successful build is not evidence of a complete boot until the image is executed and the result is recorded.
-
-## Install
-
-The PC-image installer is destructive and requires explicit confirmation. Always verify the target disk before invoking it.
 
 ## Documentation
 
