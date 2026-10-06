@@ -7,7 +7,7 @@ The kernel integration deliberately does not depend on fragile line-context
 patch files. The build tool applies a deterministic source overlay:
 
 ```text
-kernel/rust/luna_boot.rs
+components/kernel/rust/luna_boot.rs
         ↓
 tools/apply-luna-kernel-overlay.sh
         ↓

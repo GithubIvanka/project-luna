@@ -4,8 +4,8 @@ set -euo pipefail
 SRC="$1"
 REPO_ROOT="$2"
 
-RUST_SRC="${REPO_ROOT}/kernel/rust/luna_boot.rs"
-EXEC_SRC="${REPO_ROOT}/kernel/rust/luna_exec.rs"
+RUST_SRC="${REPO_ROOT}/components/kernel/rust/luna_boot.rs"
+EXEC_SRC="${REPO_ROOT}/components/kernel/rust/luna_exec.rs"
 RUST_DST="${SRC}/arch/x86/kernel/luna_boot.rs"
 EXEC_DST="${SRC}/arch/x86/kernel/luna_exec.rs"
 MAKEFILE="${SRC}/arch/x86/kernel/Makefile"

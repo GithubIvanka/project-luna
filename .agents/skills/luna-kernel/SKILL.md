@@ -5,7 +5,7 @@ description: Work on Luna's Linux kernel overlay, direct luna-init execution, ha
 # Luna Kernel
 Keep Luna-specific kernel integration small and explicit.
 Validate `LunaBootHandoffV1`, memory ranges, init ELF constraints, and init digest.
-Use the existing `kernel/rust/luna_boot.rs` and `luna_exec.rs` path unless evidence requires redesign.
+Use the existing `components/kernel/rust/luna_boot.rs` and `luna_exec.rs` path unless evidence requires redesign.
 Preserve direct initial-userspace execution from the memory-resident luna-init handoff.
 Alpha hardware priority: Intel UHD 630/i915, AX200 Wi-Fi/Bluetooth, r8169 Ethernet,
 Intel HDA audio, USB xHCI, NVMe and SATA.

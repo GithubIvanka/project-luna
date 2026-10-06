@@ -86,7 +86,7 @@ else
     exit 1
 fi
 
-LUNA_LOGIN_ART="$ROOT_DIR/../../pic/luna.png"
+LUNA_LOGIN_ART="$ROOT_DIR/../../docs/design/visual-concepts/luna.png"
 if [[ -s "$LUNA_LOGIN_ART" ]]; then
     mkdir -p "$OUT/alpine-root/resources/images" "$OUT/alpine-root/usr/share/luna"
     install -Dm0644 "$LUNA_LOGIN_ART" "$OUT/alpine-root/resources/images/luna.png"

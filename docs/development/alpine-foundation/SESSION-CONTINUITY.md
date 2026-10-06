@@ -35,7 +35,7 @@ Verified OpenRC lifecycle:
 - OpenRC owns the system daemon lifecycle; the native Luna UserSession remains the single login/session entry point.
 
 Verified graphical login:
-- Native login renderer loads the Luna font and `pic/luna.png`.
+- Native login renderer loads the Luna font and `docs/design/visual-concepts/luna.png`.
 - DRM master and QEMU KMS target are acquired at 1280x800@75Hz.
 - `luna/luna` authentication succeeds.
 - `luna-user-session` launches `/usr/bin/luna-graphical-session`.
@@ -118,10 +118,10 @@ Do not add a display manager, GNOME portals, a full desktop stack, or the old gl
 ## Files of record
 
 Direct-root launcher:
-`components/core/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
+`components/boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
 
 Login helper:
-`components/core/luna-boot/tests/ovmf/configure-alpine-test-user.sh`
+`components/boot/tests/ovmf/configure-alpine-test-user.sh`
 
 Direct-root kernel overlay:
 `tools/apply-luna-direct-root-overlay.py`
@@ -133,10 +133,10 @@ Niri cache:
 `dist/.build/alpine-niri-apk-cache/`
 
 Direct-root output:
-`components/core/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/`
+`components/boot/tests/ovmf/out-alpine-luna-kernel-direct-root/`
 
 Successful serial log:
-`components/core/luna-boot/tests/ovmf/out-alpine-luna-kernel-direct-root/serial.log`
+`components/boot/tests/ovmf/out-alpine-luna-kernel-direct-root/serial.log`
 
 ## Continuity rule
 
@@ -181,7 +181,7 @@ Known non-blocking warnings in this minimal test environment:
 - The host/QEMU test still reports the expected unrelated ACPI/WMI and missing optional logind properties.
 
 Current direct-root graphical test plumbing:
-- `components/core/luna-boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
+- `components/boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
 - `dist/.build/mesa-virgl-build/direct/`
 - `dist/.build/noctalia-build/`
 - `dist/.build/noctalia-runtime-apks/`

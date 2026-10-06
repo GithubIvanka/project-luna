@@ -99,8 +99,8 @@ file "$SESSION" | grep -Eq 'statically linked|static-pie linked' || { echo "luna
 # Full desktop providers remain in DATA as complete functional packages.
 # The boot-critical System Image contains only Luna-native core binaries.
 
-cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/components/core/luna-boot/Cargo.toml"
-EFI="$REPO_ROOT/components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
+cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/components/boot/Cargo.toml"
+EFI="$REPO_ROOT/components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 [ -f "$EFI" ] || { echo "UEFI loader was not produced: $EFI" >&2; exit 1; }
 
 # Canonical System Image: only the accepted top-level namespaces exist; resource types live under resources/.

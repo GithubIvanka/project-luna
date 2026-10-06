@@ -129,22 +129,22 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            components/core/luna-boot/target
-          key: ${{ runner.os }}-luna-boot-${{ hashFiles('components/core/luna-boot/Cargo.lock', 'components/core/luna-boot/Cargo.toml') }}
+            components/boot/target
+          key: ${{ runner.os }}-luna-boot-${{ hashFiles('components/boot/Cargo.lock', 'components/boot/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-luna-boot-
       - name: Check bootloader
         run: cargo check --target x86_64-unknown-uefi
-        working-directory: components/core/luna-boot
+        working-directory: components/boot
       - name: Build bootloader
         run: cargo build --release --target x86_64-unknown-uefi
-        working-directory: components/core/luna-boot
+        working-directory: components/boot
       - name: Verify bootloader artifact
-        run: test -f components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi
+        run: test -f components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi
       - name: Verify kernel integration files
         run: |
-          test -f kernel/rust/luna_boot.rs
+          test -f components/kernel/rust/luna_boot.rs
           test -f tools/apply-luna-kernel-overlay.sh
-          test ! -e kernel/patches/0001-luna-kernel-rust-parser.patch
-          test ! -e kernel/patches/0002-luna-kernel-rust-build.patch
-          test ! -e kernel/patches/0003-luna-kernel-rust-bridge.patch
+          test ! -e components/kernel/patches/0001-luna-kernel-rust-parser.patch
+          test ! -e components/kernel/patches/0002-luna-kernel-rust-build.patch
+          test ! -e components/kernel/patches/0003-luna-kernel-rust-bridge.patch

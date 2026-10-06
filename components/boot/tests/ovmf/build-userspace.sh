@@ -1,7 +1,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-OUT="${REPO_ROOT}/components/core/luna-boot/tests/ovmf/out"
+OUT="${REPO_ROOT}/components/boot/tests/ovmf/out"
 SYSROOT="${OUT}/system-root"
 
 : "${LUNA_TEST_KERNEL:?Set LUNA_TEST_KERNEL to a Linux x86_64 bzImage}"

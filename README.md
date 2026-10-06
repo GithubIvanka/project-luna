@@ -56,7 +56,7 @@ Mount namespace isolation is mandatory. A PID namespace is not required for ordi
 
 ## Development
 
-Luna components are written in Rust. The Luna kernel integration is maintained separately under `kernel/`.
+Luna components are written in Rust. The Luna kernel integration is maintained separately under `components/kernel/`.
 
 Development changes follow [`docs/development/AI-DEVELOPMENT-RULES.md`](docs/development/AI-DEVELOPMENT-RULES.md).
 

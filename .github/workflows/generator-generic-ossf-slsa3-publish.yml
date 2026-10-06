@@ -31,14 +31,14 @@ jobs:
         run: cargo build --workspace --release
 
       - name: Build luna-boot
-        working-directory: components/core/luna-boot
+        working-directory: components/boot
         run: cargo build --release --target x86_64-unknown-uefi
 
       - name: Collect release subjects
         run: |
           set -euo pipefail
           mkdir -p release-subjects
-          cp components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi release-subjects/
+          cp components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi release-subjects/
           tar -czf release-subjects/project-luna-workspace.tar.gz target/release
 
       - name: Generate subject hashes

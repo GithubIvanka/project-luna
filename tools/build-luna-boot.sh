@@ -16,7 +16,7 @@ if ! rustup target list --installed | grep -qx "$TARGET"; then
     rustup target add "$TARGET"
 fi
 
-cd "$REPO_ROOT/components/core/luna-boot"
+cd "$REPO_ROOT/components/boot"
 mkdir -p "$LOG_DIR"
 
 echo "Сборка luna-boot для $TARGET ($PROFILE)..."
@@ -68,4 +68,4 @@ fi
 
 [ -f "$ARTIFACT" ] || { echo "Ошибка: результат сборки не найден: $ARTIFACT" >&2; exit 1; }
 
-printf '\nГотово. luna-boot: %s\n' "$REPO_ROOT/components/core/luna-boot/$ARTIFACT"
+printf '\nГотово. luna-boot: %s\n' "$REPO_ROOT/components/boot/$ARTIFACT"

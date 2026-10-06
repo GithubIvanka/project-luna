@@ -36,7 +36,7 @@ A fresh Alpine/QEMU boot verified:
 - Real /etc/shadow authentication succeeds for the selected disposable Alpine test account.
 - The credential transition succeeds.
 - The native session reaches the graphical desktop launch stage.
-- The login renderer loads the canonical Luna font and `pic/luna.png` as low-opacity login artwork.
+- The login renderer loads the canonical Luna font and `docs/design/visual-concepts/luna.png` as low-opacity login artwork.
 - Relative pointer movement is accelerated locally for the direct evdev login UI; the desktop compositor keeps its own normal pointer path.
 - Forced termination of the Niri child leaves the root UserSession supervisor alive and causes it to reacquire DRM/KMS and return to the native login UI.
 - ACPI RSDP is forwarded from the UEFI configuration table into Linux boot_params; the previous ACPI BIOS/RSDP and `wmi-bmof` startup errors are no longer present in the fresh test boot.
@@ -80,8 +80,8 @@ Pointer:
 - click on the round login button submits the password
 
 Visuals:
-- visual direction follows `pic/concept_2.png`: deep navy background, blue/cyan accents, sparse controls and orbital Luna branding
-- `pic/luna.png` is loaded as a subdued left-side artwork layer
+- visual direction follows `docs/design/visual-concepts/concept_2.png`: deep navy background, blue/cyan accents, sparse controls and orbital Luna branding
+- `docs/design/visual-concepts/luna.png` is loaded as a subdued left-side artwork layer
 - the renderer draws the Luna orbital logo natively instead of baking the login screen into a single bitmap
 
 Fonts:

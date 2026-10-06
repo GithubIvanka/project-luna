@@ -5,7 +5,7 @@ out
 target/
 docs/archive/
 
-components/core/luna-boot/tests/ovmf/out*
+components/boot/tests/ovmf/out*
 experiments/
 
 .tmp/

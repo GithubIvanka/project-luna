@@ -52,7 +52,7 @@ UEFI загружает UEFI application, предоставляя Boot Services
 
 Luna status: реализовано.
 
-components/core/luna-boot — отдельный Rust UEFI application на crate uefi. Он проверяет
+components/boot — отдельный Rust UEFI application на crate uefi. Он проверяет
 EFI/LUNA-SYS identity, выбирает target, загружает kernel/init, строит
 LunaBootHandoffV1 и ведёт BootAttempt.
 
@@ -67,7 +67,7 @@ direct-PID1 пути.
 
 Luna status: базовый механизм реализован.
 
-kernel/rust/luna_boot.rs уже фиксирует handoff и memory-resident luna-init.
+components/kernel/rust/luna_boot.rs уже фиксирует handoff и memory-resident luna-init.
 Serial boot показывает последовательность KernelHandoff → KernelStarted → InitStarted →
 InitReady, после чего luna-init становится PID 1.
 

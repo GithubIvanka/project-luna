@@ -13,7 +13,7 @@ tools/build-component.sh luna-system-runtime --release
 tools/build-luna-boot.sh
 ```
 
-The bootloader result is `components/core/luna-boot/target/x86_64-unknown-uefi/release/luna-boot.efi`.
+The bootloader result is `components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi`.
 
 ## PC image
 

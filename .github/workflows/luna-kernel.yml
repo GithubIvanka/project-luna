@@ -34,10 +34,10 @@ jobs:
         run: |
           test -f tools/build-luna-kernel.sh
           test -f tools/apply-luna-kernel-overlay.sh
-          test -f kernel/rust/luna_boot.rs
-          test ! -e kernel/patches/0001-luna-kernel-rust-parser.patch
-          test ! -e kernel/patches/0002-luna-kernel-rust-build.patch
-          test ! -e kernel/patches/0003-luna-kernel-rust-bridge.patch
+          test -f components/kernel/rust/luna_boot.rs
+          test ! -e components/kernel/patches/0001-luna-kernel-rust-parser.patch
+          test ! -e components/kernel/patches/0002-luna-kernel-rust-build.patch
+          test ! -e components/kernel/patches/0003-luna-kernel-rust-bridge.patch
 
       - name: Build Project Luna kernel
         env:
