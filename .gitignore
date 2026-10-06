@@ -6,7 +6,6 @@ target/
 docs/archive/
 
 components/boot/tests/ovmf/out*
-experiments/
 
 .tmp/
 .idea/
