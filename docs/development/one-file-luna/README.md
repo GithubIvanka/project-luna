@@ -1,3 +1,5 @@
+[Reading 137 lines from start (total: 137 lines, 0 remaining)]
+
 # Luna One File Experiment
 
 **Stage:** 0 — One File Luna
@@ -68,8 +70,7 @@ The implementation lives under `experiments/luna-onefile/` and is intentionally 
 
 The first prototype contains:
 
-- a static musl `luna-init` executable;
-- BusyBox only for the bootstrap shell used by the proof;
+- a static Rust no_std luna-init entered through a minimal C _start;
 - a tiny initramfs;
 - a Linux EFI-stub kernel image with that initramfs embedded.
 
@@ -93,7 +94,7 @@ The first boot experiments established the following:
 3. Rust `std` as PID 1 caused a general-protection fault in this environment, so it is deliberately not part of the Stage 0 critical path.
 4. The working Luna PID 1 is now a Rust `no_std` static library entered by a minimal C `_start`, with no libc or Rust `std` runtime before `luna_main()`.
 5. The accepted Stage 0 artifact is a Linux EFI-stub `bzImage` with the Luna initramfs embedded. Direct QEMU boot is the current automated acceptance path.
-6. OVMF was able to discover and start the EFI-stub image, but this environment did not complete kernel handoff reliably; that UEFI-specific issue remains a follow-up and is not being conflated with the successful direct kernel boot.
+6. The same image was successfully booted through OVMF with the existing luna-boot.efi; the complete path reaches LUNA-READY.
 
 The failure mode was useful: it established a hard boundary between the Linux kernel substrate and the userspace runtime we control. Future stages should keep that boundary explicit.
 
@@ -117,8 +118,23 @@ Observed artifact characteristics:
 
 Acceptance is implemented in experiments/luna-onefile/test-stage0.sh.
 
-The current accepted path is direct QEMU kernel loading. UEFI/OVMF handoff remains a separate integration problem for Stage 1 and is intentionally not hidden by this acceptance test.
+Direct QEMU and OVMF-through-luna-boot are both accepted paths. The OVMF path is wrapped by experiments/luna-onefile/test-uefi.sh.
 
 ## Immediate next work
 
-Stage 1 begins by introducing the Luna-owned bootloader while preserving the Stage 0 artifact as a known-good reference. The bootloader must eventually own EFI discovery, disk identity, kernel selection and verification without bringing back a distribution boot stack.
+Stage 1 now moves from proof to hardening: reduce the bootloader dependency surface, make the one-file kernel artifact a first-class boot target, and establish the minimal canonical LUNA-SYS fixture without reintroducing a distribution boot stack.
+## Stage 1.0 result — 2026-10-06
+
+The existing Luna EFI bootloader was tested against the one-file kernel artifact.
+
+Verified path:
+
+UEFI/OVMF -> luna-boot.efi -> LUNA-SYS -> one-file Linux bzImage -> embedded initramfs -> Rust no_std luna-init -> LUNA-READY
+
+The test uses the existing OVMF fixture harness and replaces only its kernel input with experiments/luna-onefile/out/luna-onefile.efi.
+
+Acceptance is now wrapped by experiments/luna-onefile/test-uefi.sh.
+
+This establishes that the current luna-boot kernel handoff can consume the experimental one-file kernel without changing the Linux boot contract. The next Stage 1 work is therefore bootloader integration/hardening rather than proving EFI execution from scratch.
+
+[executed on device: pandora (0de7d85d-b652-4002-8307-c060ee52463b)]
