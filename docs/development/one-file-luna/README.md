@@ -138,3 +138,14 @@ Acceptance is now wrapped by experiments/luna-onefile/test-uefi.sh.
 This establishes that the current luna-boot kernel handoff can consume the experimental one-file kernel without changing the Linux boot contract. The next Stage 1 work is therefore bootloader integration/hardening rather than proving EFI execution from scratch.
 
 [executed on device: pandora (0de7d85d-b652-4002-8307-c060ee52463b)]
+## Stage 1.1 result — 2026-10-06
+
+The OVMF test was reduced to a clean canonical disk fixture with no Alpine userspace. The fixture contains only EFI, LUNA-SYS and a single LUNA-DATA partition. LUNA-SYS contains the one-file bzImage, a minimal luna-init record/manifest, and a minimal normal System Image manifest plus empty squashfs payload.
+
+Verified path:
+
+UEFI/OVMF -> luna-boot.efi -> GPT LUNA-SYS/LUNA-DATA discovery -> target resolution -> one-file bzImage -> embedded initramfs -> Rust no_std luna-init -> LUNA-READY
+
+This proves that the bootloader GPT/ext4 discovery, target resolution and Linux handoff do not require Alpine. It does not yet remove the embedded initramfs from the kernel; that is intentionally deferred to the next step, where the Luna kernel consumes the bootloader-provided init identity.
+
+Acceptance is wrapped by experiments/luna-onefile/test-luna-sys.sh.
