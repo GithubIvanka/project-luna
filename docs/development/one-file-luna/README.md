@@ -149,3 +149,18 @@ UEFI/OVMF -> luna-boot.efi -> GPT LUNA-SYS/LUNA-DATA discovery -> target resolut
 This proves that the bootloader GPT/ext4 discovery, target resolution and Linux handoff do not require Alpine. It does not yet remove the embedded initramfs from the kernel; that is intentionally deferred to the next step, where the Luna kernel consumes the bootloader-provided init identity.
 
 Acceptance is wrapped by experiments/luna-onefile/test-luna-sys.sh.
+## Stage 1.2 result — 2026-10-06
+
+The kernel-side direct-init path was verified without an embedded initramfs.
+
+The tested kernel is built from Linux 7.2.4 with the Luna kernel overlay, CONFIG_RUST=y and CONFIG_RELOCATABLE=y. CONFIG_INITRAMFS_SOURCE is absent. The existing luna-boot reads the external luna-init from LUNA-SYS, creates the Linux handoff, and the kernel executes that memory-resident init as PID 1 through luna_exec.
+
+Observed serial path:
+
+luna_boot: boot availability handoff=1 init=1 -> luna_exec: preparing memory-resident luna-init -> luna_exec: executing memory-resident luna-init as PID 1 -> luna_exec: luna-init exec transition accepted -> LUNA-INIT: PID 1 -> LUNA-READY
+
+The Alpine-free canonical GPT fixture is unchanged. The one-file kernel itself no longer supplies PID 1 through initramfs; the init object comes from LUNA-SYS and is transferred through the Luna handoff ABI.
+
+Acceptance is exposed by experiments/luna-onefile/test-luna-direct.sh. The reproducible builder is experiments/luna-onefile/build-direct.sh.
+
+This is the first complete proof of the intended ownership boundary: UEFI/luna-boot owns image discovery and handoff, the Luna kernel owns direct-init execution, and luna-init starts without a pathname-based rootfs pivot.
