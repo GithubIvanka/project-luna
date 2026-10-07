@@ -21,9 +21,12 @@ immutable base → выбранный System Image
 mutable system → LUNA-DATA/system
 user state     → LUNA-DATA/users/<user>
 cache          → LUNA-DATA/cache
+volume         → VolumeRef + relative path
 ```
 
-Для отдельных ресурсов могут использоваться Bundle и разрешённые внешние volumes/devices.
+Для отдельных ресурсов могут использоваться Bundle и разрешённые внешние
+Volumes. Volume Namespace остаётся отдельным от logical root: наличие Volume не
+означает, что его содержимое автоматически становится частью `/`.
 
 ## Персональность
 

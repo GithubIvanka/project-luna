@@ -503,7 +503,7 @@ impl ApplicationRuntime for InMemoryApplicationRuntime {
                 LogicalPath::new(resource.logical_path()).map_err(RuntimeError::Mapping)?;
             plan.value()
                 .mapping()
-                .resolve(&logical)
+                .resolve_source(&logical)
                 .map_err(RuntimeError::Mapping)?;
         }
         let id = self.allocate_instance_id();

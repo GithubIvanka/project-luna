@@ -109,7 +109,10 @@ pub struct VolumePath {
 }
 
 impl VolumePath {
-    pub fn new(volume: VolumeRef, relative_path: impl Into<String>) -> Result<Self, VolumePathError> {
+    pub fn new(
+        volume: VolumeRef,
+        relative_path: impl Into<String>,
+    ) -> Result<Self, VolumePathError> {
         let relative_path = relative_path.into();
         if !relative_path.starts_with('/') {
             return Err(VolumePathError::NotAbsolute);
@@ -137,7 +140,11 @@ impl VolumePath {
         &self.relative_path
     }
 
-    pub fn to_display_string(&self, letter: DriveLetter) -> String {
+    pub fn to_native_display_string(&self, native_name: &str) -> String {
+        format!("{}:{}", native_name, self.relative_path)
+    }
+
+    pub fn to_windows_display_string(&self, letter: DriveLetter) -> String {
         format!("{}{}", letter, self.relative_path)
     }
 }
@@ -196,7 +203,11 @@ mod tests {
         let path = VolumePath::new(volume.clone(), "/projects/luna").unwrap();
         assert_eq!(path.volume(), &volume);
         assert_eq!(path.relative_path(), "/projects/luna");
-        assert_eq!(path.to_display_string(DriveLetter::D), "D:/projects/luna");
+        assert_eq!(path.to_native_display_string("data"), "data:/projects/luna");
+        assert_eq!(
+            path.to_windows_display_string(DriveLetter::D),
+            "D:/projects/luna"
+        );
     }
 
     #[test]

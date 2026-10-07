@@ -68,19 +68,31 @@ pub fn materialize_profiled_logical_root(
 
     for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
         let logical_path = root.join(rule.logical().as_str().trim_start_matches('/'));
+        let physical = rule.physical().ok_or_else(|| {
+            NamespaceError::FilesystemAccess(
+                "Volume mapping requires a storage-aware namespace resolver".to_owned(),
+            )
+        })?;
         let adjusted = match rule.kind() {
             MappingKind::File => MappingRule::file(
                 LogicalPath::new(logical_path).map_err(|_| NamespaceError::InvalidPath)?,
-                rule.physical().clone(),
+                physical.clone(),
             )
             .with_access(rule.access().iter().copied()),
             MappingKind::Subtree => MappingRule::subtree(
                 LogicalPath::new(logical_path).map_err(|_| NamespaceError::InvalidPath)?,
-                rule.physical().clone(),
+                physical.clone(),
             )
             .with_access(rule.access().iter().copied()),
         };
-        let source = adjusted.physical().as_path();
+        let source = adjusted
+            .physical()
+            .ok_or_else(|| {
+                NamespaceError::FilesystemAccess(
+                    "internal mapping source is not physical".to_owned(),
+                )
+            })?
+            .as_path();
         let trusted_root = trusted_source_roots
             .iter()
             .find(|root| source == root.as_path() || source.starts_with(root))

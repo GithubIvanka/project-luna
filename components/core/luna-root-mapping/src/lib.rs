@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use luna_common::{ResourceAccess, RuntimeKind};
+use luna_common::{ResourceAccess, RuntimeKind, VolumePath};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct LogicalPath(String);
@@ -89,6 +89,33 @@ impl PhysicalPath {
     }
 }
 
+/// Declarative source identity for a mapping.
+///
+/// `Physical` is retained as a backend/migration source for existing Linux
+/// integration. New storage mappings SHOULD use `Volume`, which keeps the
+/// storage identity separate from any concrete Linux pathname or mountpoint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MappingSource {
+    Physical(PhysicalPath),
+    Volume(VolumePath),
+}
+
+impl MappingSource {
+    pub fn physical(&self) -> Option<&PhysicalPath> {
+        match self {
+            Self::Physical(path) => Some(path),
+            Self::Volume(_) => None,
+        }
+    }
+
+    pub fn volume(&self) -> Option<&VolumePath> {
+        match self {
+            Self::Physical(_) => None,
+            Self::Volume(path) => Some(path),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum MappingKind {
     File,
@@ -98,7 +125,7 @@ pub enum MappingKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MappingRule {
     logical: LogicalPath,
-    physical: PhysicalPath,
+    source: MappingSource,
     kind: MappingKind,
     access: BTreeSet<ResourceAccess>,
 }
@@ -109,19 +136,34 @@ impl MappingRule {
     }
 
     pub fn file(logical: LogicalPath, physical: PhysicalPath) -> Self {
-        Self {
+        Self::from_source(
             logical,
-            physical,
-            kind: MappingKind::File,
-            access: BTreeSet::new(),
-        }
+            MappingSource::Physical(physical),
+            MappingKind::File,
+        )
     }
 
     pub fn subtree(logical: LogicalPath, physical: PhysicalPath) -> Self {
+        Self::from_source(
+            logical,
+            MappingSource::Physical(physical),
+            MappingKind::Subtree,
+        )
+    }
+
+    pub fn volume(logical: LogicalPath, volume: VolumePath) -> Self {
+        Self::from_source(logical, MappingSource::Volume(volume), MappingKind::File)
+    }
+
+    pub fn volume_subtree(logical: LogicalPath, volume: VolumePath) -> Self {
+        Self::from_source(logical, MappingSource::Volume(volume), MappingKind::Subtree)
+    }
+
+    fn from_source(logical: LogicalPath, source: MappingSource, kind: MappingKind) -> Self {
         Self {
             logical,
-            physical,
-            kind: MappingKind::Subtree,
+            source,
+            kind,
             access: BTreeSet::new(),
         }
     }
@@ -138,8 +180,16 @@ impl MappingRule {
         &self.logical
     }
 
-    pub fn physical(&self) -> &PhysicalPath {
-        &self.physical
+    pub fn source(&self) -> &MappingSource {
+        &self.source
+    }
+
+    pub fn physical(&self) -> Option<&PhysicalPath> {
+        self.source.physical()
+    }
+
+    pub fn volume_path(&self) -> Option<&VolumePath> {
+        self.source.volume()
     }
 
     pub fn kind(&self) -> MappingKind {
@@ -161,6 +211,8 @@ pub enum MappingError {
     DuplicateLogicalPath,
     NotMapped,
     ConflictingPhysicalPath,
+    PhysicalPathUnavailable,
+    InvalidVolumePath,
     RuntimeConflict {
         existing: RuntimeKind,
         requested: RuntimeKind,
@@ -178,6 +230,10 @@ impl fmt::Display for MappingError {
             Self::DuplicateLogicalPath => "logical path is already mapped",
             Self::NotMapped => "logical path is not mapped",
             Self::ConflictingPhysicalPath => "logical path has conflicting physical mappings",
+            Self::PhysicalPathUnavailable => {
+                "mapping source is a Luna Volume and has not been resolved to a Linux path"
+            }
+            Self::InvalidVolumePath => "mapping contains an invalid VolumePath",
             Self::RuntimeConflict {
                 existing,
                 requested,
@@ -244,18 +300,47 @@ impl MappingTable {
         Ok(())
     }
 
-    /// Resolves a logical resource to its physical backing path.
-    pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
+    /// Resolves a logical resource to a source identity without touching the filesystem.
+    pub fn resolve_source(&self, logical: &LogicalPath) -> Result<MappingSource, MappingError> {
         let rule = self.resolve_rule(logical)?;
-        match rule.kind {
-            MappingKind::File => Ok(rule.physical.clone()),
-            MappingKind::Subtree => {
-                let relative = logical
-                    .as_path()
-                    .strip_prefix(rule.logical.as_path())
-                    .map_err(|_| MappingError::NotMapped)?;
-                Ok(PhysicalPath::new(rule.physical.as_path().join(relative)))
+        if rule.kind == MappingKind::File {
+            return Ok(rule.source.clone());
+        }
+
+        let relative = logical
+            .as_path()
+            .strip_prefix(rule.logical.as_path())
+            .map_err(|_| MappingError::NotMapped)?;
+        match &rule.source {
+            MappingSource::Physical(path) => Ok(MappingSource::Physical(PhysicalPath::new(
+                path.as_path().join(relative),
+            ))),
+            MappingSource::Volume(path) => {
+                let base = path.relative_path().trim_end_matches('/');
+                let suffix = relative.to_string_lossy();
+                let combined = if base.is_empty() {
+                    format!("/{suffix}")
+                } else if suffix.is_empty() {
+                    base.to_owned()
+                } else {
+                    format!("{base}/{suffix}")
+                };
+                let volume_path = VolumePath::new(path.volume().clone(), combined)
+                    .map_err(|_| MappingError::InvalidVolumePath)?;
+                Ok(MappingSource::Volume(volume_path))
             }
+        }
+    }
+
+    /// Resolves a logical resource to a concrete Linux path.
+    ///
+    /// This legacy/backend-facing API succeeds only for physical mapping
+    /// sources. Volume mappings must first be resolved by a storage-aware
+    /// namespace backend.
+    pub fn resolve(&self, logical: &LogicalPath) -> Result<PhysicalPath, MappingError> {
+        match self.resolve_source(logical)? {
+            MappingSource::Physical(path) => Ok(path),
+            MappingSource::Volume(_) => Err(MappingError::PhysicalPathUnavailable),
         }
     }
 
@@ -279,7 +364,7 @@ impl MappingTable {
         let mut entries = BTreeMap::new();
         for rule in &self.rules {
             if entries
-                .insert(rule.logical.clone(), rule.physical.clone())
+                .insert(rule.logical.clone(), rule.source.clone())
                 .is_some()
             {
                 return Err(MappingError::ConflictingPhysicalPath);
@@ -315,13 +400,20 @@ impl MappingTable {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MaterializedNamespace {
-    entries: BTreeMap<LogicalPath, PhysicalPath>,
+    entries: BTreeMap<LogicalPath, MappingSource>,
     runtime: Option<RuntimeKind>,
 }
 
 impl MaterializedNamespace {
-    pub fn resolve(&self, logical: &LogicalPath) -> Result<&PhysicalPath, MappingError> {
+    pub fn resolve_source(&self, logical: &LogicalPath) -> Result<&MappingSource, MappingError> {
         self.entries.get(logical).ok_or(MappingError::NotMapped)
+    }
+
+    pub fn resolve(&self, logical: &LogicalPath) -> Result<&PhysicalPath, MappingError> {
+        match self.resolve_source(logical)? {
+            MappingSource::Physical(path) => Ok(path),
+            MappingSource::Volume(_) => Err(MappingError::PhysicalPathUnavailable),
+        }
     }
 
     pub fn runtime(&self) -> Option<RuntimeKind> {
@@ -336,7 +428,7 @@ impl MaterializedNamespace {
         self.entries.is_empty()
     }
 
-    pub fn entries(&self) -> impl Iterator<Item = (&LogicalPath, &PhysicalPath)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&LogicalPath, &MappingSource)> {
         self.entries.iter()
     }
 }
@@ -353,8 +445,11 @@ fn path_depth(path: &Path) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{LogicalPath, MappingError, MappingKind, MappingRule, MappingTable, PhysicalPath};
-    use luna_common::{ResourceAccess, RuntimeKind};
+    use super::{
+        LogicalPath, MappingError, MappingKind, MappingRule, MappingSource, MappingTable,
+        PhysicalPath,
+    };
+    use luna_common::{ResourceAccess, RuntimeKind, VolumePath, VolumeRef};
     use std::path::Path;
 
     #[test]
@@ -409,7 +504,7 @@ mod tests {
         let rule = table
             .resolve_rule(&LogicalPath::new("/data/app/file").unwrap())
             .unwrap();
-        assert_eq!(rule.physical().as_path(), Path::new("/two"));
+        assert_eq!(rule.physical().unwrap().as_path(), Path::new("/two"));
     }
 
     #[test]
@@ -433,6 +528,45 @@ mod tests {
             Path::new("/data/system/libs/gtk/4/themes/default.ini")
         );
         assert_eq!(table.resolve(&outside), Err(MappingError::NotMapped));
+    }
+
+    #[test]
+    fn volume_mapping_keeps_storage_identity_out_of_linux_paths() {
+        let logical = LogicalPath::new("/data/projects").unwrap();
+        let volume = VolumeRef::new(luna_common::VolumeId::from("partition-guid:data"));
+        let source = VolumePath::new(volume.clone(), "/projects").unwrap();
+        let rule = MappingRule::volume_subtree(logical.clone(), source.clone());
+        assert_eq!(rule.volume_path(), Some(&source));
+        assert_eq!(rule.physical(), None);
+
+        let mut table = MappingTable::new();
+        table.insert(rule).unwrap();
+        assert_eq!(
+            table.resolve_source(&LogicalPath::new("/data/projects/file.txt").unwrap()),
+            Ok(MappingSource::Volume(
+                VolumePath::new(volume, "/projects/file.txt",).unwrap()
+            ))
+        );
+        assert_eq!(
+            table.resolve(&logical),
+            Err(MappingError::PhysicalPathUnavailable)
+        );
+    }
+
+    #[test]
+    fn materialized_namespace_preserves_volume_sources() {
+        let logical = LogicalPath::new("/media/backup").unwrap();
+        let volume = VolumeRef::new(luna_common::VolumeId::from("partition-guid:backup"));
+        let source = VolumePath::new(volume, "/documents").unwrap();
+        let mut table = MappingTable::new();
+        table
+            .insert(MappingRule::volume_subtree(logical.clone(), source.clone()))
+            .unwrap();
+        let namespace = table.materialize().unwrap();
+        assert_eq!(
+            namespace.resolve_source(&logical),
+            Ok(&MappingSource::Volume(source))
+        );
     }
 
     #[test]

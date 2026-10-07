@@ -21,6 +21,9 @@
 
 `MappingPlan` описывает требуемое логическое отображение. Он не является security grant.
 
+Для storage source mapping используется типизированная ссылка на Volume, а не
+raw Linux pathname:
+
 ```text
 ApplicationPlan
     ↓
@@ -29,9 +32,23 @@ MappingPlan
 luna-security
     ↓
 luna-namespace
+    ↓
+namespace-local MountInstance
 ```
 
-Физические пути `LUNA-SYS/...` и `LUNA-DATA/...` остаются внутренней деталью реализации.
+Пример source mapping:
+
+```text
+logical /data/projects
+    -> VolumeRef(LUNA-DATA) + /projects
+
+logical /media/backup
+    -> VolumeRef(backup) + /documents
+```
+
+Физические пути `LUNA-SYS/...`, `LUNA-DATA/...`, `/dev/...` и `/mnt/...` остаются
+внутренней деталью storage/mount backend и не являются identity mapping rule.
+Drive letters также не являются source identity.
 
 ## Правила
 

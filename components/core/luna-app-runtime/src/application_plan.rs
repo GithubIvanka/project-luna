@@ -100,7 +100,9 @@ impl ApplicationPlan {
         Self::validate_executable(&self.executable, &self.manifest, &self.mapping)?;
         for resource in self.manifest.resources() {
             let logical = LogicalPath::new(resource.logical_path()).map_err(PlanError::Mapping)?;
-            self.mapping.resolve(&logical).map_err(PlanError::Mapping)?;
+            self.mapping
+                .resolve_source(&logical)
+                .map_err(PlanError::Mapping)?;
         }
         for request in &self.requests {
             if request.principal != Principal::Application(self.application.clone()) {
@@ -130,7 +132,7 @@ impl ApplicationPlan {
         }
         let logical = LogicalPath::new(path).map_err(PlanError::Mapping)?;
         mapping
-            .resolve(&logical)
+            .resolve_source(&logical)
             .map_err(|_| PlanError::ExecutableNotMapped(path.display().to_string()))?;
         let resource = manifest
             .resources()
