@@ -12,6 +12,7 @@ RECOVERY_TEST="${LUNA_RECOVERY_TEST:-0}"
 DATA_AMBIGUOUS_TEST="${LUNA_DATA_AMBIGUOUS_TEST:-0}"
 DATA_CONFIG_TEST="${LUNA_DATA_CONFIG_TEST:-0}"
 DATA_EXTERNAL_TEST="${LUNA_DATA_EXTERNAL_TEST:-0}"
+DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 LOG="$OUT/serial.log"
@@ -47,6 +48,14 @@ if [ "$DATA_EXTERNAL_TEST" = "1" ] && [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
   echo "DATA external and ambiguous test modes are mutually exclusive" >&2
   exit 1
 fi
+if [ "$DATA_CONFIG_STALE_TEST" = "1" ] && { [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_TEST" = "1" ] || [ "$DATA_EXTERNAL_TEST" = "1" ]; }; then
+  echo "DATA stale-config test mode is mutually exclusive" >&2
+  exit 1
+fi
+if [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
+  [ -n "$RECOVERY_ROOT_SOURCE" ] || { echo "missing Recovery DATA source root" >&2; exit 1; }
+  [ -d "$RECOVERY_ROOT_SOURCE" ] || { echo "missing Recovery DATA source root: $RECOVERY_ROOT_SOURCE" >&2; exit 1; }
+fi
 
 echo "[1/4] Building luna-boot"
 cargo build --manifest-path "$REPO_ROOT/components/boot/Cargo.toml" --release --target x86_64-unknown-uefi >/dev/null
@@ -64,7 +73,7 @@ if [ -n "$SYSTEM_ROOT_SOURCE" ]; then
   cp -a "$SYSTEM_ROOT_SOURCE/." "$OUT/minimal-root/"
 fi
 mksquashfs "$OUT/minimal-root" "$OUT/system-root/images/luna-0.1.0.squashfs" -noappend -quiet
-if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
+if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   mksquashfs "$RECOVERY_ROOT_SOURCE" "$OUT/system-root/recovery/recovery.squashfs" -noappend -quiet
   printf "%s\n" "[image]" "name = \"luna\"" "version = \"0.1.0\"" "format = \"squashfs\"" "role = \"recovery\"" "" "[architecture]" "arch = \"x86_64\"" "" "[init]" "compatible = [\"0.1.0\"]" > "$OUT/system-root/recovery/recovery.toml"
 fi
@@ -79,6 +88,8 @@ if [ "$DATA_CONFIG_TEST" = "1" ]; then
   printf '%s\n' '[data]' 'preferred_disk_guid = "11111111-1111-4111-8111-111111111111"' 'preferred_partition_guid = "44444444-4444-4444-8444-444444444444"' > "$OUT/system-root/config/luna-data.toml"
 elif [ "$DATA_EXTERNAL_TEST" = "1" ]; then
   printf '%s\n' '[data]' 'preferred_disk_guid = "66666666-6666-4666-8666-666666666666"' 'preferred_partition_guid = "77777777-7777-4777-8777-777777777777"' > "$OUT/system-root/config/luna-data.toml"
+elif [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
+  printf '%s\n' '[data]' 'preferred_disk_guid = "11111111-1111-4111-8111-111111111111"' 'preferred_partition_guid = "99999999-9999-4999-8999-999999999999"' > "$OUT/system-root/config/luna-data.toml"
 fi
 mkfs.ext4 -q -F -L LUNA-SYS -d "$OUT/system-root" "$OUT/system.img" 192M
 
@@ -109,6 +120,9 @@ if [ "$RECOVERY_TEST" = "1" ]; then
 elif [ "$DATA_EXTERNAL_TEST" = "1" ]; then
   sgdisk --disk-guid=11111111-1111-4111-8111-111111111111 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS "$OUT/disk.img" >/dev/null
   sgdisk --partition-guid=1:22222222-2222-4222-8222-222222222222 --partition-guid=2:33333333-3333-4333-8333-333333333333 "$OUT/disk.img" >/dev/null
+elif [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
+  sgdisk --disk-guid=11111111-1111-4111-8111-111111111111 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+128M -t 3:8300 -c 3:LUNA-DATA "$OUT/disk.img" >/dev/null
+  sgdisk --partition-guid=1:22222222-2222-4222-8222-222222222222 --partition-guid=2:33333333-3333-4333-8333-333333333333 --partition-guid=3:44444444-4444-4444-8444-444444444444 "$OUT/disk.img" >/dev/null
 elif [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_TEST" = "1" ]; then
   sgdisk --disk-guid=11111111-1111-4111-8111-111111111111 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+128M -t 3:8300 -c 3:LUNA-DATA -n 4:788480:+128M -t 4:8300 -c 4:LUNA-DATA "$OUT/disk.img" >/dev/null
   sgdisk --partition-guid=1:22222222-2222-4222-8222-222222222222 --partition-guid=2:33333333-3333-4333-8333-333333333333 --partition-guid=3:44444444-4444-4444-8444-444444444444 --partition-guid=4:55555555-5555-4555-8555-555555555555 "$OUT/disk.img" >/dev/null
@@ -153,7 +167,7 @@ else
   grep -Fq "Run /init as init process" "$LOG"
 fi
 
-if [ "${LUNA_RECOVERY_TEST:-0}" = "1" ] || [ "${LUNA_DATA_AMBIGUOUS_TEST:-0}" = "1" ]; then
+if [ "${LUNA_RECOVERY_TEST:-0}" = "1" ] || [ "${LUNA_DATA_AMBIGUOUS_TEST:-0}" = "1" ] || [ "${LUNA_DATA_CONFIG_STALE_TEST:-0}" = "1" ]; then
   grep -Fq "Luna: LUNA-DATA is unavailable; entering Recovery Environment" "$LOG"
   grep -Fq "Luna: luna-init is running as PID 1" "$LOG"
   grep -Fq "mode=2" "$LOG"

@@ -11,6 +11,7 @@ RECOVERY_TEST="${LUNA_RECOVERY_TEST:-0}"
 DATA_AMBIGUOUS_TEST="${LUNA_DATA_AMBIGUOUS_TEST:-0}"
 DATA_CONFIG_TEST="${LUNA_DATA_CONFIG_TEST:-0}"
 DATA_EXTERNAL_TEST="${LUNA_DATA_EXTERNAL_TEST:-0}"
+DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
 RECOVERY_ROOT="${LUNA_ONEFILE_REAL_RECOVERY_ROOT:-/tmp/luna-recovery-data-root-$$}"
 
 [ -f "$IMAGE" ] || { echo "missing real-init kernel: $IMAGE" >&2; exit 1; }
@@ -56,7 +57,7 @@ printf '%s\n' "passwd: files" "group: files" "shadow: files" "gshadow: files" "h
 chmod 0644 "$SYSROOT/config/passwd" "$SYSROOT/config/group" "$SYSROOT/config/nsswitch.conf"
 chmod 0600 "$SYSROOT/config/shadow"
 
-if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
+if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   rm -rf "$RECOVERY_ROOT"
   mkdir -p "$RECOVERY_ROOT/system"/{apps,libs,config,resources}
   mkdir -p "$RECOVERY_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
@@ -72,7 +73,7 @@ export LUNA_ONEFILE_IMAGE="$IMAGE"
 export LUNA_ONEFILE_INIT="$INIT"
 export LUNA_ONEFILE_SYSTEM_ROOT="$SYSROOT"
 export LUNA_ONEFILE_DISK_TEST_OUT="$OUT"
-if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
+if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   export LUNA_ONEFILE_RECOVERY_ROOT="$RECOVERY_ROOT"
 fi
 if [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
@@ -83,6 +84,9 @@ if [ "$DATA_CONFIG_TEST" = "1" ]; then
 fi
 if [ "$DATA_EXTERNAL_TEST" = "1" ]; then
   export LUNA_DATA_EXTERNAL_TEST=1
+fi
+if [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
+  export LUNA_DATA_CONFIG_STALE_TEST=1
 fi
 export LUNA_DIRECT_INIT=1
 export LUNA_REAL_INIT=1

@@ -152,6 +152,7 @@ fn discover_data_partition(
                 return Ok((Some(partition), DataStatus::Found));
             }
         }
+        return Ok((None, DataStatus::Missing));
     }
 
     let mut candidates = Vec::new();

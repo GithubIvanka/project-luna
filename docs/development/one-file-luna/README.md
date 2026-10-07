@@ -226,3 +226,15 @@ Verified path:
 UEFI/OVMF -> Disk A EFI + LUNA-SYS -> configured external Disk B LUNA-DATA -> real `luna-init` PID 1 -> Btrfs `/dev/sdb1` -> logical root -> `luna-system-runtime`
 
 This proves the intended physical separation invariant: EFI and LUNA-SYS remain bound to one disk, while LUNA-DATA may live on another physical disk without introducing a second boot stack or changing the direct PID 1 mechanism.
+
+## Stage 1.8 result — 2026-10-07
+
+A stale configured-DATA GUID pair was tested as a fail-closed regression. The fixture contains one valid physical `LUNA-DATA` partition, while `LUNA-SYS/config/luna-data.toml` points to a nonexistent partition GUID.
+
+Before the fix, the bootloader correctly failed the exact GUID lookup but then fell through to generic candidate discovery and silently selected the only remaining `LUNA-DATA` partition. The QEMU trace showed normal boot (`mode=0`) and `/dev/sda3`, confirming a real policy violation.
+
+The implementation in `components/boot/src/filesystem.rs` was changed so that once an explicit disk+partition GUID pair is configured, failure to resolve that exact pair returns `DataStatus::Missing` immediately. Generic discovery is no longer allowed to substitute another provider.
+
+After the fix, the same stale-config fixture enters Recovery, mounts the Recovery DATA Image, and reaches `LUNA-SYSTEM-RUNTIME: READY`. The positive exact-match test was rerun afterward and still selects the configured `/dev/sda3` normally.
+
+This establishes the required fail-closed invariant for persisted DATA identity: configured DATA is either the exact configured provider or Recovery; it is never silently replaced by an arbitrary candidate.
