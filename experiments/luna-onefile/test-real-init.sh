@@ -24,12 +24,51 @@ mkdir -p "$SYSROOT/apps/luna-system-runtime" "$SYSROOT/config" "$SYSROOT/libs"
 mkdir -p "$SYSROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 
 cat > "$SYSROOT/runtime.rs" <<'EOF_RUNTIME'
-use std::{thread, time::Duration};
+use std::{path::Path, thread, time::Duration};
+
+fn require_file(path: &str) {
+    if !Path::new(path).is_file() {
+        eprintln!("LUNA-LOGICAL-ROOT: missing file {path}");
+        std::process::exit(20);
+    }
+}
+
+fn require_dir(path: &str) {
+    if !Path::new(path).is_dir() {
+        eprintln!("LUNA-LOGICAL-ROOT: missing directory {path}");
+        std::process::exit(21);
+    }
+}
+
+fn require_symlink(path: &str) {
+    if !Path::new(path).is_symlink() {
+        eprintln!("LUNA-LOGICAL-ROOT: missing symlink {path}");
+        std::process::exit(22);
+    }
+}
 
 fn main() -> ! {
-    if std::path::Path::new("/usr/bin/recovery-tools").is_file() {
+    for resource_class in ["fonts", "icons", "themes", "cursors", "sounds", "locales", "translations"] {
+        require_file(&format!("/resources/{resource_class}/system-resource-marker"));
+        require_file(&format!("/usr/share/{resource_class}/data-resource-marker"));
+    }
+    require_file("/config/system-config-marker");
+    require_file("/etc/data-config-marker");
+    require_file("/data/system/config/data-config-marker");
+    require_file("/lib/luna/system-lib-marker");
+    require_file("/usr/lib/data-lib-marker");
+    require_file("/usr/local/lib/data-lib-marker");
+    require_file("/usr/bin/data-probe");
+    require_symlink("/lib/ld-musl-x86_64.so.1");
+
+    let user = std::env::var("LUNA_SESSION_USER").unwrap_or_else(|_| "luna".to_owned());
+    require_symlink(&format!("/home/{user}"));
+    require_dir(&format!("/data/users/{user}/home"));
+
+    if Path::new("/usr/bin/recovery-tools").is_file() {
         println!("LUNA-RECOVERY-DATA: READY");
     }
+    println!("LUNA-LOGICAL-ROOT-CONTRACT: READY");
     println!("LUNA-SYSTEM-RUNTIME: READY");
     loop {
         thread::sleep(Duration::from_secs(60));
@@ -61,9 +100,15 @@ if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CO
   rm -rf "$RECOVERY_ROOT"
   mkdir -p "$RECOVERY_ROOT/system"/{apps,libs,config,resources}
   mkdir -p "$RECOVERY_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
-  mkdir -p "$RECOVERY_ROOT/system/apps/recovery-tools"
+  mkdir -p "$RECOVERY_ROOT/system/apps/recovery-tools" "$RECOVERY_ROOT/system/apps/data-probe"
+  : > "$RECOVERY_ROOT/system/libs/data-lib-marker"
+  : > "$RECOVERY_ROOT/system/config/data-config-marker"
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$RECOVERY_ROOT/system/apps/recovery-tools/recovery-tools"
-  chmod 0755 "$RECOVERY_ROOT/system/apps/recovery-tools/recovery-tools"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$RECOVERY_ROOT/system/apps/data-probe/data-probe"
+  chmod 0755 "$RECOVERY_ROOT/system/apps/recovery-tools/recovery-tools" "$RECOVERY_ROOT/system/apps/data-probe/data-probe"
+  for resource_class in fonts icons themes cursors sounds locales translations; do
+    : > "$RECOVERY_ROOT/system/resources/$resource_class/data-resource-marker"
+  done
   trap 'rm -rf "$SYSROOT" "$RECOVERY_ROOT"' EXIT
 else
   trap 'rm -rf "$SYSROOT"' EXIT

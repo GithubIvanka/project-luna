@@ -238,3 +238,22 @@ The implementation in `components/boot/src/filesystem.rs` was changed so that on
 After the fix, the same stale-config fixture enters Recovery, mounts the Recovery DATA Image, and reaches `LUNA-SYSTEM-RUNTIME: READY`. The positive exact-match test was rerun afterward and still selects the configured `/dev/sda3` normally.
 
 This establishes the required fail-closed invariant for persisted DATA identity: configured DATA is either the exact configured provider or Recovery; it is never silently replaced by an arbitrary candidate.
+
+## Stage 1.9 result — 2026-10-07
+
+The logical-root provider contract was promoted from a mount-only check to an end-to-end runtime assertion. The test runtime now verifies the actual namespace assembled by `luna-init` after the `chroot` transition.
+
+The acceptance checks cover all seven System Image resource classes under `/resources`, all seven DATA resource classes under `/usr/share`, System Image configuration under `/config`, provider configuration under `/etc` and `/data/system/config`, System Image libraries under `/lib/luna`, DATA libraries under both `/usr/lib` and `/usr/local/lib`, a DATA application materialized in `/usr/bin`, the DATA musl loader mapping, and the selected user's persistent home mapping.
+
+The complete provider matrix was then exercised:
+
+```text
+normal configured DATA       -> logical-root contract -> READY
+exact configured DATA        -> logical-root contract -> READY
+external-disk DATA           -> logical-root contract -> READY
+missing DATA                 -> Recovery DATA -> logical-root contract -> READY
+ambiguous DATA               -> Recovery DATA -> logical-root contract -> READY
+stale configured DATA        -> Recovery DATA -> logical-root contract -> READY
+```
+
+This closes the current boot/provider experiment: the same real `luna-init` and System Image contract work across physical DATA on the System disk, physical DATA on another disk, and VirtualData supplied by Recovery, while stale or ambiguous persistent identity fails closed.

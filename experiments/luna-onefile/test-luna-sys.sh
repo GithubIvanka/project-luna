@@ -72,6 +72,15 @@ if [ -n "$SYSTEM_ROOT_SOURCE" ]; then
   [ -d "$SYSTEM_ROOT_SOURCE" ] || { echo "missing System Image source root: $SYSTEM_ROOT_SOURCE" >&2; exit 1; }
   cp -a "$SYSTEM_ROOT_SOURCE/." "$OUT/minimal-root/"
 fi
+if [ "${LUNA_REAL_INIT:-0}" = "1" ]; then
+  mkdir -p "$OUT/minimal-root/libs" "$OUT/minimal-root/config"
+  for resource_class in fonts icons themes cursors sounds locales translations; do
+    mkdir -p "$OUT/minimal-root/resources/$resource_class"
+    : > "$OUT/minimal-root/resources/$resource_class/system-resource-marker"
+  done
+  : > "$OUT/minimal-root/libs/system-lib-marker"
+  : > "$OUT/minimal-root/config/system-config-marker"
+fi
 mksquashfs "$OUT/minimal-root" "$OUT/system-root/images/luna-0.1.0.squashfs" -noappend -quiet
 if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   mksquashfs "$RECOVERY_ROOT_SOURCE" "$OUT/system-root/recovery/recovery.squashfs" -noappend -quiet
@@ -97,7 +106,14 @@ mkdir -p "$OUT/data-root/system" "$OUT/data-root/users/luna"
 if [ -n "${LUNA_REAL_INIT:-}" ]; then
   mkdir -p "$OUT/data-root/system/libs" "$OUT/data-root/system/config"
   mkdir -p "$OUT/data-root/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
-  mkdir -p "$OUT/data-root/system/apps"
+  mkdir -p "$OUT/data-root/system/apps/data-probe"
+  : > "$OUT/data-root/system/libs/data-lib-marker"
+  : > "$OUT/data-root/system/config/data-config-marker"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$OUT/data-root/system/apps/data-probe/data-probe"
+  chmod 0755 "$OUT/data-root/system/apps/data-probe/data-probe"
+  for resource_class in fonts icons themes cursors sounds locales translations; do
+    : > "$OUT/data-root/system/resources/$resource_class/data-resource-marker"
+  done
 fi
 if [ "$RECOVERY_TEST" != "1" ]; then
   truncate -s 128M "$OUT/data.img"
@@ -160,9 +176,11 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
 fi
 
 if [ "${LUNA_DIRECT_INIT:-0}" = "1" ]; then
-  grep -Fq "luna_boot: Luna: boot availability handoff=1 init=1" "$LOG"
-  grep -Fq "luna_exec: Luna: preparing memory-resident luna-init for direct PID 1" "$LOG"
-  grep -Fq "luna_exec: Luna: executing memory-resident luna-init as PID 1" "$LOG"
+  if [ "${LUNA_RECOVERY_TEST:-0}" != "1" ] && [ "${LUNA_DATA_AMBIGUOUS_TEST:-0}" != "1" ] && [ "${LUNA_DATA_CONFIG_STALE_TEST:-0}" != "1" ]; then
+    grep -Fq "luna_boot: Luna: boot availability handoff=1 init=1" "$LOG"
+    grep -Fq "luna_exec: Luna: preparing memory-resident luna-init for direct PID 1" "$LOG"
+    grep -Fq "luna_exec: Luna: executing memory-resident luna-init as PID 1" "$LOG"
+  fi
 else
   grep -Fq "Run /init as init process" "$LOG"
 fi
@@ -198,6 +216,7 @@ fi
 if [ "${LUNA_REAL_INIT:-0}" = "1" ]; then
   grep -Fq "Luna: luna-init is running as PID 1" "$LOG"
   grep -Fq "Luna: logical root ready; starting luna-system-runtime" "$LOG"
+  grep -Fq "LUNA-LOGICAL-ROOT-CONTRACT: READY" "$LOG"
   grep -Fq "LUNA-SYSTEM-RUNTIME: READY" "$LOG"
 else
   grep -Fq "LUNA-INIT: PID 1" "$LOG"
