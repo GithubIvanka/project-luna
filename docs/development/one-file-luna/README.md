@@ -180,3 +180,17 @@ The first real-init run exposed two useful fixture/kernel dependencies rather th
 Acceptance is exposed by `experiments/luna-onefile/test-real-init.sh`; the reproducible kernel builder is `experiments/luna-onefile/build-real-init.sh`.
 
 This closes the experiment's critical boundary: the real Luna PID 1 can be delivered from LUNA-SYS directly by the Luna handoff ABI and can establish the Luna logical root without an embedded initramfs or a second init process. The next work should focus on validating the full System Image/LUNA-DATA contract rather than changing the direct PID 1 mechanism.
+
+## Stage 1.4 result — 2026-10-07
+
+The missing-DATA recovery path was validated with the same real `luna-init` and direct-init kernel.
+
+For the acceptance fixture, the physical `LUNA-DATA` partition is intentionally absent. `luna-boot.efi` detects that DATA is unavailable and automatically switches the normal boot selection to the Recovery target. Recovery keeps the ordinary System Image + `luna-init` + kernel and adds the singleton Recovery DATA Image.
+
+Verified path:
+
+UEFI/OVMF -> `luna-boot.efi` -> DATA unavailable -> Recovery target -> direct real `luna-init` as PID 1 -> Recovery DATA Image mounted into VirtualData -> logical root -> `luna-system-runtime`
+
+The runtime emitted `LUNA-RECOVERY-DATA: READY`, confirming that Recovery DATA content was materialized into the logical runtime namespace. The normal real-init acceptance was rerun afterward and remained green.
+
+This proves the intended split of responsibility: `luna-boot.efi` owns DATA availability policy and target fallback, while `luna-init` owns the selected physical or VirtualData provider materialization. No separate Recovery System Image and no initramfs are required.

@@ -7,6 +7,8 @@ IMAGE="${LUNA_ONEFILE_REAL_IMAGE:-$ROOT/out/luna-real-init.efi}"
 INIT="${LUNA_ONEFILE_REAL_INIT:-$ROOT/out/luna-real-init.init}"
 OUT="${LUNA_ONEFILE_REAL_TEST_OUT:-$ROOT/out/luna-real-init-test}"
 SYSROOT="${LUNA_ONEFILE_REAL_SYSTEM_ROOT:-/tmp/luna-real-init-system-root-$$}"
+RECOVERY_TEST="${LUNA_RECOVERY_TEST:-0}"
+RECOVERY_ROOT="${LUNA_ONEFILE_REAL_RECOVERY_ROOT:-/tmp/luna-recovery-data-root-$$}"
 
 [ -f "$IMAGE" ] || { echo "missing real-init kernel: $IMAGE" >&2; exit 1; }
 [ -f "$INIT" ] || { echo "missing real luna-init: $INIT" >&2; exit 1; }
@@ -21,6 +23,9 @@ cat > "$SYSROOT/runtime.rs" <<'EOF_RUNTIME'
 use std::{thread, time::Duration};
 
 fn main() -> ! {
+    if std::path::Path::new("/usr/bin/recovery-tools").is_file() {
+        println!("LUNA-RECOVERY-DATA: READY");
+    }
     println!("LUNA-SYSTEM-RUNTIME: READY");
     loop {
         thread::sleep(Duration::from_secs(60));
@@ -48,12 +53,25 @@ printf '%s\n' "passwd: files" "group: files" "shadow: files" "gshadow: files" "h
 chmod 0644 "$SYSROOT/config/passwd" "$SYSROOT/config/group" "$SYSROOT/config/nsswitch.conf"
 chmod 0600 "$SYSROOT/config/shadow"
 
-trap 'rm -rf "$SYSROOT"' EXIT
+if [ "$RECOVERY_TEST" = "1" ]; then
+  rm -rf "$RECOVERY_ROOT"
+  mkdir -p "$RECOVERY_ROOT/system"/{apps,libs,config,resources}
+  mkdir -p "$RECOVERY_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
+  mkdir -p "$RECOVERY_ROOT/system/apps/recovery-tools"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$RECOVERY_ROOT/system/apps/recovery-tools/recovery-tools"
+  chmod 0755 "$RECOVERY_ROOT/system/apps/recovery-tools/recovery-tools"
+  trap 'rm -rf "$SYSROOT" "$RECOVERY_ROOT"' EXIT
+else
+  trap 'rm -rf "$SYSROOT"' EXIT
+fi
 
 export LUNA_ONEFILE_IMAGE="$IMAGE"
 export LUNA_ONEFILE_INIT="$INIT"
 export LUNA_ONEFILE_SYSTEM_ROOT="$SYSROOT"
 export LUNA_ONEFILE_DISK_TEST_OUT="$OUT"
+if [ "$RECOVERY_TEST" = "1" ]; then
+  export LUNA_ONEFILE_RECOVERY_ROOT="$RECOVERY_ROOT"
+fi
 export LUNA_DIRECT_INIT=1
 export LUNA_REAL_INIT=1
 
