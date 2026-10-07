@@ -194,3 +194,11 @@ UEFI/OVMF -> `luna-boot.efi` -> DATA unavailable -> Recovery target -> direct re
 The runtime emitted `LUNA-RECOVERY-DATA: READY`, confirming that Recovery DATA content was materialized into the logical runtime namespace. The normal real-init acceptance was rerun afterward and remained green.
 
 This proves the intended split of responsibility: `luna-boot.efi` owns DATA availability policy and target fallback, while `luna-init` owns the selected physical or VirtualData provider materialization. No separate Recovery System Image and no initramfs are required.
+
+## Stage 1.5 result — 2026-10-07
+
+The ambiguous-DATA safety path was validated. The fixture contains two valid GPT partitions named `LUNA-DATA`, with distinct partition GUIDs and no configured GUID pair selecting either one.
+
+`luna-boot.efi` reports DATA as unavailable for normal selection because the provider is ambiguous and automatically switches to the Recovery target. The same real `luna-init` then mounts the Recovery DATA Image, materializes its `recovery-tools` provider into the logical namespace, and reaches `LUNA-SYSTEM-RUNTIME: READY` without mounting either ambiguous physical DATA partition.
+
+This closes both normal DATA safety branches currently exercised by the one-file experiment: missing DATA and ambiguous DATA both fail closed into Recovery rather than silently selecting an arbitrary provider.
