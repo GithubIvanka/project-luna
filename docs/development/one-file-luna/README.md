@@ -202,3 +202,15 @@ The ambiguous-DATA safety path was validated. The fixture contains two valid GPT
 `luna-boot.efi` reports DATA as unavailable for normal selection because the provider is ambiguous and automatically switches to the Recovery target. The same real `luna-init` then mounts the Recovery DATA Image, materializes its `recovery-tools` provider into the logical namespace, and reaches `LUNA-SYSTEM-RUNTIME: READY` without mounting either ambiguous physical DATA partition.
 
 This closes both normal DATA safety branches currently exercised by the one-file experiment: missing DATA and ambiguous DATA both fail closed into Recovery rather than silently selecting an arbitrary provider.
+
+## Stage 1.6 result — 2026-10-07
+
+The positive configured-DATA selection path was validated. The fixture contains two valid `LUNA-DATA` partitions, but `LUNA-SYS/config/luna-data.toml` contains an exact disk GUID + partition GUID pair for the first DATA target.
+
+`luna-boot.efi` resolves the configured pair before generic candidate discovery and selects the configured partition even though another valid `LUNA-DATA` is present. The real `luna-init` receives `mode=0`, mounts `/dev/sda3`, prepares the logical root and starts `luna-system-runtime`.
+
+Verified path:
+
+UEFI/OVMF -> configured GUID pair -> selected physical LUNA-DATA `/dev/sda3` -> real `luna-init` PID 1 -> logical root -> `luna-system-runtime`
+
+The one-file experiment now exercises all three DATA selection outcomes: an exact configured match is accepted, no valid provider is treated as missing and enters Recovery, and multiple unconfigured providers are treated as ambiguous and enter Recovery.

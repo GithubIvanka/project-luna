@@ -9,6 +9,7 @@ OUT="${LUNA_ONEFILE_REAL_TEST_OUT:-$ROOT/out/luna-real-init-test}"
 SYSROOT="${LUNA_ONEFILE_REAL_SYSTEM_ROOT:-/tmp/luna-real-init-system-root-$$}"
 RECOVERY_TEST="${LUNA_RECOVERY_TEST:-0}"
 DATA_AMBIGUOUS_TEST="${LUNA_DATA_AMBIGUOUS_TEST:-0}"
+DATA_CONFIG_TEST="${LUNA_DATA_CONFIG_TEST:-0}"
 RECOVERY_ROOT="${LUNA_ONEFILE_REAL_RECOVERY_ROOT:-/tmp/luna-recovery-data-root-$$}"
 
 [ -f "$IMAGE" ] || { echo "missing real-init kernel: $IMAGE" >&2; exit 1; }
@@ -75,6 +76,9 @@ if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
 fi
 if [ "$DATA_AMBIGUOUS_TEST" = "1" ]; then
   export LUNA_DATA_AMBIGUOUS_TEST=1
+fi
+if [ "$DATA_CONFIG_TEST" = "1" ]; then
+  export LUNA_DATA_CONFIG_TEST=1
 fi
 export LUNA_DIRECT_INIT=1
 export LUNA_REAL_INIT=1
