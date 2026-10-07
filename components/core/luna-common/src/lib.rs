@@ -9,6 +9,7 @@ mod access;
 mod id;
 mod profile;
 mod runtime;
+mod storage;
 mod user;
 mod version;
 
@@ -16,5 +17,8 @@ pub use access::ResourceAccess;
 pub use id::{BundleId, ComponentId};
 pub use profile::{ProfileError, RuntimeProfile};
 pub use runtime::{ParseRuntimeKindError, RuntimeKind, RuntimeSpec};
+pub use storage::{
+    DriveLetter, DriveLetterError, VolumeId, VolumePath, VolumePathError, VolumeRef, VolumeRole,
+};
 pub use user::UserId;
 pub use version::Version;
