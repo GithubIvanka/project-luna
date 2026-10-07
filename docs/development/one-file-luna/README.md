@@ -214,3 +214,15 @@ Verified path:
 UEFI/OVMF -> configured GUID pair -> selected physical LUNA-DATA `/dev/sda3` -> real `luna-init` PID 1 -> logical root -> `luna-system-runtime`
 
 The one-file experiment now exercises all three DATA selection outcomes: an exact configured match is accepted, no valid provider is treated as missing and enters Recovery, and multiple unconfigured providers are treated as ambiguous and enter Recovery.
+
+## Stage 1.7 result — 2026-10-07
+
+The cross-disk DATA binding path was validated. The fixture places EFI and `LUNA-SYS` on the first virtual disk and places the only physical `LUNA-DATA` partition on a second virtual disk. `LUNA-SYS/config/luna-data.toml` stores the second disk GUID and DATA partition GUID.
+
+`luna-boot.efi` discovers the configured DATA provider across all available block devices rather than restricting discovery to the System disk. The handoff carries the selected partition GUID to the kernel, and the real `luna-init` resolves that GUID independently through `/sys/block` and mounts the external provider as `/dev/sdb1`.
+
+Verified path:
+
+UEFI/OVMF -> Disk A EFI + LUNA-SYS -> configured external Disk B LUNA-DATA -> real `luna-init` PID 1 -> Btrfs `/dev/sdb1` -> logical root -> `luna-system-runtime`
+
+This proves the intended physical separation invariant: EFI and LUNA-SYS remain bound to one disk, while LUNA-DATA may live on another physical disk without introducing a second boot stack or changing the direct PID 1 mechanism.
