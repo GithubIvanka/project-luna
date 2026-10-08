@@ -49,5 +49,18 @@ materialization mount instances.
 ## Статус
 
 Базовые device/volume types и query boundary существуют. Dynamic letter registry
-существует как prototype. Полный hotplug discovery, persistent registry, secure
-mount/eject backend и production `Volumes` API ещё не завершены.
+и durable volume preferences реализованы как рабочий prototype.
+
+Persistent registry хранит только пользовательские preferences:
+
+```text
+LUNA-DATA/system/volumes/volume-registry.toml
+```
+
+Текущие assignments `C:`/`D:`...`Z:` не восстанавливаются из файла как runtime
+state; после загрузки preferences они пересчитываются при attach. Доступно также
+обратное разрешение `DriveLetter -> VolumeRef`, поэтому Windows System for Luna
+может использовать тот же storage identity.
+
+Полный block-volume hotplug discovery, secure mount/eject backend и production
+`Volumes` IPC/API ещё не завершены.

@@ -6,7 +6,10 @@ use std::path::Path;
 
 pub use luna_common::{DriveLetter, DriveLetterError, VolumeId, VolumeRef, VolumeRole};
 
+mod persistence;
 mod uevent;
+
+pub use persistence::{VOLUME_REGISTRY_VERSION, VolumeRegistryError};
 pub use uevent::{Uevent, UeventMonitor};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -77,6 +80,7 @@ pub struct VolumeRegistry {
     active: BTreeMap<VolumeId, DriveLetter>,
     by_letter: BTreeMap<DriveLetter, VolumeId>,
     labels: BTreeMap<VolumeId, String>,
+    native_names: BTreeMap<VolumeId, String>,
     preferred: BTreeMap<VolumeId, DriveLetter>,
     roles: BTreeMap<VolumeId, VolumeRole>,
 }
@@ -96,7 +100,9 @@ impl std::fmt::Display for VolumeAssignmentError {
             Self::NoExternalLettersAvailable => "no external drive letters are available",
             Self::InvalidPreferredLetter => "preferred drive letter must be D through Z",
             Self::LetterAlreadyAssigned => "drive letter is already assigned",
-            Self::CannotReassignReservedVolume => "reserved volume cannot be assigned a drive letter",
+            Self::CannotReassignReservedVolume => {
+                "reserved volume cannot be assigned a drive letter"
+            }
             Self::VolumeNotActive => "volume is not actively assigned",
         };
         f.write_str(message)
@@ -110,16 +116,20 @@ impl VolumeRegistry {
         Self::default()
     }
 
-    pub fn set_label(
-        &mut self,
-        volume: &VolumeId,
-        label: impl Into<String>,
-    ) {
+    pub fn set_label(&mut self, volume: &VolumeId, label: impl Into<String>) {
         self.labels.insert(volume.clone(), label.into());
     }
 
     pub fn label(&self, volume: &VolumeId) -> Option<&str> {
         self.labels.get(volume).map(String::as_str)
+    }
+
+    pub fn set_native_name(&mut self, volume: &VolumeId, native_name: impl Into<String>) {
+        self.native_names.insert(volume.clone(), native_name.into());
+    }
+
+    pub fn native_name(&self, volume: &VolumeId) -> Option<&str> {
+        self.native_names.get(volume).map(String::as_str)
     }
 
     pub fn set_preferred(
@@ -142,7 +152,10 @@ impl VolumeRegistry {
         self.preferred.get(volume).copied()
     }
 
-    pub fn assign(&mut self, volume: &VolumeInfo) -> Result<Option<DriveLetter>, VolumeAssignmentError> {
+    pub fn assign(
+        &mut self,
+        volume: &VolumeInfo,
+    ) -> Result<Option<DriveLetter>, VolumeAssignmentError> {
         if let Some(letter) = self.active.get(volume.id()).copied() {
             return Ok(Some(letter));
         }
@@ -162,17 +175,21 @@ impl VolumeRegistry {
             | VolumeRole::Swap
             | VolumeRole::RecoveryVirtual => Ok(None),
             VolumeRole::External => {
-                let letter = self.preferred(volume.id()).and_then(|preferred| {
-                    if !self.by_letter.contains_key(&preferred) {
-                        Some(preferred)
-                    } else {
-                        None
-                    }
-                }).or_else(|| {
-                    ('D'..='Z')
-                        .map(|value| DriveLetter::new(value).expect("ASCII letter"))
-                        .find(|candidate| !self.by_letter.contains_key(candidate))
-                }).ok_or(VolumeAssignmentError::NoExternalLettersAvailable)?;
+                let letter = self
+                    .preferred(volume.id())
+                    .and_then(|preferred| {
+                        if !self.by_letter.contains_key(&preferred) {
+                            Some(preferred)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        ('D'..='Z')
+                            .map(|value| DriveLetter::new(value).expect("ASCII letter"))
+                            .find(|candidate| !self.by_letter.contains_key(candidate))
+                    })
+                    .ok_or(VolumeAssignmentError::NoExternalLettersAvailable)?;
 
                 self.active.insert(volume.id().clone(), letter);
                 self.by_letter.insert(letter, volume.id().clone());
@@ -223,6 +240,10 @@ impl VolumeRegistry {
 
     pub fn volume_for_letter(&self, letter: DriveLetter) -> Option<&VolumeId> {
         self.by_letter.get(&letter)
+    }
+
+    pub fn volume_ref_for_letter(&self, letter: DriveLetter) -> Option<VolumeRef> {
+        self.volume_for_letter(letter).cloned().map(VolumeRef::new)
     }
 
     pub fn active_assignments(&self) -> impl Iterator<Item = (&VolumeId, DriveLetter)> {
@@ -311,6 +332,27 @@ impl DeviceManager {
         &mut self.volume_registry
     }
 
+    pub fn load_volume_preferences(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), VolumeRegistryError> {
+        let mut registry = VolumeRegistry::load_preferences(path)?;
+        for volume in self.volumes.values() {
+            registry
+                .assign(volume)
+                .map_err(VolumeRegistryError::Assignment)?;
+        }
+        self.volume_registry = registry;
+        Ok(())
+    }
+
+    pub fn save_volume_preferences(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), VolumeRegistryError> {
+        self.volume_registry.save_preferences(path)
+    }
+
     pub fn refresh_input_devices(&mut self) -> std::io::Result<()> {
         let root = Path::new("/sys/class/input");
         let mut devices = Vec::new();
@@ -337,8 +379,8 @@ pub trait DeviceQuery {
 #[cfg(test)]
 mod tests {
     use super::{
-        DeviceId, DeviceManager, DriveLetter, InputDeviceInfo, VolumeId, VolumeInfo, VolumeRegistry,
-        VolumeRole, VolumeState,
+        DeviceId, DeviceManager, DriveLetter, InputDeviceInfo, VolumeId, VolumeInfo, VolumeRef,
+        VolumeRegistry, VolumeRole, VolumeState,
     };
 
     #[test]
@@ -391,6 +433,10 @@ mod tests {
         let c = VolumeInfo::new(VolumeId::from("c"), Some("C".into()), VolumeState::Mounted);
         assert_eq!(registry.assign(&a).unwrap().unwrap().as_char(), 'D');
         assert_eq!(registry.assign(&b).unwrap().unwrap().as_char(), 'E');
+        assert_eq!(
+            registry.volume_ref_for_letter(DriveLetter::D),
+            Some(VolumeRef::new(a.id().clone()))
+        );
         assert_eq!(registry.release(a.id()).unwrap().as_char(), 'D');
         assert_eq!(registry.assign(&c).unwrap().unwrap().as_char(), 'D');
     }
@@ -399,10 +445,18 @@ mod tests {
     fn preferred_letter_is_optional_and_explicitly_user_controlled() {
         let mut registry = VolumeRegistry::new();
         let volume = VolumeId::from("backup");
-        registry.set_preferred(&volume, DriveLetter::new('H').unwrap()).unwrap();
+        registry
+            .set_preferred(&volume, DriveLetter::new('H').unwrap())
+            .unwrap();
         let info = VolumeInfo::new(volume.clone(), Some("Backup".into()), VolumeState::Mounted);
-        assert_eq!(registry.assign(&info).unwrap(), Some(DriveLetter::new('H').unwrap()));
-        assert_eq!(registry.preferred(&volume), Some(DriveLetter::new('H').unwrap()));
+        assert_eq!(
+            registry.assign(&info).unwrap(),
+            Some(DriveLetter::new('H').unwrap())
+        );
+        assert_eq!(
+            registry.preferred(&volume),
+            Some(DriveLetter::new('H').unwrap())
+        );
         registry.clear_preferred(&volume);
         assert_eq!(registry.preferred(&volume), None);
     }
@@ -435,6 +489,40 @@ mod tests {
     fn device_manager_starts_with_empty_registry() {
         let manager = DeviceManager::new();
         assert!(manager.input_devices().is_empty());
+    }
+
+    #[test]
+    fn device_manager_restores_persisted_preference_before_attach() {
+        let path = std::env::temp_dir().join(format!(
+            "luna-device-manager-{}-preferences.toml",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let volume = VolumeId::from("partition-guid:work");
+        let mut preferences = VolumeRegistry::new();
+        preferences.set_label(&volume, "Work");
+        preferences.set_native_name(&volume, "work");
+        preferences
+            .set_preferred(&volume, DriveLetter::new('H').unwrap())
+            .unwrap();
+        preferences.save_preferences(&path).unwrap();
+
+        let mut manager = DeviceManager::new();
+        manager.load_volume_preferences(&path).unwrap();
+        let info = VolumeInfo::new(volume.clone(), Some("Work".into()), VolumeState::Detected);
+        assert_eq!(
+            manager.register_volume(info).unwrap(),
+            Some(DriveLetter::new('H').unwrap())
+        );
+        assert_eq!(
+            manager
+                .volume_registry()
+                .volume_ref_for_letter(DriveLetter::new('H').unwrap()),
+            Some(VolumeRef::new(volume))
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
