@@ -92,8 +92,12 @@ Linux mountpoint.
 реализован prototype `VolumeMountResolver` / `VolumeMountManager` с
 `MountInstance` lifecycle и отдельным namespace-local filesystem mount.
 
-Production integration с авторизованным `MappingPlan`, secure eject/unmount
-policy, provider IPC и privileged runtime environment продолжается.
+`luna-app-runtime` уже предоставляет адаптер `DeviceVolumeResolver`, который связывает
+реальный `DeviceManager` с `VolumeMountResolver`. Авторизация Volume mapping выполняется
+по `VolumeId`, поэтому concrete `/dev/...` path не участвует в application policy.
+
+Полная materialization Volume mappings внутри child mount namespace, secure eject/unmount
+policy, provider IPC и privileged runtime environment продолжаются.
 
 Прямой privileged mount smoke-test зависит от возможности процесса создавать
 новый mount namespace; unit tests не требуют этих host capabilities.

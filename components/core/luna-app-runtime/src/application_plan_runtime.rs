@@ -6,12 +6,17 @@
 //! a profile-driven logical root in a private mount namespace, installs
 //! filesystem enforcement, and registers the supervised process.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use luna_common::RuntimeProfile;
-use luna_namespace::{LinuxMountNamespace, materialize_profiled_logical_root};
-use luna_root_mapping::{LogicalPath, MappingKind};
+use luna_common::{RuntimeProfile, VolumeId, VolumeRef};
+use luna_device_manager::DeviceManager;
+use luna_namespace::{
+    LinuxMountNamespace, MountInstance, NamespaceError, ResolvedVolume, VolumeMountManager,
+    VolumeMountResolver, materialize_profiled_logical_root,
+};
+use luna_root_mapping::{LogicalPath, MappingKind, MappingSource, MappingTable};
 use luna_security::{CapabilityName, CapabilityRegistry};
 use luna_system_runtime::SystemRuntimeService;
 use luna_user_session::UserSession;
@@ -21,6 +26,102 @@ use crate::{
     ApplicationInstance, ApplicationInstanceId, FailureStage, InMemoryApplicationRuntime,
     InstanceState, LinuxApplicationRuntime, RuntimeError,
 };
+
+/// Adapts the system-owned Device Manager backend into the namespace mount
+/// resolver. The application-facing API still uses only VolumeRef and paths.
+pub struct DeviceVolumeResolver<'a> {
+    manager: &'a DeviceManager,
+}
+
+impl<'a> DeviceVolumeResolver<'a> {
+    pub fn new(manager: &'a DeviceManager) -> Self {
+        Self { manager }
+    }
+
+    pub fn snapshot_for_mapping(
+        &self,
+        mapping: &MappingTable,
+    ) -> Result<StaticDeviceVolumeResolver, NamespaceError> {
+        StaticDeviceVolumeResolver::from_mapping(self.manager, mapping)
+    }
+}
+
+impl VolumeMountResolver for DeviceVolumeResolver<'_> {
+    fn resolve_volume(
+        &self,
+        volume: &luna_common::VolumeRef,
+    ) -> Result<ResolvedVolume, NamespaceError> {
+        let backend = self
+            .manager
+            .volume_backend(volume)
+            .map_err(|error| NamespaceError::FilesystemAccess(error.to_string()))?;
+        Ok(ResolvedVolume::new(
+            backend.volume().clone(),
+            backend.backend_node().to_path_buf(),
+            backend.filesystem().to_owned(),
+            backend.read_only(),
+        ))
+    }
+}
+
+/// An owned resolver snapshot safe to move into a forked child before exec.
+///
+/// The snapshot deliberately contains only backend details for VolumeRefs that
+/// are actually present in one mapping table; it carries no drive-letter state.
+#[derive(Clone, Debug, Default)]
+pub struct StaticDeviceVolumeResolver {
+    volumes: BTreeMap<VolumeId, ResolvedVolume>,
+}
+
+impl StaticDeviceVolumeResolver {
+    pub fn from_mapping(
+        manager: &DeviceManager,
+        mapping: &MappingTable,
+    ) -> Result<Self, NamespaceError> {
+        let mut volumes = BTreeMap::new();
+        for rule in mapping.iter() {
+            let MappingSource::Volume(path) = rule.source() else {
+                continue;
+            };
+            let volume = path.volume();
+            if volumes.contains_key(volume.id()) {
+                continue;
+            }
+            let backend = manager
+                .volume_backend(volume)
+                .map_err(|error| NamespaceError::FilesystemAccess(error.to_string()))?;
+            volumes.insert(
+                volume.id().clone(),
+                ResolvedVolume::new(
+                    backend.volume().clone(),
+                    backend.backend_node().to_path_buf(),
+                    backend.filesystem().to_owned(),
+                    backend.read_only(),
+                ),
+            );
+        }
+        Ok(Self { volumes })
+    }
+
+    pub fn len(&self) -> usize {
+        self.volumes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.volumes.is_empty()
+    }
+}
+
+impl VolumeMountResolver for StaticDeviceVolumeResolver {
+    fn resolve_volume(&self, volume: &VolumeRef) -> Result<ResolvedVolume, NamespaceError> {
+        self.volumes.get(volume.id()).cloned().ok_or_else(|| {
+            NamespaceError::FilesystemAccess(format!(
+                "volume {} is missing from resolver snapshot",
+                volume.id()
+            ))
+        })
+    }
+}
 
 /// Immutable execution environment selected by the system runtime for one
 /// application launch.
@@ -33,6 +134,7 @@ pub struct ApplicationLaunchContext {
     base_root: PathBuf,
     staging_parent: PathBuf,
     trusted_source_roots: Vec<PathBuf>,
+    volume_resolver: Option<StaticDeviceVolumeResolver>,
 }
 
 impl ApplicationLaunchContext {
@@ -46,7 +148,18 @@ impl ApplicationLaunchContext {
             base_root: base_root.into(),
             staging_parent: staging_parent.into(),
             trusted_source_roots: Vec::new(),
+            volume_resolver: None,
         }
+    }
+
+    /// Attach an owned Device Manager snapshot for Volume mapping materialization.
+    pub fn with_volume_resolver(mut self, resolver: StaticDeviceVolumeResolver) -> Self {
+        self.volume_resolver = Some(resolver);
+        self
+    }
+
+    pub fn volume_resolver(&self) -> Option<&StaticDeviceVolumeResolver> {
+        self.volume_resolver.as_ref()
     }
 
     /// Add a system-selected physical source root from which application
@@ -230,6 +343,18 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             RuntimeError::InvalidExecutable(plan.value().executable().path().display().to_string())
         })?;
 
+        let mapping = plan.value().mapping().clone();
+        let volume_resolver = context.volume_resolver().cloned();
+        if mapping
+            .iter()
+            .any(|rule| matches!(rule.source(), MappingSource::Volume(_)))
+            && volume_resolver.is_none()
+        {
+            return Err(RuntimeError::Security(
+                "Volume mapping requires a Device Manager resolver snapshot".into(),
+            ));
+        }
+
         let id = self.model.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
             id,
@@ -251,7 +376,6 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
             }
         };
 
-        let mapping = plan.value().mapping().clone();
         let base_root = context.base_root().to_path_buf();
         let trusted_source_roots = context.trusted_source_roots().to_vec();
         let root_for_child = staging.path().to_path_buf();
@@ -269,6 +393,19 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 &profile,
             )
             .map_err(|error| std::io::Error::other(error.to_string()))?;
+
+            if let Some(resolver) = volume_resolver.as_ref() {
+                let mut volume_mounts = VolumeMountManager::new();
+                materialize_volume_mappings(
+                    &mut volume_mounts,
+                    &namespace,
+                    resolver,
+                    logical.path(),
+                    &mapping,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            }
+
             namespace
                 .enter_logical_root(&logical)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
@@ -314,6 +451,36 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         self.roots.insert(process, root);
         Ok(id)
     }
+}
+
+#[cfg(unix)]
+fn materialize_volume_mappings(
+    mounts: &mut VolumeMountManager,
+    namespace: &LinuxMountNamespace,
+    resolver: &impl VolumeMountResolver,
+    root: &Path,
+    mapping: &MappingTable,
+) -> Result<Vec<MountInstance>, NamespaceError> {
+    let mut instances = Vec::new();
+    for rule in mapping.iter() {
+        let MappingSource::Volume(path) = rule.source() else {
+            continue;
+        };
+        if rule.kind() != MappingKind::Subtree {
+            return Err(NamespaceError::FilesystemAccess(format!(
+                "Volume mapping must use subtree kind: {}",
+                rule.logical()
+            )));
+        }
+        instances.push(mounts.mount_volume(
+            namespace,
+            resolver,
+            root,
+            rule.logical().as_path(),
+            path,
+        )?);
+    }
+    Ok(instances)
 }
 
 #[cfg(unix)]
@@ -369,7 +536,7 @@ fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), Runtime
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationLaunchContext, PendingStagingRoot};
+    use super::{ApplicationLaunchContext, DeviceVolumeResolver, PendingStagingRoot};
     use crate::{ApplicationInstanceId, RuntimeError};
     use luna_namespace::LinuxMountNamespace;
     use std::path::Path;
@@ -480,6 +647,32 @@ mod tests {
         )
         .with_trusted_source_root(Path::new("/luna/data/apps"));
         assert!(context.validate().is_ok());
+    }
+
+    #[test]
+    fn device_volume_resolver_adapts_device_manager_backend() {
+        let volume = luna_device_manager::VolumeInfo::discovered(
+            luna_common::VolumeId::from("partition-guid:usb"),
+            Some("USB".into()),
+            "usb".into(),
+            Some("ext4".into()),
+            luna_common::VolumeRole::External,
+            luna_device_manager::VolumeState::Available,
+            "/dev/null".into(),
+        );
+        let id = volume.id().clone();
+        let mut manager = luna_device_manager::DeviceManager::new();
+        manager.register_volume(volume).unwrap();
+
+        let resolver = DeviceVolumeResolver::new(&manager);
+        let resolved = luna_namespace::VolumeMountResolver::resolve_volume(
+            &resolver,
+            &luna_common::VolumeRef::new(id.clone()),
+        )
+        .unwrap();
+        assert_eq!(resolved.volume().id(), &id);
+        assert_eq!(resolved.backend_node(), Path::new("/dev/null"));
+        assert_eq!(resolved.filesystem(), "ext4");
     }
 
     #[test]

@@ -67,12 +67,12 @@ pub fn materialize_profiled_logical_root(
     }
 
     for rule in mappings.iter().filter(|rule| !rule.access().is_empty()) {
+        // Volume mappings are materialized separately by VolumeMountManager.
+        // Only physical mappings belong to this profile's secure bind phase.
+        let Some(physical) = rule.physical() else {
+            continue;
+        };
         let logical_path = root.join(rule.logical().as_str().trim_start_matches('/'));
-        let physical = rule.physical().ok_or_else(|| {
-            NamespaceError::FilesystemAccess(
-                "Volume mapping requires a storage-aware namespace resolver".to_owned(),
-            )
-        })?;
         let adjusted = match rule.kind() {
             MappingKind::File => MappingRule::file(
                 LogicalPath::new(logical_path).map_err(|_| NamespaceError::InvalidPath)?,

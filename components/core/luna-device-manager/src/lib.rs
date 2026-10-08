@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use luna_common::{DriveLetter, DriveLetterError, VolumeId, VolumeRef, VolumeRole};
 
@@ -43,6 +43,34 @@ pub struct VolumeInfo {
     state: VolumeState,
     role: VolumeRole,
     backend_node: String,
+}
+
+/// Backend-only information needed when a VolumeRef is materialized into a
+/// Linux mount. Applications never receive this object directly.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VolumeBackend {
+    volume: VolumeRef,
+    backend_node: PathBuf,
+    filesystem: String,
+    read_only: bool,
+}
+
+impl VolumeBackend {
+    pub fn volume(&self) -> &VolumeRef {
+        &self.volume
+    }
+
+    pub fn backend_node(&self) -> &Path {
+        &self.backend_node
+    }
+
+    pub fn filesystem(&self) -> &str {
+        &self.filesystem
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
 }
 
 impl VolumeInfo {
@@ -168,6 +196,42 @@ impl std::fmt::Display for VolumeAssignmentError {
 }
 
 impl std::error::Error for VolumeAssignmentError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VolumeBackendError {
+    UnknownVolume(VolumeId),
+    Unavailable {
+        volume: VolumeId,
+        state: VolumeState,
+    },
+    NonMountableRole {
+        volume: VolumeId,
+        role: VolumeRole,
+    },
+    MissingFilesystem(VolumeId),
+    MissingBackendNode(VolumeId),
+}
+
+impl std::fmt::Display for VolumeBackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownVolume(id) => write!(f, "unknown volume {id}"),
+            Self::Unavailable { volume, state } => {
+                write!(
+                    f,
+                    "volume {volume} is not available for mounting: {state:?}"
+                )
+            }
+            Self::NonMountableRole { volume, role } => {
+                write!(f, "volume {volume} has non-mountable role {role:?}")
+            }
+            Self::MissingFilesystem(id) => write!(f, "volume {id} has no filesystem type"),
+            Self::MissingBackendNode(id) => write!(f, "volume {id} has no backend node"),
+        }
+    }
+}
+
+impl std::error::Error for VolumeBackendError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VolumeSyncError {
@@ -440,6 +504,44 @@ impl DeviceManager {
         self.volumes.get(volume)
     }
 
+    /// Resolve a logical VolumeRef to backend mount information.
+    ///
+    /// This is a system/backend boundary: callers may use the result to
+    /// materialize a namespace, but the Volume API itself remains typed as
+    /// VolumeRef + relative path.
+    pub fn volume_backend(&self, volume: &VolumeRef) -> Result<VolumeBackend, VolumeBackendError> {
+        let info = self
+            .volume(volume.id())
+            .ok_or_else(|| VolumeBackendError::UnknownVolume(volume.id().clone()))?;
+
+        if !matches!(info.state(), VolumeState::Available | VolumeState::Mounted) {
+            return Err(VolumeBackendError::Unavailable {
+                volume: volume.id().clone(),
+                state: info.state(),
+            });
+        }
+        if !matches!(info.role(), VolumeRole::External | VolumeRole::LunaData) {
+            return Err(VolumeBackendError::NonMountableRole {
+                volume: volume.id().clone(),
+                role: info.role(),
+            });
+        }
+        let filesystem = info
+            .filesystem()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| VolumeBackendError::MissingFilesystem(volume.id().clone()))?;
+        if info.backend_node().is_empty() {
+            return Err(VolumeBackendError::MissingBackendNode(volume.id().clone()));
+        }
+
+        Ok(VolumeBackend {
+            volume: volume.clone(),
+            backend_node: PathBuf::from(info.backend_node()),
+            filesystem: filesystem.to_owned(),
+            read_only: false,
+        })
+    }
+
     pub fn volumes(&self) -> impl Iterator<Item = &VolumeInfo> {
         self.volumes.values()
     }
@@ -610,6 +712,7 @@ mod tests {
         DeviceId, DeviceManager, DriveLetter, InputDeviceInfo, VolumeId, VolumeInfo, VolumeRef,
         VolumeRegistry, VolumeRole, VolumeState,
     };
+    use std::path::Path;
 
     #[test]
     fn volume_identity_and_user_label_are_separate() {
@@ -751,6 +854,64 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn backend_resolution_exposes_only_mount_metadata_for_mountable_volumes() {
+        let volume = VolumeInfo::discovered(
+            VolumeId::from("partition-guid:usb"),
+            Some("USB".into()),
+            "usb".into(),
+            Some("ext4".into()),
+            VolumeRole::External,
+            VolumeState::Available,
+            "/dev/null".into(),
+        );
+        let id = volume.id().clone();
+        let mut manager = DeviceManager::new();
+        manager.register_volume(volume).unwrap();
+
+        let backend = manager.volume_backend(&VolumeRef::new(id.clone())).unwrap();
+        assert_eq!(backend.volume().id(), &id);
+        assert_eq!(backend.backend_node(), Path::new("/dev/null"));
+        assert_eq!(backend.filesystem(), "ext4");
+        assert!(!backend.read_only());
+    }
+
+    #[test]
+    fn backend_resolution_rejects_system_and_incomplete_volumes() {
+        let system = VolumeInfo::discovered(
+            VolumeId::from("partition-guid:system"),
+            Some("LUNA-SYS".into()),
+            "system".into(),
+            Some("ext4".into()),
+            VolumeRole::System,
+            VolumeState::Mounted,
+            "/dev/null".into(),
+        );
+        let missing_fs = VolumeInfo::discovered(
+            VolumeId::from("partition-guid:broken"),
+            None,
+            "broken".into(),
+            None,
+            VolumeRole::External,
+            VolumeState::Available,
+            "/dev/null".into(),
+        );
+        let system_id = system.id().clone();
+        let missing_id = missing_fs.id().clone();
+        let mut manager = DeviceManager::new();
+        manager.register_volume(system).unwrap();
+        manager.register_volume(missing_fs).unwrap();
+
+        assert!(matches!(
+            manager.volume_backend(&VolumeRef::new(system_id)),
+            Err(super::VolumeBackendError::NonMountableRole { .. })
+        ));
+        assert!(matches!(
+            manager.volume_backend(&VolumeRef::new(missing_id)),
+            Err(super::VolumeBackendError::MissingFilesystem(_))
+        ));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
-use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
+use luna_root_mapping::{LogicalPath, MappingError, MappingSource, MappingTable};
 use luna_security::{AuthorizationRequest, AuthorizationSource, Permission, Principal, Resource};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -152,7 +152,16 @@ impl ApplicationPlan {
         let mut requests = Vec::new();
 
         for resource in self.manifest.resources() {
-            let resource_id = Resource::FilesystemPath(resource.logical_path().to_owned());
+            let logical = match LogicalPath::new(resource.logical_path()) {
+                Ok(logical) => logical,
+                Err(_) => continue,
+            };
+            let resource_id = match self.mapping.resolve_source(&logical) {
+                Ok(MappingSource::Volume(path)) => {
+                    Resource::Volume(path.volume().id().as_str().to_owned())
+                }
+                _ => Resource::FilesystemPath(resource.logical_path().to_owned()),
+            };
             for access in resource.access() {
                 let permission = match access {
                     ResourceAccess::Read => Permission::Read,
@@ -456,6 +465,62 @@ mod tests {
     fn authorization_is_fail_closed() {
         let result = authorize_application_plan(plan(), &Deny);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn volume_mappings_authorize_volume_identity_instead_of_linux_paths() {
+        let mut mapping = MappingTable::new();
+        let volume =
+            luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:data"));
+        mapping
+            .insert(MappingRule::file(
+                LogicalPath::new("/bin/app").unwrap(),
+                PhysicalPath::new("/data/apps/example/bin/app"),
+            ))
+            .unwrap();
+        mapping
+            .insert(MappingRule::volume_subtree(
+                LogicalPath::new("/home/alice/Documents").unwrap(),
+                luna_common::VolumePath::new(volume.clone(), "/Documents").unwrap(),
+            ))
+            .unwrap();
+        let mut manifest = valid_manifest();
+        manifest.add_resource(
+            BundleResource::new("/home/alice/Documents/readme.txt", "Documents/readme.txt")
+                .with_access([ResourceAccess::Read]),
+        );
+        let plan = ApplicationPlan::new(
+            manifest,
+            mapping,
+            &active_session(),
+            RuntimeSpec::luna(),
+            ExecutableSpec::new("/bin/app"),
+            vec![],
+        )
+        .unwrap();
+
+        struct RecordingAllow {
+            seen: std::cell::RefCell<Vec<AuthorizationRequest>>,
+        }
+        impl PolicyAuthority for RecordingAllow {
+            fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
+                self.seen.borrow_mut().push(request.clone());
+                Ok(Decision::Allow)
+            }
+        }
+
+        let policy = RecordingAllow {
+            seen: std::cell::RefCell::new(Vec::new()),
+        };
+        authorize_application_plan(plan, &policy).unwrap();
+        let seen = policy.seen.borrow();
+        assert!(seen.iter().any(|request| {
+            request.resource == Resource::Volume("partition-guid:data".into())
+                && request.permission == Permission::Read
+        }));
+        assert!(!seen.iter().any(|request| {
+            request.resource == Resource::FilesystemPath("/home/alice/Documents/readme.txt".into())
+        }));
     }
 
     #[test]

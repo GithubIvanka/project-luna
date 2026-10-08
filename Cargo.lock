@@ -745,6 +745,7 @@ dependencies = [
  "libc",
  "luna-bundle",
  "luna-common",
+ "luna-device-manager",
  "luna-namespace",
  "luna-root-mapping",
  "luna-security",

@@ -8,7 +8,10 @@ pub use application_plan::{
     ApplicationPlan, AuthorizedApplicationPlan, ExecutableSpec, PlanError,
     authorize_application_plan,
 };
-pub use application_plan_runtime::{ApplicationLaunchContext, ApplicationPlanLauncher};
+pub use application_plan_runtime::{
+    ApplicationLaunchContext, ApplicationPlanLauncher, DeviceVolumeResolver,
+    StaticDeviceVolumeResolver,
+};
 pub use elf_closure::{
     ElfClass, ElfDependencyClosure, ElfDependencyNode, ElfDependencyResolver, ElfEndian, ElfError,
     ElfMachine, ElfMetadata, FilesystemElfResolver, TrustedElfSource, parse_elf,

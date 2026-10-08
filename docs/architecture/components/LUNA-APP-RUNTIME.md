@@ -65,6 +65,9 @@ process
 ```
 
 `luna-app-runtime` не принимает security decisions и не создаёт физические mappings самостоятельно.
+Для Volume mappings он переводит выбранный `VolumeRef` в security resource `VolumeId`,
+а backend resolution выполняется через `DeviceVolumeResolver` от системного
+`luna-device-manager`.
 
 ## RuntimeSpec и libc
 
@@ -120,4 +123,7 @@ Stopping → Failed
 
 ## Статус
 
-Домен `ApplicationInstance`, планирование, authorization pipeline и базовый Linux runtime backend реализованы; полная production integration и kernel/provider enforcement продолжаются.
+Домен `ApplicationInstance`, планирование, authorization pipeline и базовый Linux runtime backend реализованы.
+Volume mappings теперь проходят идентичностно-ориентированную authorization boundary и
+имеют адаптер от `DeviceManager` к namespace backend. Полная production materialization,
+privileged kernel/provider enforcement и secure mount lifecycle продолжаются.
