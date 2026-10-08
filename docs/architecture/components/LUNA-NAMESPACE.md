@@ -58,10 +58,42 @@ User, network, IPC, UTS, time и другие namespaces создаются то
 
 Компонент не добавляет ресурсы, которых нет в `AuthorizedApplicationPlan`. Ошибка materialization является отказом запуска, а не поводом расширить доступ.
 
+Для Volume storage используется отдельный namespace-local `MountInstance`:
+
+```text
+VolumeRef + relative path
+        ↓
+VolumeMountResolver
+        ↓
+ResolvedVolume (backend-only)
+        ↓
+VolumeMountManager
+        ↓
+MountInstance
+```
+
+`VolumeMountResolver` является границей между object-level Volume Namespace и
+Linux backend. Он возвращает конкретный backend node и filesystem только на
+момент materialization; эти данные не становятся application API.
+
+`VolumeMountManager` владеет lifecycle mount instances: attach внутри текущего
+Linux mount namespace, unmount конкретного instance и удаление всех instances
+для одного `VolumeRef`. Один Volume может одновременно иметь несколько
+namespace-local instances. Публичный `MountInstance` не раскрывает внутренний
+Linux mountpoint.
+
 ## Очистка
 
 После завершения запуска временные namespace/mount resources должны быть освобождены. Ошибка cleanup должна оставаться наблюдаемой отдельно от результата процесса.
 
 ## Статус
 
-Базовые Linux namespace и mount primitives существуют. Полная production materialization, credential/capability enforcement и cleanup hardening продолжаются.
+Базовые Linux namespace и mount primitives существуют. Для Volume Namespace
+реализован prototype `VolumeMountResolver` / `VolumeMountManager` с
+`MountInstance` lifecycle и отдельным namespace-local filesystem mount.
+
+Production integration с авторизованным `MappingPlan`, secure eject/unmount
+policy, provider IPC и privileged runtime environment продолжается.
+
+Прямой privileged mount smoke-test зависит от возможности процесса создавать
+новый mount namespace; unit tests не требуют этих host capabilities.

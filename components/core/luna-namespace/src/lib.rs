@@ -19,7 +19,10 @@ use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
 
 mod profile;
 mod secure_mount;
+mod volume_mount;
+
 pub use profile::materialize_profiled_logical_root;
+pub use volume_mount::{MountInstance, ResolvedVolume, VolumeMountManager, VolumeMountResolver};
 
 #[derive(Debug)]
 pub enum NamespaceError {
