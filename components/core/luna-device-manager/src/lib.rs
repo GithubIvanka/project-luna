@@ -6,9 +6,11 @@ use std::path::Path;
 
 pub use luna_common::{DriveLetter, DriveLetterError, VolumeId, VolumeRef, VolumeRole};
 
+mod block;
 mod persistence;
 mod uevent;
 
+pub use block::BlockVolumeDiscovery;
 pub use persistence::{VOLUME_REGISTRY_VERSION, VolumeRegistryError};
 pub use uevent::{Uevent, UeventMonitor};
 
@@ -27,6 +29,7 @@ impl DeviceId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VolumeState {
     Detected,
+    Available,
     Mounted,
     Unavailable,
     Removing,
@@ -35,8 +38,11 @@ pub enum VolumeState {
 pub struct VolumeInfo {
     id: VolumeId,
     label: Option<String>,
+    native_name: Option<String>,
+    filesystem: Option<String>,
     state: VolumeState,
     role: VolumeRole,
+    backend_node: String,
 }
 
 impl VolumeInfo {
@@ -53,8 +59,31 @@ impl VolumeInfo {
         Self {
             id,
             label,
+            native_name: None,
+            filesystem: None,
             state,
             role,
+            backend_node: String::new(),
+        }
+    }
+
+    pub fn discovered(
+        id: VolumeId,
+        label: Option<String>,
+        native_name: String,
+        filesystem: Option<String>,
+        role: VolumeRole,
+        state: VolumeState,
+        backend_node: String,
+    ) -> Self {
+        Self {
+            id,
+            label,
+            native_name: Some(native_name),
+            filesystem,
+            state,
+            role,
+            backend_node,
         }
     }
 
@@ -66,12 +95,41 @@ impl VolumeInfo {
         self.label.as_deref()
     }
 
+    pub fn native_name(&self) -> Option<&str> {
+        self.native_name.as_deref()
+    }
+
+    pub fn filesystem(&self) -> Option<&str> {
+        self.filesystem.as_deref()
+    }
+
     pub fn state(&self) -> VolumeState {
         self.state
     }
 
     pub fn role(&self) -> VolumeRole {
         self.role
+    }
+
+    pub(crate) fn backend_node(&self) -> &str {
+        &self.backend_node
+    }
+
+    fn with_runtime_metadata(
+        &self,
+        other: &Self,
+        label: Option<String>,
+        native_name: Option<String>,
+    ) -> Self {
+        Self {
+            id: self.id.clone(),
+            label,
+            native_name,
+            filesystem: other.filesystem.clone(),
+            state: other.state,
+            role: other.role,
+            backend_node: other.backend_node.clone(),
+        }
     }
 }
 
@@ -110,6 +168,57 @@ impl std::fmt::Display for VolumeAssignmentError {
 }
 
 impl std::error::Error for VolumeAssignmentError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VolumeSyncError {
+    Discovery(String),
+    Assignment(VolumeAssignmentError),
+}
+
+impl std::fmt::Display for VolumeSyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Discovery(error) => write!(f, "volume discovery failed: {error}"),
+            Self::Assignment(error) => write!(f, "volume assignment failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for VolumeSyncError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VolumeEvent {
+    Attached {
+        volume: VolumeInfo,
+        drive_letter: Option<DriveLetter>,
+    },
+    Updated {
+        volume: VolumeInfo,
+        drive_letter: Option<DriveLetter>,
+    },
+    Detached {
+        volume: VolumeInfo,
+        drive_letter: Option<DriveLetter>,
+    },
+}
+
+impl VolumeEvent {
+    pub fn volume(&self) -> &VolumeInfo {
+        match self {
+            Self::Attached { volume, .. }
+            | Self::Updated { volume, .. }
+            | Self::Detached { volume, .. } => volume,
+        }
+    }
+
+    pub fn drive_letter(&self) -> Option<DriveLetter> {
+        match self {
+            Self::Attached { drive_letter, .. }
+            | Self::Updated { drive_letter, .. }
+            | Self::Detached { drive_letter, .. } => *drive_letter,
+        }
+    }
+}
 
 impl VolumeRegistry {
     pub fn new() -> Self {
@@ -305,11 +414,18 @@ impl DeviceManager {
 
     pub fn register_volume(
         &mut self,
-        volume: VolumeInfo,
+        mut volume: VolumeInfo,
     ) -> Result<Option<DriveLetter>, VolumeAssignmentError> {
-        if let Some(label) = volume.label() {
+        if let Some(label) = self.volume_registry.label(volume.id()) {
+            volume.label = Some(label.to_owned());
+        } else if let Some(label) = volume.label() {
             self.volume_registry.set_label(volume.id(), label);
         }
+
+        if let Some(native_name) = self.volume_registry.native_name(volume.id()) {
+            volume.native_name = Some(native_name.to_owned());
+        }
+
         let letter = self.volume_registry.assign(&volume)?;
         self.volumes.insert(volume.id().clone(), volume);
         Ok(letter)
@@ -318,6 +434,10 @@ impl DeviceManager {
     pub fn remove_volume(&mut self, volume: &VolumeId) -> Option<VolumeInfo> {
         self.volume_registry.release(volume);
         self.volumes.remove(volume)
+    }
+
+    pub fn volume(&self, volume: &VolumeId) -> Option<&VolumeInfo> {
+        self.volumes.get(volume)
     }
 
     pub fn volumes(&self) -> impl Iterator<Item = &VolumeInfo> {
@@ -338,6 +458,16 @@ impl DeviceManager {
     ) -> Result<(), VolumeRegistryError> {
         let mut registry = VolumeRegistry::load_preferences(path)?;
         for volume in self.volumes.values() {
+            if registry.label(volume.id()).is_none() {
+                if let Some(label) = volume.label() {
+                    registry.set_label(volume.id(), label);
+                }
+            }
+            if registry.native_name(volume.id()).is_none() {
+                if let Some(native_name) = volume.native_name() {
+                    registry.set_native_name(volume.id(), native_name);
+                }
+            }
             registry
                 .assign(volume)
                 .map_err(VolumeRegistryError::Assignment)?;
@@ -351,6 +481,104 @@ impl DeviceManager {
         path: impl AsRef<Path>,
     ) -> Result<(), VolumeRegistryError> {
         self.volume_registry.save_preferences(path)
+    }
+
+    pub fn set_volume_label(&mut self, volume: &VolumeId, label: impl Into<String>) -> bool {
+        if let Some(info) = self.volumes.get_mut(volume) {
+            let label = label.into();
+            self.volume_registry.set_label(volume, &label);
+            info.label = Some(label);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_volume_native_name(
+        &mut self,
+        volume: &VolumeId,
+        native_name: impl Into<String>,
+    ) -> bool {
+        if let Some(info) = self.volumes.get_mut(volume) {
+            let native_name = native_name.into();
+            self.volume_registry.set_native_name(volume, &native_name);
+            info.native_name = Some(native_name);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn reconcile_block_volumes(
+        &mut self,
+        discovery: &BlockVolumeDiscovery,
+    ) -> Result<Vec<VolumeEvent>, VolumeSyncError> {
+        let discovered = discovery
+            .scan()
+            .map_err(|error| VolumeSyncError::Discovery(error.to_string()))?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut events = Vec::new();
+
+        for incoming in discovered {
+            let id = incoming.id().clone();
+            seen.insert(id.clone());
+
+            if let Some(existing) = self.volumes.get(&id).cloned() {
+                let label = self
+                    .volume_registry
+                    .label(&id)
+                    .map(str::to_owned)
+                    .or_else(|| incoming.label.clone());
+                let native_name = self
+                    .volume_registry
+                    .native_name(&id)
+                    .map(str::to_owned)
+                    .or_else(|| incoming.native_name.clone())
+                    .or_else(|| existing.native_name.clone());
+                let updated = existing.with_runtime_metadata(&incoming, label, native_name);
+                let drive_letter = self.volume_registry.current_letter(&id);
+
+                if updated != existing {
+                    self.volumes.insert(id, updated.clone());
+                    events.push(VolumeEvent::Updated {
+                        volume: updated,
+                        drive_letter,
+                    });
+                }
+            } else {
+                let drive_letter = self
+                    .register_volume(incoming.clone())
+                    .map_err(VolumeSyncError::Assignment)?;
+                let volume = self
+                    .volumes
+                    .get(&id)
+                    .cloned()
+                    .expect("registered volume must be present");
+                events.push(VolumeEvent::Attached {
+                    volume,
+                    drive_letter,
+                });
+            }
+        }
+
+        let removed = self
+            .volumes
+            .keys()
+            .filter(|id| !seen.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for id in removed {
+            let drive_letter = self.volume_registry.current_letter(&id);
+            if let Some(volume) = self.remove_volume(&id) {
+                events.push(VolumeEvent::Detached {
+                    volume,
+                    drive_letter,
+                });
+            }
+        }
+
+        Ok(events)
     }
 
     pub fn refresh_input_devices(&mut self) -> std::io::Result<()> {

@@ -87,8 +87,49 @@ fn run() -> Result<(), String> {
     manager
         .refresh_input_devices()
         .map_err(|error| format!("input sysfs scan unavailable: {error}"))?;
+    let block_discovery = luna_device_manager::BlockVolumeDiscovery::new();
+    let initial_volume_events = manager
+        .reconcile_block_volumes(&block_discovery)
+        .map_err(|error| format!("initial block-volume discovery unavailable: {error}"))?;
+    for event in &initial_volume_events {
+        eprintln!(
+            "luna-device-manager: volume {:?} alias={:?}",
+            event.volume().id(),
+            event.drive_letter()
+        );
+    }
     let input_count = manager.input_devices().len();
-    let mut status = format!("input_devices={input_count}\n");
+    let volume_count = manager.volumes().count();
+    let mut status = format!("input_devices={input_count}\nvolume_count={volume_count}\n");
+    for volume in manager.volumes() {
+        status.push_str("volume_id=");
+        status.push_str(volume.id().as_str());
+        status.push('\n');
+        status.push_str("volume_label=");
+        status.push_str(volume.label().unwrap_or_default());
+        status.push('\n');
+        status.push_str("volume_native_name=");
+        status.push_str(volume.native_name().unwrap_or_default());
+        status.push('\n');
+        status.push_str("volume_filesystem=");
+        status.push_str(volume.filesystem().unwrap_or_default());
+        status.push('\n');
+        status.push_str("volume_role=");
+        status.push_str(&format!("{:?}", volume.role()));
+        status.push('\n');
+        status.push_str("volume_state=");
+        status.push_str(&format!("{:?}", volume.state()));
+        status.push('\n');
+        status.push_str("volume_drive_letter=");
+        status.push_str(
+            &manager
+                .volume_registry()
+                .current_letter(volume.id())
+                .map(|letter| letter.to_string())
+                .unwrap_or_default(),
+        );
+        status.push('\n');
+    }
     for device in manager.input_devices() {
         status.push_str("input=");
         status.push_str(device.node());
@@ -162,6 +203,20 @@ fn run() -> Result<(), String> {
                     manager
                         .refresh_input_devices()
                         .map_err(|error| format!("refresh input registry after uevent: {error}"))?;
+                } else if subsystem == "block" {
+                    let events =
+                        manager
+                            .reconcile_block_volumes(&block_discovery)
+                            .map_err(|error| {
+                                format!("reconcile block volumes after uevent: {error}")
+                            })?;
+                    for event in events {
+                        eprintln!(
+                            "luna-device-manager: volume {:?} alias={:?}",
+                            event.volume().id(),
+                            event.drive_letter()
+                        );
+                    }
                 }
             }
         }

@@ -51,6 +51,12 @@ materialization mount instances.
 Базовые device/volume types и query boundary существуют. Dynamic letter registry
 и durable volume preferences реализованы как рабочий prototype.
 
+Block-volume discovery теперь начинается непосредственно с kernel sysfs
+(`/sys/class/block`). Для GPT-разделов identity берётся прежде всего из
+partition GUID; при его отсутствии используются filesystem UUID и временный
+block-device fallback. Filesystem metadata и partition type/name обогащаются из
+udev database, если она доступна, но udev не является источником Volume identity.
+
 Persistent registry хранит только пользовательские preferences:
 
 ```text
@@ -62,5 +68,17 @@ state; после загрузки preferences они пересчитывают
 обратное разрешение `DriveLetter -> VolumeRef`, поэтому Windows System for Luna
 может использовать тот же storage identity.
 
-Полный block-volume hotplug discovery, secure mount/eject backend и production
-`Volumes` IPC/API ещё не завершены.
+Volume lifecycle теперь имеет reconcile boundary:
+
+```text
+kernel uevent
+    -> block discovery
+    -> DeviceManager reconciliation
+    -> Attached / Updated / Detached event
+```
+
+Повторный discovery не меняет уже назначенную букву для существующего VolumeId.
+Удаление освобождает динамический alias, после чего следующий attach может
+его переиспользовать.
+
+Secure mount/eject backend и production `Volumes` IPC/API ещё не завершены.
