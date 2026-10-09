@@ -19,12 +19,21 @@ for artifact in \
 done
 
 run_case() {
-  local failure="${1:-}"
-  local name="${failure:-positive}"
+  local scenario="${1:-positive}"
+  local failure=""
+  local interactive=0
+  local name="$scenario"
+  case "$scenario" in
+    positive) name=positive ;;
+    missing-volume-manager|no-available-volumes) failure="$scenario" ;;
+    interactive-login) interactive=1 ;;
+    *) echo "unknown manager-gate scenario: $scenario" >&2; exit 2 ;;
+  esac
   echo
   echo "=== Luna manager-gate case: ${name} ==="
   export LUNA_MANAGER_GATE_TEST=1
   export LUNA_MANAGER_GATE_FAILURE="$failure"
+  export LUNA_MANAGER_GATE_INTERACTIVE_TEST="$interactive"
   export LUNA_REAL_SYSTEM_RUNTIME=1
   export LUNA_ONEFILE_QEMU_TIMEOUT="$QEMU_TIMEOUT"
   export LUNA_ONEFILE_REAL_TEST_OUT="$OUT/$name"
@@ -33,18 +42,16 @@ run_case() {
 
 case "${1:-all}" in
   all)
-    run_case ""
-    run_case "missing-volume-manager"
-    run_case "no-available-volumes"
+    run_case positive
+    run_case missing-volume-manager
+    run_case no-available-volumes
+    run_case interactive-login
     ;;
-  positive)
-    run_case ""
-    ;;
-  missing-volume-manager|no-available-volumes)
+  positive|interactive-login|missing-volume-manager|no-available-volumes)
     run_case "$1"
     ;;
   *)
-    echo "usage: $0 [all|positive|missing-volume-manager|no-available-volumes]" >&2
+    echo "usage: $0 [all|positive|missing-volume-manager|no-available-volumes|interactive-login]" >&2
     exit 2
     ;;
 esac

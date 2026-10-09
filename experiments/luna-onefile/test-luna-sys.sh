@@ -16,6 +16,7 @@ DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
 REAL_SYSTEM_RUNTIME_TEST="${LUNA_REAL_SYSTEM_RUNTIME:-0}"
 MANAGER_GATE_TEST="${LUNA_MANAGER_GATE_TEST:-0}"
 MANAGER_GATE_FAILURE="${LUNA_MANAGER_GATE_FAILURE:-}"
+MANAGER_GATE_INTERACTIVE_TEST="${LUNA_MANAGER_GATE_INTERACTIVE_TEST:-0}"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 LOG="$OUT/serial.log"
@@ -169,10 +170,57 @@ fi
 cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
 
 echo "[4/4] Booting UEFI fixture"
+QEMU_MONITOR_ARGS=()
+QEMU_MONITOR_SOCKET="/tmp/luna-hmp-$$.sock"
+INPUT_INJECTOR_PID=""
+if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
+  QEMU_MONITOR_ARGS=(-monitor "unix:$QEMU_MONITOR_SOCKET,server=on,wait=off")
+  python3 - "$QEMU_MONITOR_SOCKET" "$LOG" <<'PY_INPUT' &
+from pathlib import Path
+import socket
+import sys
+import time
+
+monitor_path = sys.argv[1]
+serial_log = Path(sys.argv[2])
+deadline = time.monotonic() + 10.0
+ready_marker = "luna-user-session: login UI keyboard/pointer input ready"
+while time.monotonic() < deadline:
+    if serial_log.exists() and ready_marker in serial_log.read_text(errors="replace"):
+        break
+    time.sleep(0.1)
+else:
+    print("keyboard injector: UserSession input readiness was not observed", file=sys.stderr)
+    raise SystemExit(1)
+
+connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+while time.monotonic() < deadline:
+    try:
+        connection.connect(monitor_path)
+        break
+    except (FileNotFoundError, ConnectionRefusedError):
+        time.sleep(0.1)
+else:
+    print("keyboard injector: QEMU monitor did not become available", file=sys.stderr)
+    raise SystemExit(1)
+
+with connection:
+    # The fixture has one eligible account. Send normal key presses for
+    # the temporary test password; no authentication API is bypassed.
+    for key in ("t", "e", "s", "t", "1", "2", "3", "ret"):
+        connection.sendall(f"sendkey {key}\n".encode())
+        time.sleep(0.22)
+print("keyboard injector: sent test password through QEMU HMP")
+PY_INPUT
+  INPUT_INJECTOR_PID=$!
+fi
 set +e
-timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -vga std -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
+timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -vga std -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" "${QEMU_MONITOR_ARGS[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
 status=$?
 set -e
+if [ -n "$INPUT_INJECTOR_PID" ]; then
+  wait "$INPUT_INJECTOR_PID" || true
+fi
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
   echo "QEMU failed with status $status" >&2
   exit "$status"
@@ -257,6 +305,12 @@ if [ "$MANAGER_GATE_TEST" = "1" ]; then
       [ "$success_line" -lt "$drm_line" ]
       [ "$drm_line" -lt "$frame_line" ]
       [ "$frame_line" -lt "$input_line" ]
+
+      if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
+        grep -Fq "luna-user-session: login credentials accepted" "$LOG"
+        grep -Fq "luna-system-runtime: graphical UserSession launched /usr/bin/luna-graphical-session" "$LOG"
+        grep -Fq "LUNA-NATIVE-SESSION: READY" "$LOG"
+      fi
       ;;
     missing-volume-manager)
       grep -Fq "luna-system-runtime: native system service startup failed:" "$LOG"

@@ -371,3 +371,53 @@ and initialize keyboard/pointer input in the test fixture. It does not yet
 prove interactive authentication: the harness does not inject keystrokes or
 verify that a user's desktop session starts. The fixture has no bundled font,
 so the renderer's documented bitmap fallback remains expected and non-fatal.
+
+## Stage 4.3 — interactive native login and unprivileged session handoff — 2026-10-09
+
+The login UI acceptance was extended from drawing a frame to a real keyboard
+submission and a normal user-session process launch. The direct-init kernel now
+also enables and verifies `CONFIG_MULTIUSER=y`. This is required: Linux's
+`tinyconfig` with MULTIUSER disabled compiles out UID/GID credential syscalls,
+while Luna correctly calls `initgroups`, `setresgid`, and `setresuid` before
+launching the graphical session.
+
+The dedicated test fixture enables a temporary SHA-512-crypt password only for
+the `luna` test account; Recovery is marked `nologin` so the ordinary login
+screen has one eligible account. The QEMU HMP keyboard injector sends actual
+key events into the native UI. It does not bypass SessionUi or authentication.
+
+Verified path in QEMU/OVMF:
+
+```text
+manager readiness -> boot success
+-> DRM master + KMS frame + keyboard input ready
+-> keyboard-entered test password
+-> luna-user-session: login credentials accepted
+-> user credential syscalls succeed with CONFIG_MULTIUSER=y
+-> luna-graphical-session launched as the authenticated user
+-> LUNA-NATIVE-SESSION: READY
+```
+
+The session fixture checks that the bootstrap runtime exists at
+`/sbin/luna-system-runtime`, its actual logical-root location, and verifies
+the configured Niri file and DATA-provided resources expected by a normal user
+session. Recovery-only home paths are not prerequisites for this normal-mode
+acceptance.
+
+The acceptance command is:
+
+```sh
+bash experiments/luna-onefile/test-manager-boot.sh all
+```
+
+The four scenarios cover positive manager/KMS readiness, missing Volume
+Manager, zero available volumes, and interactive authentication plus native
+session launch. The test password is synthetic and exists only in the disposable
+test image; it is not written into project configuration or host accounts.
+
+All four scenarios passed as one complete suite on 2026-10-09 using the
+Linux 7.2.4 direct-init kernel with `CONFIG_NET`, `CONFIG_DRM`,
+`CONFIG_DRM_BOCHS`, `CONFIG_INPUT_EVDEV`, and `CONFIG_MULTIUSER` enabled.
+In the interactive case the serial trace contains both
+`login credentials accepted` and `LUNA-NATIVE-SESSION: READY`, with no kernel
+panic after the authenticated user process is launched.

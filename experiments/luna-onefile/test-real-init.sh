@@ -15,6 +15,7 @@ DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
 REAL_RUNTIME_TEST="${LUNA_REAL_SYSTEM_RUNTIME:-0}"
 MANAGER_GATE_TEST="${LUNA_MANAGER_GATE_TEST:-0}"
 MANAGER_GATE_FAILURE="${LUNA_MANAGER_GATE_FAILURE:-}"
+MANAGER_GATE_INTERACTIVE_TEST="${LUNA_MANAGER_GATE_INTERACTIVE_TEST:-0}"
 RECOVERY_ROOT="${LUNA_ONEFILE_REAL_RECOVERY_ROOT:-/tmp/luna-recovery-data-root-$$}"
 
 [ -f "$IMAGE" ] || { echo "missing real-init kernel: $IMAGE" >&2; exit 1; }
@@ -28,6 +29,10 @@ if [ "$MANAGER_GATE_TEST" = "1" ]; then
     ""|missing-volume-manager|no-available-volumes) ;;
     *) echo "unknown manager-gate failure mode: $MANAGER_GATE_FAILURE" >&2; exit 2 ;;
   esac
+fi
+if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ] && [ "$MANAGER_GATE_TEST" != "1" ]; then
+  echo "interactive login test requires the manager-gate fixture" >&2
+  exit 2
 fi
 command -v rustc >/dev/null
 rustup target list --installed | grep -qx x86_64-unknown-linux-musl
@@ -140,6 +145,10 @@ root:x:0:0:root:/root:/bin/sh
 luna:x:1000:1000:Luna User:/home/luna:/bin/sh
 recovery:x:1001:1001:Luna Recovery:/home/recovery:/bin/sh
 EOF_PASSWD
+if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
+  # Recovery identities are not candidates for a normal graphical login.
+  sed -i 's|^recovery:x:1001:1001:Luna Recovery:/home/recovery:/bin/sh$|recovery:x:1001:1001:Luna Recovery:/home/recovery:/sbin/nologin|' "$SYSROOT/config/passwd"
+fi
 cat > "$SYSROOT/config/group" <<'EOF_GROUP'
 root:x:0:
 shadow:x:42:
@@ -151,6 +160,29 @@ root:!*:0:0:99999:7:::
 luna:!*:0:0:99999:7:::
 recovery:!*:0:0:99999:7:::
 EOF_SHADOW
+if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
+  command -v openssl >/dev/null || { echo "interactive login test requires openssl" >&2; exit 1; }
+  test_password_hash="$(openssl passwd -6 -salt lunatest 'test123')"
+  python3 - "$SYSROOT/config/shadow" "$test_password_hash" <<'PY_SHADOW'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+password_hash = sys.argv[2]
+lines = path.read_text().splitlines()
+found = False
+for index, line in enumerate(lines):
+    fields = line.split(":")
+    if fields[0] == "luna":
+        fields[1] = password_hash
+        lines[index] = ":".join(fields)
+        found = True
+        break
+if not found:
+    raise SystemExit("test account missing from shadow fixture")
+path.write_text("\n".join(lines) + "\n")
+PY_SHADOW
+fi
 printf '%s\n' "passwd: files" "group: files" "shadow: files" "gshadow: files" "hosts: files" "services: files" "networks: files" "protocols: files" > "$SYSROOT/config/nsswitch.conf"
 mkdir -p "$SYSROOT/config/luna"
 printf '%s\n' '// minimal Luna native-runtime test configuration' > "$SYSROOT/config/luna/niri-config.kdl"
@@ -172,17 +204,15 @@ fn require(path: &str) {
 fn main() -> ! {
     for path in [
         "/etc/luna/niri-config.kdl",
-        "/usr/bin/luna-system-runtime",
+        "/sbin/luna-system-runtime",
         "/data/system/state/luna-state.redb",
         "/etc/data-config-marker",
         "/usr/lib/data-lib-marker",
         "/usr/share/fonts/data-resource-marker",
         "/usr/bin/data-probe",
-        "/home/recovery",
     ] {
         require(path);
     }
-    require("/data/users/recovery/home");
     println!("LUNA-NATIVE-SESSION: READY");
     loop {
         thread::sleep(Duration::from_secs(60));
