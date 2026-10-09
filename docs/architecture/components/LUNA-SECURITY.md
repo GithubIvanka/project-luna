@@ -61,6 +61,14 @@ Per-instance policy может только ужесточить application-lev
 
 Authorization может быть привязана к конкретной revision/snapshot политики.
 
+Для storage используются разные типы resources:
+
+- `Resource::Volume` — сам Volume как объект (например, visibility/manage), не разрешение на чтение его файлов;
+- `Resource::VolumePath` — разрешение на точный `VolumeRef + relative_path`;
+- `Resource::VolumeSubtree` — разрешение на каталог и его descendants только на том же Volume.
+
+Subtree grant проверяет границу пути по компонентам, а не простому строковому prefix; он не переносится на другой Volume или соседний путь вроде `/Documents-old`. `MappingRule::volume_subtree` требует явного `VolumeSubtree` grant для корня реально опубликованного subtree; отдельные Bundle resources получают path-scoped requests. Mapping layout проверяется до запуска: пересекающиеся source targets, где Volume мог бы перекрыть другой ресурс, отклоняются. Drive letters и Linux backend nodes не являются security identities.
+
 ## Capability
 
 `CapabilityRegistry` связывает известный capability с provider. Регистрация provider сама по себе не создаёт `CapabilityGrant` и не принимает policy decision.

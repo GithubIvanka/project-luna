@@ -102,7 +102,7 @@ impl VolumeRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VolumePath {
     volume: VolumeRef,
     relative_path: String,
@@ -120,15 +120,21 @@ impl VolumePath {
         if relative_path.contains('\0') {
             return Err(VolumePathError::Nul);
         }
-        if relative_path
-            .split('/')
-            .any(|component| component == ".." || component == ".")
-        {
-            return Err(VolumePathError::Traversal);
+
+        let mut normalized = String::from("/");
+        for component in relative_path.split('/').filter(|value| !value.is_empty()) {
+            if component == ".." || component == "." {
+                return Err(VolumePathError::Traversal);
+            }
+            if normalized.len() > 1 {
+                normalized.push('/');
+            }
+            normalized.push_str(component);
         }
+
         Ok(Self {
             volume,
-            relative_path,
+            relative_path: normalized,
         })
     }
 
@@ -208,6 +214,13 @@ mod tests {
             path.to_windows_display_string(DriveLetter::D),
             "D:/projects/luna"
         );
+    }
+
+    #[test]
+    fn volume_path_normalizes_repeated_and_trailing_slashes() {
+        let volume = VolumeRef::new(VolumeId::from("volume-1"));
+        let path = VolumePath::new(volume, "//Documents///Projects/").unwrap();
+        assert_eq!(path.relative_path(), "/Documents/Projects");
     }
 
     #[test]

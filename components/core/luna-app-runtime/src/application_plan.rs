@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use luna_bundle::{BundleKind, BundleManifest, ResourceAccess, validate_manifest};
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
-use luna_root_mapping::{LogicalPath, MappingError, MappingSource, MappingTable};
+use luna_root_mapping::{LogicalPath, MappingError, MappingKind, MappingSource, MappingTable};
 use luna_security::{AuthorizationRequest, AuthorizationSource, Permission, Principal, Resource};
 use luna_user_session::{SessionId, SessionState, UserSession};
 
@@ -157,9 +157,7 @@ impl ApplicationPlan {
                 Err(_) => continue,
             };
             let resource_id = match self.mapping.resolve_source(&logical) {
-                Ok(MappingSource::Volume(path)) => {
-                    Resource::Volume(path.volume().id().as_str().to_owned())
-                }
+                Ok(MappingSource::Volume(path)) => Resource::VolumePath(path),
                 _ => Resource::FilesystemPath(resource.logical_path().to_owned()),
             };
             for access in resource.access() {
@@ -171,6 +169,30 @@ impl ApplicationPlan {
                 requests.push(AuthorizationRequest {
                     principal: principal.clone(),
                     resource: resource_id.clone(),
+                    permission,
+                });
+            }
+        }
+
+        // A subtree mapping exposes the full mapped directory, not only the
+        // manifest entries below it. Require an explicit grant for that root
+        // scope as well as the path-scoped grants for declared entries above.
+        for rule in self.mapping.iter() {
+            if rule.kind() != MappingKind::Subtree {
+                continue;
+            }
+            let MappingSource::Volume(path) = rule.source() else {
+                continue;
+            };
+            for access in rule.access() {
+                let permission = match access {
+                    ResourceAccess::Read => Permission::Read,
+                    ResourceAccess::Write => Permission::Write,
+                    ResourceAccess::Execute => Permission::Execute,
+                };
+                requests.push(AuthorizationRequest {
+                    principal: principal.clone(),
+                    resource: Resource::VolumeSubtree(path.clone()),
                     permission,
                 });
             }
@@ -468,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn volume_mappings_authorize_volume_identity_instead_of_linux_paths() {
+    fn volume_mappings_authorize_exact_paths_and_explicit_subtree_scope() {
         let mut mapping = MappingTable::new();
         let volume =
             luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:data"));
@@ -479,10 +501,13 @@ mod tests {
             ))
             .unwrap();
         mapping
-            .insert(MappingRule::volume_subtree(
-                LogicalPath::new("/home/alice/Documents").unwrap(),
-                luna_common::VolumePath::new(volume.clone(), "/Documents").unwrap(),
-            ))
+            .insert(
+                MappingRule::volume_subtree(
+                    LogicalPath::new("/home/alice/Documents").unwrap(),
+                    luna_common::VolumePath::new(volume.clone(), "/Documents").unwrap(),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
             .unwrap();
         let mut manifest = valid_manifest();
         manifest.add_resource(
@@ -514,9 +539,16 @@ mod tests {
         };
         authorize_application_plan(plan, &policy).unwrap();
         let seen = policy.seen.borrow();
+        let exact_file = Resource::VolumePath(
+            luna_common::VolumePath::new(volume.clone(), "/Documents/readme.txt").unwrap(),
+        );
+        let subtree_scope =
+            Resource::VolumeSubtree(luna_common::VolumePath::new(volume, "/Documents").unwrap());
         assert!(seen.iter().any(|request| {
-            request.resource == Resource::Volume("partition-guid:data".into())
-                && request.permission == Permission::Read
+            request.resource == exact_file && request.permission == Permission::Read
+        }));
+        assert!(seen.iter().any(|request| {
+            request.resource == subtree_scope && request.permission == Permission::Read
         }));
         assert!(!seen.iter().any(|request| {
             request.resource == Resource::FilesystemPath("/home/alice/Documents/readme.txt".into())

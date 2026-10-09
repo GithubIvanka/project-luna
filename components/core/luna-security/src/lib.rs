@@ -3,7 +3,7 @@
 //! This crate evaluates policy. Low-level kernel/filesystem primitives remain
 //! responsible for enforcing the result.
 
-use luna_common::{BundleId, RuntimeKind, UserId};
+use luna_common::{BundleId, RuntimeKind, UserId, VolumePath};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -21,12 +21,21 @@ pub enum Principal {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum Resource {
     UserData(UserId),
-    ApplicationData { user: UserId, application: BundleId },
+    ApplicationData {
+        user: UserId,
+        application: BundleId,
+    },
     Application(BundleId),
     FilesystemPath(String),
     Capability(String),
     Runtime(RuntimeKind),
+    /// Whole-volume management/visibility resource, not a path grant.
     Volume(String),
+    /// A grant for one exact storage path.
+    VolumePath(VolumePath),
+    /// A grant to a directory and its descendants. It is distinct from an
+    /// exact-path grant so mapping a subtree cannot silently broaden access.
+    VolumeSubtree(VolumePath),
     Device(String),
     System,
 }
@@ -142,13 +151,44 @@ impl StaticPolicyAuthority {
             .remove(&(principal.clone(), resource.clone(), permission));
     }
     pub fn is_granted(&self, request: &AuthorizationRequest) -> bool {
-        self.grants.contains(&(
+        if self.grants.contains(&(
             request.principal.clone(),
             request.resource.clone(),
             request.permission,
-        ))
+        )) {
+            return true;
+        }
+
+        self.grants.iter().any(|(principal, resource, permission)| {
+            if principal != &request.principal || permission != &request.permission {
+                return false;
+            }
+            let Resource::VolumeSubtree(scope) = resource else {
+                return false;
+            };
+            match &request.resource {
+                Resource::VolumePath(path) | Resource::VolumeSubtree(path) => {
+                    path_is_within_volume_scope(path, scope)
+                }
+                _ => false,
+            }
+        })
     }
 }
+fn path_is_within_volume_scope(path: &VolumePath, scope: &VolumePath) -> bool {
+    if path.volume() != scope.volume() {
+        return false;
+    }
+    let path = path.relative_path();
+    let root = scope.relative_path().trim_end_matches('/');
+    root.is_empty()
+        || root == "/"
+        || path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 impl PolicyAuthority for StaticPolicyAuthority {
     fn authorize(&self, request: &AuthorizationRequest) -> Result<Decision, SecurityError> {
         Ok(if self.is_granted(request) {
@@ -165,7 +205,7 @@ mod tests {
         AuthorizationRequest, Constraint, Decision, Permission, PolicyAuthority, Principal,
         Resource, StaticPolicyAuthority,
     };
-    use luna_common::{BundleId, RuntimeKind, UserId};
+    use luna_common::{BundleId, RuntimeKind, UserId, VolumePath};
 
     #[test]
     fn explicit_grant_allows_and_revoke_denies() {
@@ -290,6 +330,94 @@ mod tests {
         );
         assert_eq!(policy.authorize(&read_request).unwrap(), Decision::Allow);
         assert_eq!(policy.authorize(&network_request).unwrap(), Decision::Deny);
+    }
+
+    #[test]
+    fn volume_path_grants_are_scoped_to_volume_and_relative_path() {
+        let principal = Principal::Application(BundleId::from("example.app"));
+        let volume =
+            luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:data"));
+        let other_volume =
+            luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:usb"));
+        let requested =
+            Resource::VolumePath(VolumePath::new(volume.clone(), "/Documents/readme.txt").unwrap());
+        let sibling =
+            Resource::VolumePath(VolumePath::new(volume, "/Documents/secret.txt").unwrap());
+        let other_volume_path =
+            Resource::VolumePath(VolumePath::new(other_volume, "/Documents/readme.txt").unwrap());
+        let mut policy = StaticPolicyAuthority::new();
+        let request = AuthorizationRequest {
+            principal: principal.clone(),
+            resource: requested.clone(),
+            permission: Permission::Read,
+        };
+        policy.grant(principal.clone(), requested, Permission::Read);
+
+        assert_eq!(policy.authorize(&request).unwrap(), Decision::Allow);
+        assert_eq!(
+            policy
+                .authorize(&AuthorizationRequest {
+                    principal: principal.clone(),
+                    resource: sibling,
+                    permission: Permission::Read,
+                })
+                .unwrap(),
+            Decision::Deny
+        );
+        assert_eq!(
+            policy
+                .authorize(&AuthorizationRequest {
+                    principal,
+                    resource: other_volume_path,
+                    permission: Permission::Read,
+                })
+                .unwrap(),
+            Decision::Deny
+        );
+    }
+
+    #[test]
+    fn volume_subtree_grants_cover_descendants_only_on_the_same_volume() {
+        let principal = Principal::Application(BundleId::from("example.app"));
+        let volume =
+            luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:data"));
+        let other_volume =
+            luna_common::VolumeRef::new(luna_common::VolumeId::from("partition-guid:usb"));
+        let scope = Resource::VolumeSubtree(VolumePath::new(volume.clone(), "/Documents").unwrap());
+        let child =
+            Resource::VolumePath(VolumePath::new(volume.clone(), "/Documents/readme.txt").unwrap());
+        let sibling = Resource::VolumePath(
+            VolumePath::new(volume.clone(), "/Documents-old/readme.txt").unwrap(),
+        );
+        let other_volume_child =
+            Resource::VolumePath(VolumePath::new(other_volume, "/Documents/readme.txt").unwrap());
+        let mut policy = StaticPolicyAuthority::new();
+        policy.grant(principal.clone(), scope, Permission::Read);
+
+        for resource in [child] {
+            assert_eq!(
+                policy
+                    .authorize(&AuthorizationRequest {
+                        principal: principal.clone(),
+                        resource,
+                        permission: Permission::Read,
+                    })
+                    .unwrap(),
+                Decision::Allow
+            );
+        }
+        for resource in [sibling, other_volume_child] {
+            assert_eq!(
+                policy
+                    .authorize(&AuthorizationRequest {
+                        principal: principal.clone(),
+                        resource,
+                        permission: Permission::Read,
+                    })
+                    .unwrap(),
+                Decision::Deny
+            );
+        }
     }
 
     #[test]

@@ -93,11 +93,15 @@ Linux mountpoint.
 `MountInstance` lifecycle и отдельным namespace-local filesystem mount.
 
 `luna-app-runtime` уже предоставляет адаптер `DeviceVolumeResolver`, который связывает
-реальный `DeviceManager` с `VolumeMountResolver`. Авторизация Volume mapping выполняется
-по `VolumeId`, поэтому concrete `/dev/...` path не участвует в application policy.
+реальный `DeviceManager` с `VolumeMountResolver`. Авторизация различает `VolumePath`
+для точного пути и `VolumeSubtree` для явно опубликованного каталога. Bind mount
+ограничен корнем исходного Volume и application root; служебный mountpoint расположен
+вне дерева приложения, а read-only mapping получает read-only mount.
 
-Полная materialization Volume mappings внутри child mount namespace, secure eject/unmount
-policy, provider IPC и privileged runtime environment продолжаются.
+Прототип materialization Volume mappings внутри child mount namespace реализован, включая
+file/directory targets, path-scoped policy, read-only enforcement и отказ при пересечении
+mapping targets. Secure eject/unmount policy, provider IPC и production privileged runtime
+environment продолжаются.
 
 Прямой privileged mount smoke-test зависит от возможности процесса создавать
 новый mount namespace; unit tests не требуют этих host capabilities.

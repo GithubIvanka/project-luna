@@ -9,9 +9,11 @@ use std::ffi::CString;
 use std::fs;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use luna_common::{VolumePath, VolumeRef};
+use luna_root_mapping::MappingKind;
 
 use crate::{LinuxMountNamespace, NamespaceError};
 
@@ -87,6 +89,7 @@ impl MountInstance {
 pub struct VolumeMountManager {
     instances: Vec<MountInstance>,
     sequence: u64,
+    support_root: Option<PathBuf>,
 }
 
 impl VolumeMountManager {
@@ -98,6 +101,33 @@ impl VolumeMountManager {
         self.instances.iter()
     }
 
+    fn ensure_support_root(&mut self, root: &Path) -> Result<PathBuf, NamespaceError> {
+        let expected = volume_support_root(root);
+        if let Some(current) = &self.support_root {
+            if current != &expected {
+                return Err(NamespaceError::FilesystemAccess(
+                    "one VolumeMountManager cannot span logical roots".to_owned(),
+                ));
+            }
+            return Ok(current.clone());
+        }
+
+        match fs::symlink_metadata(&expected) {
+            Ok(_) => {
+                return Err(NamespaceError::FilesystemAccess(format!(
+                    "volume support directory already exists: {}",
+                    expected.display()
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        fs::create_dir(&expected)?;
+        fs::set_permissions(&expected, fs::Permissions::from_mode(0o700))?;
+        self.support_root = Some(expected.clone());
+        Ok(expected)
+    }
+
     pub fn mount_volume(
         &mut self,
         _namespace: &LinuxMountNamespace,
@@ -105,7 +135,12 @@ impl VolumeMountManager {
         root: &Path,
         logical_path: &Path,
         volume_path: &VolumePath,
+        mapping_kind: MappingKind,
+        mapping_read_only: bool,
     ) -> Result<MountInstance, NamespaceError> {
+        if !root.is_absolute() || !root.is_dir() {
+            return Err(NamespaceError::MissingBaseRoot);
+        }
         validate_logical_target(logical_path)?;
         let resolved = resolver.resolve_volume(volume_path.volume())?;
 
@@ -114,9 +149,20 @@ impl VolumeMountManager {
                 "volume resolver returned a different VolumeRef".to_owned(),
             ));
         }
-        if !resolved.backend_node().is_absolute() || !resolved.backend_node().exists() {
+        if !resolved.backend_node().is_absolute() {
             return Err(NamespaceError::FilesystemAccess(
-                "volume resolver returned an unavailable backend node".to_owned(),
+                "volume resolver returned a non-absolute backend node".to_owned(),
+            ));
+        }
+        let backend_metadata = fs::symlink_metadata(resolved.backend_node()).map_err(|error| {
+            NamespaceError::FilesystemAccess(format!("volume backend node is unavailable: {error}"))
+        })?;
+        if backend_metadata.file_type().is_symlink()
+            || !backend_metadata.file_type().is_block_device()
+        {
+            return Err(NamespaceError::FilesystemAccess(
+                "volume backend node must be a block device, not a symlink or regular file"
+                    .to_owned(),
             ));
         }
         if resolved.filesystem().is_empty() {
@@ -125,13 +171,19 @@ impl VolumeMountManager {
             ));
         }
 
-        let source_mountpoint = root
-            .join(".luna-volume-mounts")
-            .join(format!("{}", self.sequence));
+        let relative = relative_path(volume_path)?;
+        if relative == Path::new("/") && mapping_kind == MappingKind::File {
+            return Err(NamespaceError::FilesystemAccess(
+                "a VolumePath for '/' cannot be materialized as a file mapping".to_owned(),
+            ));
+        }
+        let support_root = self.ensure_support_root(root)?;
+        let source_mountpoint = support_root.join(format!("{}", self.sequence));
         self.sequence = self.sequence.wrapping_add(1);
-        fs::create_dir_all(&source_mountpoint)?;
+        fs::create_dir(&source_mountpoint)?;
 
-        let flags = mount_flags(resolved.read_only());
+        let effective_read_only = resolved.read_only() || mapping_read_only;
+        let flags = mount_flags(effective_read_only);
         mount_block_device(
             resolved.backend_node(),
             &source_mountpoint,
@@ -140,14 +192,16 @@ impl VolumeMountManager {
             None,
         )?;
 
-        let relative = relative_path(volume_path)?;
         let target = root.join(logical_path.strip_prefix("/").unwrap_or(logical_path));
-        prepare_directory(&target)?;
 
         let result = if relative == Path::new("/") {
-            if mount_fs_move(&source_mountpoint, &target).is_err() {
+            if let Err(error) = prepare_target(root, &target, true) {
                 let _ = unmount_path(&source_mountpoint);
-                return Err(NamespaceError::Io(io::Error::last_os_error()));
+                return Err(error);
+            }
+            if let Err(error) = mount_fs_move(&source_mountpoint, &target) {
+                let _ = unmount_path(&source_mountpoint);
+                return Err(error);
             }
             MountInstance {
                 volume: volume_path.volume().clone(),
@@ -155,7 +209,7 @@ impl VolumeMountManager {
                 mountpoint: target.clone(),
                 source_mountpoint,
                 relative_path: relative,
-                read_only: resolved.read_only(),
+                read_only: effective_read_only,
             }
         } else {
             let source_path =
@@ -167,17 +221,41 @@ impl VolumeMountManager {
                     volume_path.relative_path()
                 )));
             }
-            if !source_path.is_dir() {
+            let metadata = match fs::symlink_metadata(&source_path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    let _ = unmount_path(&source_mountpoint);
+                    return Err(error.into());
+                }
+            };
+            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
                 let _ = unmount_path(&source_mountpoint);
                 return Err(NamespaceError::FilesystemAccess(
-                    "Volume MountInstance currently requires a directory subtree".to_owned(),
+                    "VolumePath must resolve to a regular file or directory".to_owned(),
                 ));
             }
-
-            if mount_bind_subtree(&source_path, &target, resolved.read_only()).is_err() {
-                let error = io::Error::last_os_error();
+            let source_is_directory = metadata.is_dir();
+            if (mapping_kind == MappingKind::Subtree) != source_is_directory {
                 let _ = unmount_path(&source_mountpoint);
-                return Err(NamespaceError::Io(error));
+                return Err(NamespaceError::FilesystemAccess(match mapping_kind {
+                    MappingKind::File => "file mapping source resolved to a directory".to_owned(),
+                    MappingKind::Subtree => "subtree mapping source resolved to a file".to_owned(),
+                }));
+            }
+            if let Err(error) = prepare_target(root, &target, source_is_directory) {
+                let _ = unmount_path(&source_mountpoint);
+                return Err(error);
+            }
+
+            if let Err(error) = mount_bind_path(
+                &source_mountpoint,
+                &source_path,
+                root,
+                &target,
+                effective_read_only,
+            ) {
+                let _ = unmount_path(&source_mountpoint);
+                return Err(error);
             }
 
             MountInstance {
@@ -186,7 +264,7 @@ impl VolumeMountManager {
                 mountpoint: target,
                 source_mountpoint,
                 relative_path: relative,
-                read_only: resolved.read_only(),
+                read_only: effective_read_only,
             }
         };
 
@@ -219,6 +297,7 @@ impl VolumeMountManager {
         source_result?;
 
         self.instances.remove(index);
+        let _ = fs::remove_dir(&instance.source_mountpoint);
         Ok(())
     }
 
@@ -266,11 +345,87 @@ fn validate_logical_target(path: &Path) -> Result<(), NamespaceError> {
     }) {
         return Err(NamespaceError::InvalidPath);
     }
+    let top_level = path
+        .strip_prefix("/")
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .and_then(|component| component.as_os_str().to_str());
+    if matches!(top_level, Some("proc" | "sys" | "dev")) {
+        return Err(NamespaceError::FilesystemAccess(
+            "Volume mappings must not overlap the runtime /proc, /sys or /dev trees".to_owned(),
+        ));
+    }
     Ok(())
 }
 
-fn prepare_directory(target: &Path) -> Result<(), NamespaceError> {
-    fs::create_dir_all(target)?;
+fn volume_support_root(root: &Path) -> PathBuf {
+    let parent = root.parent().unwrap_or(Path::new("/tmp"));
+    let name = root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("root");
+    parent.join(format!(".luna-volume-mounts-{name}"))
+}
+
+fn prepare_target(root: &Path, target: &Path, directory: bool) -> Result<(), NamespaceError> {
+    if !root.is_absolute() || !target.starts_with(root) || target == root {
+        return Err(NamespaceError::InvalidPath);
+    }
+    let relative = target
+        .strip_prefix(root)
+        .map_err(|_| NamespaceError::InvalidPath)?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(NamespaceError::InvalidPath);
+    }
+
+    let root_metadata = fs::symlink_metadata(root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(NamespaceError::FilesystemAccess(
+            "Volume mapping root must be a real directory".to_owned(),
+        ));
+    }
+
+    let mut current = root.to_path_buf();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component.as_os_str());
+        let final_component = index + 1 == components.len();
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(NamespaceError::FilesystemAccess(
+                        "Volume mapping path traverses a symlink".to_owned(),
+                    ));
+                }
+                let expected_directory = !final_component || directory;
+                if expected_directory && !metadata.is_dir() {
+                    return Err(NamespaceError::FilesystemAccess(
+                        "Volume mapping parent/target is not a directory".to_owned(),
+                    ));
+                }
+                if final_component && !directory && !metadata.is_file() {
+                    return Err(NamespaceError::FilesystemAccess(
+                        "file VolumePath target is not a regular file".to_owned(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !final_component || directory {
+                    fs::create_dir(&current)?;
+                } else {
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&current)?;
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
     Ok(())
 }
 
@@ -325,11 +480,17 @@ fn mount_raw(
     Ok(())
 }
 
-fn mount_bind_subtree(source: &Path, target: &Path, read_only: bool) -> Result<(), NamespaceError> {
+fn mount_bind_path(
+    trusted_source_root: &Path,
+    source: &Path,
+    trusted_target_root: &Path,
+    target: &Path,
+    read_only: bool,
+) -> Result<(), NamespaceError> {
     crate::secure_mount::secure_bind_mount_from_roots(
-        Path::new("/"),
+        trusted_source_root,
         source,
-        Path::new("/"),
+        trusted_target_root,
         target,
         read_only,
     )
@@ -357,17 +518,27 @@ fn unmount_path(path: &Path) -> Result<(), NamespaceError> {
     let path = path_cstring(path)?;
     let status = unsafe { libc::umount2(path.as_ptr(), libc::MNT_DETACH) };
     if status == -1 {
-        return Err(NamespaceError::Io(io::Error::last_os_error()));
+        let error = io::Error::last_os_error();
+        if matches!(
+            error.raw_os_error(),
+            Some(libc::EINVAL) | Some(libc::ENOENT)
+        ) {
+            return Ok(());
+        }
+        return Err(NamespaceError::Io(error));
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ResolvedVolume, VolumeMountManager, VolumeMountResolver};
+    use super::{
+        ResolvedVolume, VolumeMountManager, VolumeMountResolver, prepare_target,
+        volume_support_root,
+    };
     use crate::NamespaceError;
     use luna_common::{VolumeId, VolumePath, VolumeRef};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     struct FakeResolver;
 
@@ -412,6 +583,71 @@ mod tests {
         let resolved = resolver.resolve_volume(&volume).unwrap();
         assert_eq!(resolved.volume(), &volume);
         assert_eq!(resolved.filesystem(), "ext4");
+    }
+
+    #[test]
+    fn volume_support_mountpoints_are_siblings_not_application_visible_paths() {
+        let root = Path::new("/staging/instance-7");
+        let support = volume_support_root(root);
+        assert_eq!(
+            support,
+            Path::new("/staging/.luna-volume-mounts-instance-7")
+        );
+        assert!(!support.starts_with(root));
+    }
+
+    #[test]
+    fn target_preparation_supports_files_and_directories_and_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("luna-volume-target-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let file = root.join("readme.txt");
+        prepare_target(&root, &file, false).unwrap();
+        assert!(file.is_file());
+
+        let directory = root.join("documents");
+        prepare_target(&root, &directory, true).unwrap();
+        assert!(directory.is_dir());
+
+        let link = root.join("alias.txt");
+        symlink(&file, &link).unwrap();
+        assert!(prepare_target(&root, &link, false).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn target_preparation_rejects_symlink_ancestors_without_writing_outside_root() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "luna-volume-symlink-{}-{nonce}",
+            std::process::id()
+        ));
+        let root = base.join("app-root");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("alias")).unwrap();
+
+        let escaped = root.join("alias/created.txt");
+        assert!(prepare_target(&root, &escaped, false).is_err());
+        assert!(!outside.join("created.txt").exists());
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

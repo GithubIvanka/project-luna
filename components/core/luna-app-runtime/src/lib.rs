@@ -628,8 +628,9 @@ impl LinuxApplicationRuntime {
         let parent = root.parent().unwrap_or(Path::new("/tmp"));
         let name = root.file_name().and_then(|v| v.to_str()).unwrap_or("root");
         let support = parent.join(format!(".luna-namespace-{}-{}", process.get(), name));
+        let volume_support = parent.join(format!(".luna-volume-mounts-{name}"));
         let mut failures = Vec::new();
-        for path in [&root, &support] {
+        for path in [&root, &support, &volume_support] {
             if let Err(error) = fs::remove_dir_all(path)
                 && error.kind() != std::io::ErrorKind::NotFound
             {

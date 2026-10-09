@@ -65,9 +65,10 @@ process
 ```
 
 `luna-app-runtime` не принимает security decisions и не создаёт физические mappings самостоятельно.
-Для Volume mappings он переводит выбранный `VolumeRef` в security resource `VolumeId`,
-а backend resolution выполняется через `DeviceVolumeResolver` от системного
-`luna-device-manager`.
+Для Volume mappings он создаёт path-scoped security requests: `VolumePath` для точных
+ресурсов и `VolumeSubtree` для directory mappings. Backend resolution выполняется через
+`DeviceVolumeResolver` от системного `luna-device-manager`; drive letters и `/dev/...`
+не участвуют в application authorization.
 
 ## RuntimeSpec и libc
 
@@ -124,6 +125,7 @@ Stopping → Failed
 ## Статус
 
 Домен `ApplicationInstance`, планирование, authorization pipeline и базовый Linux runtime backend реализованы.
-Volume mappings теперь проходят идентичностно-ориентированную authorization boundary и
-имеют адаптер от `DeviceManager` к namespace backend. Полная production materialization,
-privileged kernel/provider enforcement и secure mount lifecycle продолжаются.
+Volume mappings используют path-scoped authorization (`VolumePath` / `VolumeSubtree`),
+реальный Device Manager snapshot и namespace-local `MountInstance`; layout validation
+отклоняет пересекающиеся targets до запуска. Production privileged mount testing,
+secure eject lifecycle и provider IPC продолжаются.

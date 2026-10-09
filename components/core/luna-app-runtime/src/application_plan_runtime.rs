@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use luna_common::{RuntimeProfile, VolumeId, VolumeRef};
+use luna_common::{ResourceAccess, RuntimeProfile, VolumeId, VolumeRef};
 use luna_device_manager::DeviceManager;
 use luna_namespace::{
     LinuxMountNamespace, MountInstance, NamespaceError, ResolvedVolume, VolumeMountManager,
@@ -80,6 +80,9 @@ impl StaticDeviceVolumeResolver {
     ) -> Result<Self, NamespaceError> {
         let mut volumes = BTreeMap::new();
         for rule in mapping.iter() {
+            if rule.access().is_empty() {
+                continue;
+            }
             let MappingSource::Volume(path) = rule.source() else {
                 continue;
             };
@@ -245,6 +248,17 @@ fn has_navigation_syntax(path: &Path) -> bool {
         .any(|component| component == "." || component == "..")
 }
 
+#[cfg(unix)]
+fn restrict_staging_root(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn restrict_staging_root(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// A newly-created staging root is removed unless ownership is explicitly
 /// committed to the running process maps. This keeps every early-return path
 /// fail-closed without duplicating cleanup branches.
@@ -264,6 +278,13 @@ impl PendingStagingRoot {
             )));
         }
         fs::create_dir(&path).map_err(|error| RuntimeError::Staging(error.to_string()))?;
+        if let Err(error) = restrict_staging_root(&path) {
+            let _ = fs::remove_dir(&path);
+            return Err(RuntimeError::Staging(format!(
+                "restrict staging root permissions {}: {error}",
+                path.display()
+            )));
+        }
         Ok(Self {
             path,
             committed: false,
@@ -284,6 +305,11 @@ impl Drop for PendingStagingRoot {
     fn drop(&mut self) {
         if !self.committed {
             let _ = fs::remove_dir_all(&self.path);
+            if let (Some(parent), Some(name)) = (self.path.parent(), self.path.file_name()) {
+                let support =
+                    parent.join(format!(".luna-volume-mounts-{}", name.to_string_lossy()));
+                let _ = fs::remove_dir_all(support);
+            }
         }
     }
 }
@@ -354,6 +380,8 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 "Volume mapping requires a Device Manager resolver snapshot".into(),
             ));
         }
+        validate_volume_mapping_layout(&mapping)
+            .map_err(|error| RuntimeError::Security(error.to_string()))?;
 
         let id = self.model.allocate_instance_id();
         let mut instance = ApplicationInstance::new_with_runtime(
@@ -454,6 +482,29 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
 }
 
 #[cfg(unix)]
+fn validate_volume_mapping_layout(mapping: &MappingTable) -> Result<(), NamespaceError> {
+    for volume_rule in mapping.iter().filter(|rule| {
+        !rule.access().is_empty() && matches!(rule.source(), MappingSource::Volume(_))
+    }) {
+        for other in mapping.iter().filter(|rule| !rule.access().is_empty()) {
+            if volume_rule.logical() == other.logical() {
+                continue;
+            }
+            let volume_path = volume_rule.logical().as_path();
+            let other_path = other.logical().as_path();
+            if volume_path.starts_with(other_path) || other_path.starts_with(volume_path) {
+                return Err(NamespaceError::FilesystemAccess(format!(
+                    "overlapping mapping targets cannot be materialized with Volume mounts: {} and {}",
+                    volume_rule.logical(),
+                    other.logical()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
 fn materialize_volume_mappings(
     mounts: &mut VolumeMountManager,
     namespace: &LinuxMountNamespace,
@@ -461,23 +512,23 @@ fn materialize_volume_mappings(
     root: &Path,
     mapping: &MappingTable,
 ) -> Result<Vec<MountInstance>, NamespaceError> {
+    validate_volume_mapping_layout(mapping)?;
     let mut instances = Vec::new();
     for rule in mapping.iter() {
+        if rule.access().is_empty() {
+            continue;
+        }
         let MappingSource::Volume(path) = rule.source() else {
             continue;
         };
-        if rule.kind() != MappingKind::Subtree {
-            return Err(NamespaceError::FilesystemAccess(format!(
-                "Volume mapping must use subtree kind: {}",
-                rule.logical()
-            )));
-        }
         instances.push(mounts.mount_volume(
             namespace,
             resolver,
             root,
             rule.logical().as_path(),
             path,
+            rule.kind(),
+            !rule.access().contains(&ResourceAccess::Write),
         )?);
     }
     Ok(instances)
@@ -536,7 +587,10 @@ fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), Runtime
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationLaunchContext, DeviceVolumeResolver, PendingStagingRoot};
+    use super::{
+        ApplicationLaunchContext, DeviceVolumeResolver, PendingStagingRoot,
+        validate_volume_mapping_layout,
+    };
     use crate::{ApplicationInstanceId, RuntimeError};
     use luna_namespace::LinuxMountNamespace;
     use std::path::Path;
@@ -650,6 +704,55 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_volume_and_physical_mapping_targets_fail_closed() {
+        use luna_common::{ResourceAccess, VolumeId, VolumePath, VolumeRef};
+        use luna_root_mapping::{LogicalPath, MappingRule, MappingTable, PhysicalPath};
+
+        let volume = VolumeRef::new(VolumeId::from("partition-guid:data"));
+        let mut overlapping = MappingTable::new();
+        overlapping
+            .insert(
+                MappingRule::volume_subtree(
+                    LogicalPath::new("/home/docs").unwrap(),
+                    VolumePath::new(volume.clone(), "/Documents").unwrap(),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
+            .unwrap();
+        overlapping
+            .insert(
+                MappingRule::file(
+                    LogicalPath::new("/home/docs/readme.txt").unwrap(),
+                    PhysicalPath::new("/data/apps/example/readme.txt"),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
+            .unwrap();
+        assert!(validate_volume_mapping_layout(&overlapping).is_err());
+
+        let mut disjoint = MappingTable::new();
+        disjoint
+            .insert(
+                MappingRule::volume_subtree(
+                    LogicalPath::new("/home/docs").unwrap(),
+                    VolumePath::new(volume, "/Documents").unwrap(),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
+            .unwrap();
+        disjoint
+            .insert(
+                MappingRule::file(
+                    LogicalPath::new("/home/photos").unwrap(),
+                    PhysicalPath::new("/data/apps/example/photos"),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
+            .unwrap();
+        assert!(validate_volume_mapping_layout(&disjoint).is_ok());
+    }
+
+    #[test]
     fn device_volume_resolver_adapts_device_manager_backend() {
         let volume = luna_device_manager::VolumeInfo::discovered(
             luna_common::VolumeId::from("partition-guid:usb"),
@@ -673,6 +776,38 @@ mod tests {
         assert_eq!(resolved.volume().id(), &id);
         assert_eq!(resolved.backend_node(), Path::new("/dev/null"));
         assert_eq!(resolved.filesystem(), "ext4");
+
+        use luna_common::{ResourceAccess, VolumePath};
+        use luna_root_mapping::{LogicalPath, MappingRule, MappingTable};
+        let mut mapping = MappingTable::new();
+        mapping
+            .insert(
+                MappingRule::volume_subtree(
+                    LogicalPath::new("/media/docs").unwrap(),
+                    VolumePath::new(luna_common::VolumeRef::new(id.clone()), "/Documents").unwrap(),
+                )
+                .with_access([ResourceAccess::Read]),
+            )
+            .unwrap();
+        mapping
+            .insert(MappingRule::volume(
+                LogicalPath::new("/media/ignored").unwrap(),
+                VolumePath::new(
+                    luna_common::VolumeRef::new(luna_common::VolumeId::from("not-registered")),
+                    "/ignored.txt",
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        let snapshot = resolver.snapshot_for_mapping(&mapping).unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert!(
+            luna_namespace::VolumeMountResolver::resolve_volume(
+                &snapshot,
+                &luna_common::VolumeRef::new(luna_common::VolumeId::from("not-registered")),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -691,6 +826,12 @@ mod tests {
                 .expect("create staging root");
             path = staging.path().to_path_buf();
             assert!(path.exists());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o700);
+            }
         }
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(parent);
