@@ -33,15 +33,21 @@ UEFI discovery, kernel handoff, выбором System Image, проверкой 
 
 ## Успешная загрузка
 
-В обычном boot mode runtime запускает OpenRC runlevels и ждёт фактической
-готовности `luna-device-manager` и `luna-volume-manager`. Проверяются native
-kernel uevent monitor, обнаруженные block partitions, включённая auto-attach
-policy и хотя бы один доступный Volume. Если любой из этапов не завершился,
-runtime не подтверждает boot success: ошибка остаётся явной и вход в графическую
-сессию не начинается. Только после этой проверки подтверждается `SUCCESS`, и
-`LunaBootAttempt` удаляется через `efivarfs`.
+В обычном boot mode runtime напрямую запускает и supervises `luna-device-manager`
+и `luna-volume-manager`. Внешний service manager не является обязательным для
+этого критического пути. Runtime ждёт readiness обоих компонентов и проверяет:
+наличие native kernel uevent monitor, обнаруженных block partitions, включённой
+auto-attach policy и хотя бы одного доступного Volume. Если любой этап не
+завершился, runtime не подтверждает boot success, а графическая сессия не
+начинается.
 
-Recovery mode сохраняет отдельную последовательность с виртуальным DATA provider.
+После успешного gate runtime подтверждает `SUCCESS` и очищает `LunaBootAttempt`.
+Только затем, если доступен `/usr/bin/openrc`, запускаются внешние compatibility
+runlevels для некритичных desktop/system providers. OpenRC не запускает Luna
+Device Manager или Volume Manager и не владеет их readiness.
+
+Recovery mode сохраняет отдельную последовательность с виртуальным DATA provider
+и не требует обычного physical-volume startup.
 
 ```text
 SystemRuntime started

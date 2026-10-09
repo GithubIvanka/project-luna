@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use crate::DiscoveredBlockVolume;
@@ -80,7 +81,13 @@ impl BlockVolumeDiscovery {
                 .cloned()
                 .or_else(|| uevent.get("PARTNAME").cloned());
             let parttype = udev.get("ID_PART_ENTRY_TYPE").cloned();
-            let filesystem = udev.get("ID_FS_TYPE").cloned();
+            // udev metadata is useful compatibility enrichment, but the native
+            // boot path must still identify Luna's required filesystems when
+            // no udev daemon/database exists. Keep this probe deliberately small:
+            // direct System Image boot requires ext4; LUNA-DATA requires Btrfs.
+            let filesystem = udev.get("ID_FS_TYPE").cloned().or_else(|| {
+                probe_filesystem(Path::new(&format!("/dev/{devname}"))).map(str::to_owned)
+            });
 
             let id = if let Some(partuuid) = partuuid {
                 VolumeId::from(format!("partition-guid:{partuuid}"))
@@ -132,6 +139,44 @@ impl BlockVolumeDiscovery {
         }
         Ok(result)
     }
+}
+
+/// Identify only the filesystems required by the minimal Luna boot contract.
+/// Full compatibility probing remains optional udev metadata; this native probe
+/// uses read-only superblock signatures and never mounts or mutates the device.
+fn probe_filesystem(device: &Path) -> Option<&'static str> {
+    let file = fs::File::open(device).ok()?;
+
+    // Btrfs superblock magic (`_BHRfS_M`) lives at byte 0x40 of the first
+    // superblock, which begins at 64 KiB from the start of the filesystem.
+    let mut btrfs_magic = [0u8; 8];
+    if read_exact_at(&file, &mut btrfs_magic, 0x10040).is_ok() && &btrfs_magic == b"_BHRfS_M" {
+        return Some("btrfs");
+    }
+
+    // ext4's little-endian s_magic (0xEF53) is at offset 0x38 in its
+    // primary superblock, which begins at byte 1024.
+    let mut ext4_magic = [0u8; 2];
+    if read_exact_at(&file, &mut ext4_magic, 1024 + 0x38).is_ok() && ext4_magic == [0x53, 0xEF] {
+        return Some("ext4");
+    }
+
+    None
+}
+
+fn read_exact_at(file: &fs::File, buffer: &mut [u8], offset: u64) -> io::Result<()> {
+    let mut read = 0usize;
+    while read < buffer.len() {
+        let count = file.read_at(&mut buffer[read..], offset + read as u64)?;
+        if count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "filesystem signature is outside the available device range",
+            ));
+        }
+        read += count;
+    }
+    Ok(())
 }
 
 fn partition_is_removable(sysfs_path: &Path) -> bool {
@@ -279,8 +324,9 @@ fn default_native_name(role: VolumeRole, label: Option<&str>, devname: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockVolumeDiscovery, classify_role, default_native_name};
+    use super::{BlockVolumeDiscovery, classify_role, default_native_name, probe_filesystem};
     use crate::VolumeRole;
+    use std::os::unix::fs::FileExt;
 
     #[test]
     fn classifies_luna_roles_from_partition_metadata() {
@@ -326,6 +372,54 @@ mod tests {
             default_native_name(VolumeRole::External, None, "sdb1"),
             "volume-sdb1"
         );
+    }
+
+    fn temporary_probe_image(name: &str, size: u64) -> (std::path::PathBuf, std::fs::File) {
+        use std::fs::OpenOptions;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "luna-device-manager-{name}-{}-{nonce}.img",
+            std::process::id()
+        ));
+        let file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.set_len(size).unwrap();
+        (path, file)
+    }
+
+    #[test]
+    fn native_probe_identifies_btrfs_without_udev_metadata() {
+        let (path, file) = temporary_probe_image("btrfs", 0x10040 + 8);
+        file.write_at(b"_BHRfS_M", 0x10040).unwrap();
+        drop(file);
+        assert_eq!(probe_filesystem(&path), Some("btrfs"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn native_probe_identifies_ext4_without_udev_metadata() {
+        let (path, file) = temporary_probe_image("ext4", 1024 + 0x38 + 2);
+        file.write_at(&[0x53, 0xEF], 1024 + 0x38).unwrap();
+        drop(file);
+        assert_eq!(probe_filesystem(&path), Some("ext4"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn native_probe_does_not_guess_unknown_filesystems() {
+        let (path, file) = temporary_probe_image("unknown", 0x10040 + 8);
+        drop(file);
+        assert_eq!(probe_filesystem(&path), None);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

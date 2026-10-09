@@ -151,8 +151,6 @@ pidfile="/run/luna-volume-manager.pid"
 depend() { need luna-device-manager; after luna-device-manager; }
 EOF_OPENRC_LUNA_VOLUME
 chmod 0755 "$DATA_ROOT/system/config/init.d/luna-volume-manager"
-ln -sfn ../../init.d/luna-device-manager "$DATA_ROOT/system/config/runlevels/default/luna-device-manager"
-ln -sfn ../../init.d/luna-volume-manager "$DATA_ROOT/system/config/runlevels/default/luna-volume-manager"
 
 # System resources use the seven canonical resource types. Provider-specific
 # runtime data that normally lives below /usr/share stays inside the owning

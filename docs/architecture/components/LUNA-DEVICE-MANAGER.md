@@ -11,6 +11,7 @@
 - обработкой kernel uevents и обнаружением оборудования;
 - обнаружением блочных устройств и разделов через sysfs;
 - сбором аппаратных метаданных файловой системы из доступной udev database;
+- минимальным read-only probing сигнатур ext4/Btrfs, когда udev metadata отсутствует;
 - идентификацией физического backend и определением признака removable;
 - обнаружением input devices и их обновлением при hotplug.
 
@@ -50,13 +51,17 @@ kernel uevent / sysfs / udev metadata
 
 Daemon открывает kernel uevent monitor, запускает доступный udev-совместимый
 backend для заполнения metadata, инициирует coldplug и затем продолжает
-слушать события. Удаление устройства сообщает о физическом изменении, но
+слушать события. Если udev отсутствует, native discovery определяет ext4 и
+Btrfs по суперблочным сигнатурам без монтирования и записи; это минимальное
+обнаружение покрывает LUNA-SYS/LUNA-DATA, но не заменяет полную filesystem
+compatibility metadata для всех внешних форматов. Удаление устройства сообщает о физическом изменении, но
 согласованное снятие namespace-local mounts и ревокация доступа относятся к
 Volume Manager и namespace lifecycle.
 
 ## Статус
 
 Реализованы sysfs block discovery, stable identity derivation для GPT
-partition, best-effort filesystem metadata из udev database, input discovery и
-native kernel uevent monitor. Политика auto-attach, volume registry, aliases и
+partition, best-effort filesystem metadata из udev database, read-only native
+probe ext4/Btrfs, input discovery и native kernel uevent monitor. Политика
+auto-attach, volume registry, aliases и
 Volume backend resolution вынесены в отдельный crate `luna-volume-manager`.

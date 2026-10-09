@@ -349,7 +349,7 @@ chmod 0755 "$DATA_ROOT/system/config/init.d/luna-session"
 
 ln -sfn ../../init.d/cgroups "$DATA_ROOT/system/config/runlevels/sysinit/cgroups"
 ln -sfn ../../init.d/seatd "$DATA_ROOT/system/config/runlevels/boot/seatd"
-for svc in dbus elogind upower bluetooth networkmanager polkit rtkit luna-device-manager luna-volume-manager; do
+for svc in dbus elogind upower bluetooth networkmanager polkit rtkit; do
     ln -sfn ../../init.d/"$svc" "$DATA_ROOT/system/config/runlevels/default/$svc"
 done
 

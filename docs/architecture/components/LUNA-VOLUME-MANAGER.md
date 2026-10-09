@@ -88,9 +88,11 @@ F2FS, NTFS/NTFS3, UDF, VFAT и XFS. Неизвестная файловая си
 Реализованы crate и executable `luna-volume-manager`, policy auto-attach,
 startup coldplug wait, reconciliation по атомарному inventory snapshot, persistent
 preference backend, drive aliases и backend resolution. System Image build scripts
-пакуют daemon, OpenRC запускает Device Manager и Volume Manager при загрузке,
-а тесты проверяют доступность поддерживаемого тома и отказ для неизвестных
-файловых систем/системных разделов.
+пакуют daemon; в normal boot `luna-system-runtime` напрямую запускает и supervises
+Device Manager и Volume Manager и не подтверждает boot success, пока оба не готовы
+и не найден хотя бы один доступный Volume. OpenRC больше не является владельцем
+startup этих двух Luna components. Тесты проверяют доступность поддерживаемого
+тома и отказ для неизвестных файловых систем/системных разделов.
 
 Production IPC/API для списка Volume объектов и уведомлений, интеграция открытия
 VolumePath с Luna Files, глобальное отслеживание всех `MountInstance` для

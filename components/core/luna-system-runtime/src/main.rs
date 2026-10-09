@@ -7,7 +7,7 @@ use luna_system_manager::{
     InitRef, KernelRef, PersistentSystemManager, RecoveryDataImageRef, RecoveryTarget,
     SystemImageRef, SystemState, SystemTarget,
 };
-use luna_system_runtime::{ProcessId, SystemRuntime, SystemRuntimeService};
+use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeService};
 use luna_user_session::SessionState;
 use luna_user_session::UserCredentials;
 
@@ -139,9 +139,27 @@ fn validate_volume_service_status(
     Ok((block_volumes, available))
 }
 
-fn wait_for_volume_services(timeout: Duration) -> Result<(), String> {
+fn wait_for_volume_services(
+    runtime: &mut SystemRuntimeService,
+    services: &[ProcessId],
+    timeout: Duration,
+) -> Result<(), String> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
+        for process in services {
+            match runtime.poll_process(*process).map_err(|error| {
+                format!("poll required system service {}: {error}", process.get())
+            })? {
+                ProcessState::Running => {}
+                ProcessState::Exited(status) => {
+                    return Err(format!(
+                        "required system service {} exited before boot readiness: {status}",
+                        process.get()
+                    ));
+                }
+            }
+        }
+
         let ready = [
             DEVICE_MANAGER_READY,
             DEVICE_MANAGER_INVENTORY,
@@ -181,27 +199,92 @@ fn wait_for_volume_services(timeout: Duration) -> Result<(), String> {
     }
 }
 
-fn start_openrc() -> Result<(), luna_system_runtime::RuntimeError> {
-    for runlevel in ["sysinit", "boot", "default"] {
-        eprintln!("luna-system-runtime: OpenRC starting {runlevel} runlevel");
-        let status = std::process::Command::new("/usr/bin/openrc")
-            .arg(runlevel)
-            .status()
-            .map_err(|error| {
-                luna_system_runtime::RuntimeError::Session(format!(
-                    "start OpenRC {runlevel}: {error}"
-                ))
-            })?;
-        if !status.success() {
-            return Err(luna_system_runtime::RuntimeError::Session(format!(
-                "OpenRC {runlevel} returned {status}"
-            )));
-        }
-        eprintln!("luna-system-runtime: OpenRC {runlevel} runlevel ready");
+/// Start the minimum system services as Luna-owned supervised processes.
+/// The runtime deliberately does not delegate critical boot readiness to an
+/// external init/service manager. Volume Manager coldplug waits for the
+/// Device Manager inventory and both must pass the gate before boot success.
+fn start_system_services(
+    runtime: &mut SystemRuntimeService,
+) -> Result<Vec<ProcessId>, luna_system_runtime::RuntimeError> {
+    fs::create_dir_all("/run/luna").map_err(|error| {
+        luna_system_runtime::RuntimeError::Session(format!(
+            "prepare native system service state: {error}"
+        ))
+    })?;
+
+    let device_manager = runtime.spawn_process_inherited_stdio(
+        "/usr/bin/luna-device-manager",
+        std::iter::empty::<&str>(),
+    )?;
+    eprintln!(
+        "luna-system-runtime: started required system service /usr/bin/luna-device-manager (pid {})",
+        device_manager.get()
+    );
+
+    let volume_manager = runtime.spawn_process_inherited_stdio(
+        "/usr/bin/luna-volume-manager",
+        std::iter::empty::<&str>(),
+    )?;
+    eprintln!(
+        "luna-system-runtime: started required system service /usr/bin/luna-volume-manager (pid {})",
+        volume_manager.get()
+    );
+
+    let services = vec![device_manager, volume_manager];
+    wait_for_volume_services(runtime, &services, Duration::from_secs(20))
+        .map_err(luna_system_runtime::RuntimeError::Session)?;
+    Ok(services)
+}
+
+/// Start non-critical desktop compatibility services when the provider exists.
+/// This path is not a boot-success prerequisite: core device and volume services
+/// are already Luna-owned and validated before this function is reached.
+fn start_optional_external_services() {
+    if !std::path::Path::new("/usr/bin/openrc").is_file() {
+        eprintln!(
+            "luna-system-runtime: no external service supervisor; continuing with Luna-native system services"
+        );
+        return;
     }
 
-    wait_for_volume_services(Duration::from_secs(20))
-        .map_err(luna_system_runtime::RuntimeError::Session)?;
+    for runlevel in ["sysinit", "boot", "default"] {
+        eprintln!("luna-system-runtime: starting optional compatibility runlevel {runlevel}");
+        match std::process::Command::new("/usr/bin/openrc")
+            .arg(runlevel)
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                eprintln!(
+                    "luna-system-runtime: optional compatibility runlevel {runlevel} returned {status}; continuing"
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!(
+                    "luna-system-runtime: optional compatibility runlevel {runlevel} unavailable: {error}"
+                );
+                return;
+            }
+        }
+    }
+}
+
+fn supervise_required_system_services(
+    runtime: &mut SystemRuntimeService,
+    services: &[ProcessId],
+) -> Result<(), luna_system_runtime::RuntimeError> {
+    for process in services {
+        match runtime.poll_process(*process)? {
+            ProcessState::Running => {}
+            ProcessState::Exited(status) => {
+                return Err(luna_system_runtime::RuntimeError::Session(format!(
+                    "required system service pid {} exited: {status}",
+                    process.get()
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -447,18 +530,29 @@ fn main() {
 
     runtime.start();
     let recovery_mode = std::env::var(BOOT_MODE_ENV).is_ok_and(|value| value == "2");
-    if !recovery_mode {
-        if let Err(error) = start_openrc() {
-            eprintln!("luna-system-runtime: OpenRC bootstrap failed: {error}");
-            std::process::exit(1);
+    let system_services = if recovery_mode {
+        // Recovery uses VirtualData and its dedicated toolset; normal physical
+        // device/volume startup is intentionally not a Recovery prerequisite.
+        Vec::new()
+    } else {
+        match start_system_services(&mut runtime) {
+            Ok(services) => services,
+            Err(error) => {
+                eprintln!("luna-system-runtime: native system service startup failed: {error}");
+                std::process::exit(1);
+            }
         }
-    }
+    };
 
     if let Err(error) = boot_success::confirm_boot_success() {
         eprintln!("luna-system-runtime: boot success confirmation failed: {error}");
         std::process::exit(1);
     }
     eprintln!("luna-system-runtime: boot success confirmed");
+
+    if !recovery_mode {
+        start_optional_external_services();
+    }
 
     let login_user = std::env::var(SESSION_USER_ENV).unwrap_or_else(|_| "luna".to_owned());
 
@@ -519,6 +613,10 @@ fn main() {
         };
 
         loop {
+            if let Err(error) = supervise_required_system_services(&mut runtime, &system_services) {
+                eprintln!("luna-system-runtime: required system service failed: {error}");
+                std::process::exit(1);
+            }
             if let Err(error) = runtime.supervise() {
                 eprintln!("luna-system-runtime: supervision error: {error}");
                 std::process::exit(1);

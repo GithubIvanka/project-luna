@@ -257,3 +257,47 @@ stale configured DATA        -> Recovery DATA -> logical-root contract -> READY
 ```
 
 This closes the current boot/provider experiment: the same real `luna-init` and System Image contract work across physical DATA on the System disk, physical DATA on another disk, and VirtualData supplied by Recovery, while stale or ambiguous persistent identity fails closed.
+
+## Stage 4.0 — Luna-owned device/volume startup gate — 2026-10-09
+
+The normal direct-init path now starts the real `luna-device-manager` and
+`luna-volume-manager` as supervised child processes of `luna-system-runtime`.
+OpenRC is not required to start either Luna component and no longer owns their
+default-runlevel entries. The runtime verifies the native uevent monitor, a
+non-empty block inventory, enabled volume auto-attach, and at least one available
+Volume before confirming boot success. Early manager exit or failed readiness
+keeps boot success unconfirmed.
+
+The experiment exposed two minimum kernel/userspace contracts:
+
+- The one-file `tinyconfig` kernel must enable `CONFIG_NET=y` so
+  `NETLINK_KOBJECT_UEVENT` is available to the native Device Manager.
+- When no udev database exists, Device Manager performs read-only ext4/Btrfs
+  superblock signature checks. This is deliberately limited to the filesystems
+  needed for `LUNA-SYS` and `LUNA-DATA`; it is not a general replacement for all
+  external filesystem metadata or compatibility providers.
+
+Verified OVMF path:
+
+```text
+UEFI/OVMF
+  -> luna-boot.efi
+  -> Linux 7.2.4 direct-init kernel (CONFIG_NET=y)
+  -> real luna-init as PID 1
+  -> System Image + Btrfs LUNA-DATA -> logical root
+  -> luna-system-runtime
+  -> luna-device-manager (native uevent; 3 block partitions discovered)
+  -> luna-volume-manager (LUNA-DATA available, alias C:)
+  -> manager readiness gate (detected=3, available=1, auto_attach=true)
+  -> boot success confirmed
+```
+
+The acceptance trace confirms both managers become ready before
+`luna-system-runtime: boot success confirmed`. The manager gate itself passes in
+the headless OVMF fixture. The same run does **not** yet verify a working graphical
+login: after the boot gate, the headless environment reports `session UI I/O failed:
+No such file or directory`. That is a separate UserSession/graphics acceptance
+problem and must not be conflated with Device/Volume Manager readiness.
+
+The reproducible direct-init kernel builder now enables `CONFIG_NET` so this
+contract is preserved when the experiment kernel is rebuilt.
