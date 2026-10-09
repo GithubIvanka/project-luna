@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 luna-common = { path = "../luna-common" }
-luna-device-manager = { path = "../luna-device-manager" }
+luna-volume-manager = { path = "../luna-volume-manager" }
 luna-bundle = { path = "../luna-bundle" }
 luna-root-mapping = { path = "../luna-root-mapping" }
 luna-namespace = { path = "../luna-namespace" }

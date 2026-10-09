@@ -17,6 +17,8 @@
 |---|---|
 | `luna-user-session` | единая UserSession boundary: identity, auth, credentials, seat, input, DRM/KMS, compositor и session UI |
 | `luna-app-runtime` | lifecycle `ApplicationInstance` и координация запуска |
+| `luna-device-manager` | обнаружение физических устройств, блочных разделов и hardware hotplug |
+| `luna-volume-manager` | логические Volume, auto-attach, доступность, пользовательские метки и drive aliases |
 | `luna-app-manager` | lifecycle установленных Bundle |
 | `luna-bundle` | модель Bundle и LBP1 codec |
 | `luna-root-mapping` | логический mapping и построение `MappingPlan` |
@@ -32,6 +34,8 @@ components/
 │   ├── luna-init
 │   ├── luna-system-runtime
 │   ├── luna-user-session
+│   ├── luna-device-manager
+│   ├── luna-volume-manager
 │   ├── security / namespace / mapping
 │   ├── filesystem / state / config / events
 │   └── system target / device / kernel / update managers

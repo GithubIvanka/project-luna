@@ -73,16 +73,18 @@ tar -xzf "$ALPINE_ROOTFS" -C "$SYS_ROOT"
 
 echo "==> Luna core artifacts"
 cargo build --release -p luna-device-manager --target x86_64-unknown-linux-musl
+cargo build --release -p luna-volume-manager --target x86_64-unknown-linux-musl
 cargo build --release -p luna-system-runtime --target x86_64-unknown-linux-musl
 cargo build --release --manifest-path "$REPO_ROOT/components/core/luna-init/Cargo.toml" --target x86_64-unknown-linux-musl
 DEVICE_MANAGER="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-device-manager"
+VOLUME_MANAGER="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-volume-manager"
 RUNTIME="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-system-runtime"
 LUNA_INIT="$REPO_ROOT/components/core/luna-init/target/x86_64-unknown-linux-musl/release/luna-init"
 SESSION="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-user-session"
-for artifact in "$DEVICE_MANAGER" "$RUNTIME" "$SESSION" "$LUNA_INIT"; do
+for artifact in "$DEVICE_MANAGER" "$VOLUME_MANAGER" "$RUNTIME" "$SESSION" "$LUNA_INIT"; do
     [ -x "$artifact" ] || { echo "missing core artifact: $artifact" >&2; exit 1; }
 done
-file "$DEVICE_MANAGER" "$RUNTIME" "$SESSION" "$LUNA_INIT" | grep -E 'static-pie linked|statically linked' >/dev/null || { echo "a required Luna core artifact is not statically linked" >&2; exit 1; }
+file "$DEVICE_MANAGER" "$VOLUME_MANAGER" "$RUNTIME" "$SESSION" "$LUNA_INIT" | grep -E 'static-pie linked|statically linked' >/dev/null || { echo "a required Luna core artifact is not statically linked" >&2; exit 1; }
 
 echo "==> Luna UserSession -> LUNA-SYS"
 cargo build --release -p luna-user-session --target x86_64-unknown-linux-musl
@@ -210,6 +212,28 @@ cp -a "$SYS_ROOT/etc/init.d/local" "$DATA_ROOT/system/config/init.d/local"
 cp -a "$SYS_ROOT/etc/rc.conf" "$DATA_ROOT/system/config/rc.conf"
 cp -a "$SYS_ROOT/etc/user/." "$DATA_ROOT/system/config/user/" 2>/dev/null || true
 
+cat > "$DATA_ROOT/system/config/init.d/luna-device-manager" <<'EOF_OPENRC_LUNA_DEVICE'
+#!/sbin/openrc-run
+name="Luna Device Manager"
+description="Physical device discovery and kernel hotplug events"
+command="/usr/bin/luna-device-manager"
+command_background="yes"
+pidfile="/run/luna-device-manager.pid"
+depend() { provide luna-device-manager; }
+EOF_OPENRC_LUNA_DEVICE
+chmod 0755 "$DATA_ROOT/system/config/init.d/luna-device-manager"
+
+cat > "$DATA_ROOT/system/config/init.d/luna-volume-manager" <<'EOF_OPENRC_LUNA_VOLUME'
+#!/sbin/openrc-run
+name="Luna Volume Manager"
+description="Logical volumes and automatic availability"
+command="/usr/bin/luna-volume-manager"
+command_background="yes"
+pidfile="/run/luna-volume-manager.pid"
+depend() { need luna-device-manager; after luna-device-manager; }
+EOF_OPENRC_LUNA_VOLUME
+chmod 0755 "$DATA_ROOT/system/config/init.d/luna-volume-manager"
+
 cat > "$DATA_ROOT/system/config/init.d/seatd" <<'EOF_OPENRC_SEATD'
 #!/sbin/openrc-run
 name="seatd"
@@ -325,7 +349,7 @@ chmod 0755 "$DATA_ROOT/system/config/init.d/luna-session"
 
 ln -sfn ../../init.d/cgroups "$DATA_ROOT/system/config/runlevels/sysinit/cgroups"
 ln -sfn ../../init.d/seatd "$DATA_ROOT/system/config/runlevels/boot/seatd"
-for svc in dbus elogind upower bluetooth networkmanager polkit rtkit; do
+for svc in dbus elogind upower bluetooth networkmanager polkit rtkit luna-device-manager luna-volume-manager; do
     ln -sfn ../../init.d/"$svc" "$DATA_ROOT/system/config/runlevels/default/$svc"
 done
 
@@ -728,6 +752,7 @@ mkdir -p "$SYSTEM_IMAGE_ROOT"/{apps,drivers,firmware,libs,config,resources}
 mkdir -p "$SYSTEM_IMAGE_ROOT/config/luna" "$SYSTEM_IMAGE_ROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 
 install -Dm0755 "$DEVICE_MANAGER" "$SYSTEM_IMAGE_ROOT/apps/luna-device-manager/luna-device-manager"
+install -Dm0755 "$VOLUME_MANAGER" "$SYSTEM_IMAGE_ROOT/apps/luna-volume-manager/luna-volume-manager"
 install -Dm0755 "$RUNTIME" "$SYSTEM_IMAGE_ROOT/apps/luna-system-runtime/luna-system-runtime"
 install -Dm0755 "$SESSION" "$SYSTEM_IMAGE_ROOT/apps/luna-user-session/luna-user-session"
 mkdir -p "$SYSTEM_IMAGE_ROOT/apps/luna-graphical-session"

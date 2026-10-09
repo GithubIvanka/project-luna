@@ -9,8 +9,7 @@ pub use application_plan::{
     authorize_application_plan,
 };
 pub use application_plan_runtime::{
-    ApplicationLaunchContext, ApplicationPlanLauncher, DeviceVolumeResolver,
-    StaticDeviceVolumeResolver,
+    ApplicationLaunchContext, ApplicationPlanLauncher, StaticVolumeResolver, VolumeManagerResolver,
 };
 pub use elf_closure::{
     ElfClass, ElfDependencyClosure, ElfDependencyNode, ElfDependencyResolver, ElfEndian, ElfError,

@@ -8,6 +8,7 @@
 - `luna-system-runtime`
 - `luna-user-session`
 - `luna-device-manager`
+- `luna-volume-manager`
 - `luna-app-runtime`
 - `luna-security`
 - `luna-namespace`

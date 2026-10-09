@@ -745,12 +745,12 @@ dependencies = [
  "libc",
  "luna-bundle",
  "luna-common",
- "luna-device-manager",
  "luna-namespace",
  "luna-root-mapping",
  "luna-security",
  "luna-system-runtime",
  "luna-user-session",
+ "luna-volume-manager",
 ]
 
 [[package]]
@@ -799,8 +799,6 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "luna-common",
- "serde",
- "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -905,6 +903,16 @@ dependencies = [
  "libc",
  "luna-common",
  "png",
+]
+
+[[package]]
+name = "luna-volume-manager"
+version = "0.1.0"
+dependencies = [
+ "luna-common",
+ "luna-device-manager",
+ "serde",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

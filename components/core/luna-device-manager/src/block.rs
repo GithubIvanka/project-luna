@@ -10,7 +10,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::{VolumeId, VolumeInfo, VolumeRole, VolumeState};
+use crate::DiscoveredBlockVolume;
+use luna_common::{VolumeId, VolumeRole};
 
 const EFI_SYSTEM_PARTITION_GUID: &str = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b";
 const LINUX_SWAP_PARTITION_GUID: &str = "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f";
@@ -38,7 +39,7 @@ impl BlockVolumeDiscovery {
         Self::default()
     }
 
-    pub fn scan(&self) -> io::Result<Vec<VolumeInfo>> {
+    pub fn scan(&self) -> io::Result<Vec<DiscoveredBlockVolume>> {
         let partuuids = self.read_symlink_map("by-partuuid")?;
         let fsuuids = self.read_symlink_map("by-uuid")?;
         let labels = self.read_symlink_map("by-label")?;
@@ -97,14 +98,14 @@ impl BlockVolumeDiscovery {
             );
             let native_name = default_native_name(role, fs_label.as_deref(), &devname);
 
-            volumes.push(VolumeInfo::discovered(
+            volumes.push(DiscoveredBlockVolume::new(
                 id,
                 fs_label,
                 native_name,
                 filesystem,
                 role,
-                VolumeState::Available,
                 format!("/dev/{devname}"),
+                partition_is_removable(&sysfs_path),
             ));
         }
 
@@ -131,6 +132,16 @@ impl BlockVolumeDiscovery {
         }
         Ok(result)
     }
+}
+
+fn partition_is_removable(sysfs_path: &Path) -> bool {
+    let canonical = fs::canonicalize(sysfs_path).unwrap_or_else(|_| sysfs_path.to_path_buf());
+    let Some(parent) = canonical.parent() else {
+        return false;
+    };
+    fs::read_to_string(parent.join("removable"))
+        .ok()
+        .is_some_and(|value| value.trim() == "1")
 }
 
 fn parse_kv_file(path: &Path) -> io::Result<BTreeMap<String, String>> {

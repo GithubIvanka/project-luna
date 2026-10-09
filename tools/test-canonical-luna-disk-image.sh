@@ -57,7 +57,7 @@ unsquashfs -ll "$IMAGE_FS" 2>/dev/null | grep -q 'squashfs-root/apps/luna-init' 
     echo "luna-init must remain a LUNA-SYS core, not a System Image app" >&2
     exit 1
 }
-for path in     apps/luna-device-manager/luna-device-manager     apps/luna-system-runtime/luna-system-runtime     apps/luna-user-session/luna-user-session     config/desktop.toml     config/group     config/passwd     config/shadow     config/nsswitch.conf     config/luna/niri-config.kdl     resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf     resources/images/luna.png     apps/luna-graphical-session/luna-graphical-session; do
+for path in     apps/luna-device-manager/luna-device-manager     apps/luna-volume-manager/luna-volume-manager     apps/luna-system-runtime/luna-system-runtime     apps/luna-user-session/luna-user-session     config/desktop.toml     config/group     config/passwd     config/shadow     config/nsswitch.conf     config/luna/niri-config.kdl     resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf     resources/images/luna.png     apps/luna-graphical-session/luna-graphical-session; do
     unsquashfs -ll "$IMAGE_FS" 2>/dev/null | grep -q "squashfs-root/$path$" || {
         echo "missing System Image file: $path" >&2
         exit 1
@@ -105,6 +105,10 @@ test "$(find "$TMP" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tr '
 [ -n "$(find "$TMP/system/resources/icons/Adwaita/cursors" -type f -print -quit)" ]
 [ -f "$TMP/system/config/fonts/fonts.conf" ]
 [ -f "$TMP/system/config/rc.conf" ]
+[ -x "$TMP/system/config/init.d/luna-device-manager" ]
+[ -x "$TMP/system/config/init.d/luna-volume-manager" ]
+[ -L "$TMP/system/config/runlevels/default/luna-device-manager" ]
+[ -L "$TMP/system/config/runlevels/default/luna-volume-manager" ]
 [ -x "$TMP/system/config/init.d/dbus" ]
 [ -x "$TMP/system/config/init.d/elogind" ]
 [ -x "$TMP/system/config/init.d/luna-session" ]

@@ -14,6 +14,7 @@ members = [
   "components/core/luna-system-manager",
   "components/core/luna-update-manager",
   "components/core/luna-device-manager",
+  "components/core/luna-volume-manager",
   "components/core/luna-kernel-manager",
   "components/core/luna-system-runtime",
   "components/core/luna-user-session",

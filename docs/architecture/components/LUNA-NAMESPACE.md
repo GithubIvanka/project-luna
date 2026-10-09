@@ -92,8 +92,8 @@ Linux mountpoint.
 реализован prototype `VolumeMountResolver` / `VolumeMountManager` с
 `MountInstance` lifecycle и отдельным namespace-local filesystem mount.
 
-`luna-app-runtime` уже предоставляет адаптер `DeviceVolumeResolver`, который связывает
-реальный `DeviceManager` с `VolumeMountResolver`. Авторизация различает `VolumePath`
+`luna-app-runtime` предоставляет адаптер `VolumeManagerResolver`, который читает
+backend snapshot из `luna-volume-manager` и связывает его с `VolumeMountResolver`. Авторизация различает `VolumePath`
 для точного пути и `VolumeSubtree` для явно опубликованного каталога. Bind mount
 ограничен корнем исходного Volume и application root; служебный mountpoint расположен
 вне дерева приложения, а read-only mapping получает read-only mount.

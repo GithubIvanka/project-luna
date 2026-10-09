@@ -43,7 +43,7 @@ luna-init is a separate LUNA-SYS core artifact. It is not embedded as a System I
 
 The System Image is now a minimal immutable Luna source rather than an Alpine root snapshot.
 It contains the accepted namespaces apps, drivers, firmware, libs, config and resources.
-The current core applications are luna-device-manager, luna-system-runtime and luna-user-session.
+The current core applications are luna-device-manager, luna-volume-manager, luna-system-runtime and luna-user-session.
 The image also contains the canonical login font, Luna artwork and immutable bootstrap configuration.
 
 ## DATA
@@ -64,7 +64,7 @@ UEFI
   -> LUNA-SYS + System Image + LUNA-DATA
   -> RAM-backed logical /
   -> luna-system-runtime
-  -> luna-device-manager
+  -> luna-device-manager + luna-volume-manager (automatic volume availability)
   -> native Luna UserSession
   -> DRM/KMS login UI
   -> luna/luna authentication

@@ -78,15 +78,19 @@ mkdir -p "$DATA_ROOT/cache"
 rm -f "$OUT"/luna-pc.img "$OUT"/luna-${LUNA_VERSION}.squashfs "$OUT"/BUILD-INFO "$OUT"/SHA256SUMS
 
 cargo build --release -p luna-device-manager --target "$RUNTIME_TARGET"
+cargo build --release -p luna-volume-manager --target "$RUNTIME_TARGET"
 cargo build --release -p luna-system-runtime --target "$RUNTIME_TARGET"
 cargo build --release --manifest-path "$REPO_ROOT/components/core/luna-init/Cargo.toml" --target "$RUNTIME_TARGET"
 DEVICE_MANAGER="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-device-manager"
+VOLUME_MANAGER="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-volume-manager"
 RUNTIME="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-system-runtime"
 LUNA_INIT="$REPO_ROOT/components/core/luna-init/target/$RUNTIME_TARGET/release/luna-init"
 if [ ! -x "$LUNA_INIT" ]; then
     LUNA_INIT="$REPO_ROOT/target/$RUNTIME_TARGET/release/luna-init"
 fi
 [ -x "$DEVICE_MANAGER" ] || { echo "luna-device-manager binary was not produced: $DEVICE_MANAGER" >&2; exit 1; }
+[ -x "$VOLUME_MANAGER" ] || { echo "luna-volume-manager binary was not produced: $VOLUME_MANAGER" >&2; exit 1; }
+file "$VOLUME_MANAGER" | grep -Eq 'statically linked|static-pie linked' || { echo "luna-volume-manager is not statically linked; refusing to build PC image" >&2; exit 1; }
 [ -x "$RUNTIME" ] || { echo "runtime binary was not produced: $RUNTIME" >&2; exit 1; }
 [ -x "$LUNA_INIT" ] || { echo "luna-init binary was not produced: $LUNA_INIT" >&2; exit 1; }
 file "$RUNTIME" | grep -Eq 'statically linked|static-pie linked' || { echo "luna-system-runtime is not statically linked; refusing to build PC image" >&2; exit 1; }
@@ -108,11 +112,13 @@ EFI="$REPO_ROOT/components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi
 # masquerade as current System Image content.
 rm -rf "$SYSTEM_ROOT"
 mkdir -p "$SYSTEM_ROOT"/{apps,drivers,firmware,libs,config,resources}
-mkdir -p "$SYSTEM_ROOT/apps/luna-device-manager" "$SYSTEM_ROOT/apps/luna-system-runtime" "$SYSTEM_ROOT/apps/luna-user-session"
+mkdir -p "$SYSTEM_ROOT/apps/luna-device-manager" "$SYSTEM_ROOT/apps/luna-volume-manager" "$SYSTEM_ROOT/apps/luna-system-runtime" "$SYSTEM_ROOT/apps/luna-user-session"
 mkdir -p "$SYSTEM_ROOT/config/luna" "$SYSTEM_ROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 
 cp "$DEVICE_MANAGER" "$SYSTEM_ROOT/apps/luna-device-manager/luna-device-manager"
 chmod 0755 "$SYSTEM_ROOT/apps/luna-device-manager/luna-device-manager"
+cp "$VOLUME_MANAGER" "$SYSTEM_ROOT/apps/luna-volume-manager/luna-volume-manager"
+chmod 0755 "$SYSTEM_ROOT/apps/luna-volume-manager/luna-volume-manager"
 cp "$RUNTIME" "$SYSTEM_ROOT/apps/luna-system-runtime/luna-system-runtime"
 chmod 0755 "$SYSTEM_ROOT/apps/luna-system-runtime/luna-system-runtime"
 cp "$SESSION" "$SYSTEM_ROOT/apps/luna-user-session/luna-user-session"
@@ -122,6 +128,31 @@ chmod 0755 "$SYSTEM_ROOT/apps/luna-user-session/luna-user-session"
 # input staging area; its host directory layout is never embedded in Luna.
 cp -a "$DESKTOP_ROOT/usr/lib/." "$DATA_ROOT/system/libs/"
 cp -a "$DESKTOP_ROOT/etc/." "$DATA_ROOT/system/config/"
+
+# Luna owns physical-device events and logical volume availability.
+mkdir -p "$DATA_ROOT/system/config/init.d" "$DATA_ROOT/system/config/runlevels/default"
+cat > "$DATA_ROOT/system/config/init.d/luna-device-manager" <<'EOF_OPENRC_LUNA_DEVICE'
+#!/sbin/openrc-run
+name="Luna Device Manager"
+description="Physical device discovery and kernel hotplug events"
+command="/usr/bin/luna-device-manager"
+command_background="yes"
+pidfile="/run/luna-device-manager.pid"
+depend() { provide luna-device-manager; }
+EOF_OPENRC_LUNA_DEVICE
+chmod 0755 "$DATA_ROOT/system/config/init.d/luna-device-manager"
+cat > "$DATA_ROOT/system/config/init.d/luna-volume-manager" <<'EOF_OPENRC_LUNA_VOLUME'
+#!/sbin/openrc-run
+name="Luna Volume Manager"
+description="Logical volumes and automatic availability"
+command="/usr/bin/luna-volume-manager"
+command_background="yes"
+pidfile="/run/luna-volume-manager.pid"
+depend() { need luna-device-manager; after luna-device-manager; }
+EOF_OPENRC_LUNA_VOLUME
+chmod 0755 "$DATA_ROOT/system/config/init.d/luna-volume-manager"
+ln -sfn ../../init.d/luna-device-manager "$DATA_ROOT/system/config/runlevels/default/luna-device-manager"
+ln -sfn ../../init.d/luna-volume-manager "$DATA_ROOT/system/config/runlevels/default/luna-volume-manager"
 
 # System resources use the seven canonical resource types. Provider-specific
 # runtime data that normally lives below /usr/share stays inside the owning
@@ -187,7 +218,7 @@ for source_dir in "$DESKTOP_ROOT/usr/bin" "$DESKTOP_ROOT/usr/sbin" "$DESKTOP_ROO
     while IFS= read -r -d '' binary; do
         name="$(basename "$binary")"
         case "$name" in
-            luna-device-manager|luna-system-runtime|luna-user-session|greetd*|noctalia-greeter*|unix_chkpwd|dbus-run-session|seatd|niri-session)
+            luna-device-manager|luna-volume-manager|luna-system-runtime|luna-user-session|greetd*|noctalia-greeter*|unix_chkpwd|dbus-run-session|seatd|niri-session)
                 continue
                 ;;
         esac
@@ -334,7 +365,7 @@ chmod 0644 "$SYSTEM_ROOT/config/nsswitch.conf"
 # Guard the architectural boundary: desktop/provider executables and their
 # dynamic runtime closure must never leak into the boot-critical System Image.
 if find "$SYSTEM_ROOT/apps" -mindepth 1 -maxdepth 1 -type d \
-    ! -name luna-device-manager ! -name luna-system-runtime ! -name luna-user-session \
+    ! -name luna-device-manager ! -name luna-volume-manager ! -name luna-system-runtime ! -name luna-user-session \
     -print -quit | grep -q .; then
     echo "unexpected non-core application in System Image" >&2
     exit 1

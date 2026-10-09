@@ -296,12 +296,12 @@ luna-namespace
 
 ## 15. Устройства и внешние тома
 
-- `luna-device-manager` владеет discovery и lifecycle устройств и томов.
-- Внешние тома должны автоматически появляться с понятной пользователю идентичностью, а не с raw `/dev/...` paths.
-- Состояние управляемых томов хранится в `LUNA-DATA/system/volumes`.
-- Приложения получают контролируемый доступ к устройствам и томам через security и namespace model.
-- USB-носители не должны молча автоматически запускать приложения; policy может требовать явного подтверждения.
-- Точный production mount backend остаётся задачей реализации.
+- `luna-device-manager` владеет физическим discovery устройств и kernel hotplug events; `luna-volume-manager` владеет логическими томами и их доступностью.
+- Поддерживаемые внутренние и внешние файловые тома автоматически переходят в `Available` при подключении; USB не требует ручного постоянного mount.
+- Автоматическая доступность не запускает приложения с носителя.
+- Текущие назначения `D:`–`Z:` являются runtime aliases; durable user preferences хранятся в `LUNA-DATA/system/volumes`. `C:` зарезервирован за LUNA-DATA.
+- Приложения получают доступ к содержимому через security и namespace model; глобальная mount tree типа `/mnt/<disk>` не является API.
+- Production IPC/API для native Volumes collection, safe-eject coordination и интеграция file manager остаются задачами реализации.
 
 ## 16. Конфигурация и состояние
 
@@ -320,7 +320,7 @@ luna-namespace
 - `luna-system-manager` владеет семантикой системных target/state.
 - `luna-update-manager` владеет orchestration изменений и update transactions.
 - `luna-kernel-manager` владеет inventory и selection kernel.
-- `luna-device-manager` владеет жизненным циклом устройств и томов.
+- `luna-device-manager` владеет физическими устройствами; `luna-volume-manager` владеет жизненным циклом логических томов.
 - `luna-app-manager` владеет установкой Bundle и lifecycle его данных.
 - `luna-system-runtime` — единственный долгоживущий system-wide supervisor/runtime.
 - `luna-app-runtime` владеет lifecycle выполнения приложений.

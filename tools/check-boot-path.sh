@@ -35,6 +35,7 @@ unsquashfs -ll "$IMAGE" 2>/dev/null > "$DIST/.build/boot-path-system-image.lst"
 LIST="$DIST/.build/boot-path-system-image.lst"
 for path in \
     'apps/luna-device-manager/luna-device-manager' \
+    'apps/luna-volume-manager/luna-volume-manager' \
     'apps/luna-system-runtime/luna-system-runtime' \
     'apps/luna-user-session/luna-user-session' \
     'config/passwd' 'config/group' 'config/shadow' 'config/nsswitch.conf' \

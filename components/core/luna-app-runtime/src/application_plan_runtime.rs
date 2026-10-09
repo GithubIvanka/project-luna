@@ -11,7 +11,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use luna_common::{ResourceAccess, RuntimeProfile, VolumeId, VolumeRef};
-use luna_device_manager::DeviceManager;
 use luna_namespace::{
     LinuxMountNamespace, MountInstance, NamespaceError, ResolvedVolume, VolumeMountManager,
     VolumeMountResolver, materialize_profiled_logical_root,
@@ -20,6 +19,7 @@ use luna_root_mapping::{LogicalPath, MappingKind, MappingSource, MappingTable};
 use luna_security::{CapabilityName, CapabilityRegistry};
 use luna_system_runtime::SystemRuntimeService;
 use luna_user_session::UserSession;
+use luna_volume_manager::VolumeManager;
 
 use crate::application_plan::AuthorizedApplicationPlan;
 use crate::{
@@ -27,26 +27,26 @@ use crate::{
     InstanceState, LinuxApplicationRuntime, RuntimeError,
 };
 
-/// Adapts the system-owned Device Manager backend into the namespace mount
+/// Adapts the system-owned Volume Manager backend into the namespace mount
 /// resolver. The application-facing API still uses only VolumeRef and paths.
-pub struct DeviceVolumeResolver<'a> {
-    manager: &'a DeviceManager,
+pub struct VolumeManagerResolver<'a> {
+    manager: &'a VolumeManager,
 }
 
-impl<'a> DeviceVolumeResolver<'a> {
-    pub fn new(manager: &'a DeviceManager) -> Self {
+impl<'a> VolumeManagerResolver<'a> {
+    pub fn new(manager: &'a VolumeManager) -> Self {
         Self { manager }
     }
 
     pub fn snapshot_for_mapping(
         &self,
         mapping: &MappingTable,
-    ) -> Result<StaticDeviceVolumeResolver, NamespaceError> {
-        StaticDeviceVolumeResolver::from_mapping(self.manager, mapping)
+    ) -> Result<StaticVolumeResolver, NamespaceError> {
+        StaticVolumeResolver::from_mapping(self.manager, mapping)
     }
 }
 
-impl VolumeMountResolver for DeviceVolumeResolver<'_> {
+impl VolumeMountResolver for VolumeManagerResolver<'_> {
     fn resolve_volume(
         &self,
         volume: &luna_common::VolumeRef,
@@ -69,13 +69,13 @@ impl VolumeMountResolver for DeviceVolumeResolver<'_> {
 /// The snapshot deliberately contains only backend details for VolumeRefs that
 /// are actually present in one mapping table; it carries no drive-letter state.
 #[derive(Clone, Debug, Default)]
-pub struct StaticDeviceVolumeResolver {
+pub struct StaticVolumeResolver {
     volumes: BTreeMap<VolumeId, ResolvedVolume>,
 }
 
-impl StaticDeviceVolumeResolver {
+impl StaticVolumeResolver {
     pub fn from_mapping(
-        manager: &DeviceManager,
+        manager: &VolumeManager,
         mapping: &MappingTable,
     ) -> Result<Self, NamespaceError> {
         let mut volumes = BTreeMap::new();
@@ -115,7 +115,7 @@ impl StaticDeviceVolumeResolver {
     }
 }
 
-impl VolumeMountResolver for StaticDeviceVolumeResolver {
+impl VolumeMountResolver for StaticVolumeResolver {
     fn resolve_volume(&self, volume: &VolumeRef) -> Result<ResolvedVolume, NamespaceError> {
         self.volumes.get(volume.id()).cloned().ok_or_else(|| {
             NamespaceError::FilesystemAccess(format!(
@@ -137,7 +137,7 @@ pub struct ApplicationLaunchContext {
     base_root: PathBuf,
     staging_parent: PathBuf,
     trusted_source_roots: Vec<PathBuf>,
-    volume_resolver: Option<StaticDeviceVolumeResolver>,
+    volume_resolver: Option<StaticVolumeResolver>,
 }
 
 impl ApplicationLaunchContext {
@@ -155,13 +155,13 @@ impl ApplicationLaunchContext {
         }
     }
 
-    /// Attach an owned Device Manager snapshot for Volume mapping materialization.
-    pub fn with_volume_resolver(mut self, resolver: StaticDeviceVolumeResolver) -> Self {
+    /// Attach an owned Volume Manager snapshot for Volume mapping materialization.
+    pub fn with_volume_resolver(mut self, resolver: StaticVolumeResolver) -> Self {
         self.volume_resolver = Some(resolver);
         self
     }
 
-    pub fn volume_resolver(&self) -> Option<&StaticDeviceVolumeResolver> {
+    pub fn volume_resolver(&self) -> Option<&StaticVolumeResolver> {
         self.volume_resolver.as_ref()
     }
 
@@ -588,7 +588,7 @@ fn validate_capabilities(plan: &AuthorizedApplicationPlan) -> Result<(), Runtime
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplicationLaunchContext, DeviceVolumeResolver, PendingStagingRoot,
+        ApplicationLaunchContext, PendingStagingRoot, VolumeManagerResolver,
         validate_volume_mapping_layout,
     };
     use crate::{ApplicationInstanceId, RuntimeError};
@@ -753,21 +753,21 @@ mod tests {
     }
 
     #[test]
-    fn device_volume_resolver_adapts_device_manager_backend() {
-        let volume = luna_device_manager::VolumeInfo::discovered(
+    fn volume_manager_resolver_adapts_volume_manager_backend() {
+        let volume = luna_volume_manager::VolumeInfo::discovered(
             luna_common::VolumeId::from("partition-guid:usb"),
             Some("USB".into()),
             "usb".into(),
             Some("ext4".into()),
             luna_common::VolumeRole::External,
-            luna_device_manager::VolumeState::Available,
+            luna_volume_manager::VolumeState::Available,
             "/dev/null".into(),
         );
         let id = volume.id().clone();
-        let mut manager = luna_device_manager::DeviceManager::new();
+        let mut manager = luna_volume_manager::VolumeManager::new();
         manager.register_volume(volume).unwrap();
 
-        let resolver = DeviceVolumeResolver::new(&manager);
+        let resolver = VolumeManagerResolver::new(&manager);
         let resolved = luna_namespace::VolumeMountResolver::resolve_volume(
             &resolver,
             &luna_common::VolumeRef::new(id.clone()),
