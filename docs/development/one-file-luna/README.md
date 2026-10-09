@@ -335,3 +335,39 @@ remains a separate design task.
 The dedicated harness now uses the existing test helpers directly, so there
 are no generated temporary copies or edits to the user's test scripts required
 to run the manager-gate checks.
+
+## Stage 4.2 — native login surface in headless OVMF — 2026-10-09
+
+The headless login failure was traced to the minimal experimental kernel rather
+than to the runtime gate: the direct-init tinyconfig lacked DRM and evdev.
+`SeatController` enumerates `/dev/dri`, and UserSession's input backend
+discovers `/dev/input/event*`; without `CONFIG_DRM` and
+`CONFIG_INPUT_EVDEV`, seat discovery returned `ENOENT` before KMS
+initialization.
+
+The reproducible direct-init kernel builder now enables and verifies
+`CONFIG_DRM=y`, `CONFIG_DRM_BOCHS=y`, and
+`CONFIG_INPUT_EVDEV=y`. The OVMF fixture explicitly uses QEMU `-vga std`,
+which matches the Bochs DRM driver.
+
+The positive OVMF serial trace now verifies this ordered path:
+
+```text
+luna-system-runtime: boot success confirmed
+luna-user-session: login UI graphics device /dev/dri/card0
+luna-user-session: login UI acquired DRM master
+luna-user-session: login UI KMS target connector=39 crtc=37 mode=1280x800@75Hz
+luna-user-session: login UI initial frame presented
+luna-user-session: login UI first frame drawn
+luna-user-session: login UI keyboard/pointer input ready
+```
+
+The manager-gate regression suite was rerun against this kernel. The positive
+case must reach first frame and input readiness; negative manager cases still
+must not produce the boot-success marker.
+
+This proves the native login UI can acquire a KMS surface, draw its first frame,
+and initialize keyboard/pointer input in the test fixture. It does not yet
+prove interactive authentication: the harness does not inject keystrokes or
+verify that a user's desktop session starts. The fixture has no bundled font,
+so the renderer's documented bitmap fallback remains expected and non-fatal.

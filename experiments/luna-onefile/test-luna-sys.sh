@@ -170,7 +170,7 @@ cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
 
 echo "[4/4] Booting UEFI fixture"
 set +e
-timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
+timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -vga std -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
 status=$?
 set -e
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
@@ -239,6 +239,24 @@ if [ "$MANAGER_GATE_TEST" = "1" ]; then
       [ "$device_ready_line" -lt "$gate_line" ]
       [ "$volume_ready_line" -lt "$gate_line" ]
       [ "$gate_line" -lt "$success_line" ]
+
+      # The same direct-init fixture must expose an actual KMS surface and draw
+      # the native login frame, not merely confirm the earlier boot gate.
+      grep -Fq "luna-user-session: login UI graphics device /dev/dri/card0" "$LOG"
+      grep -Fq "luna-user-session: login UI acquired DRM master" "$LOG"
+      grep -Fq "luna-user-session: login UI KMS target connector=" "$LOG"
+      grep -Fq "luna-user-session: login UI initial frame presented" "$LOG"
+      grep -Fq "luna-user-session: login UI first frame drawn" "$LOG"
+      grep -Fq "luna-user-session: login UI keyboard/pointer input ready" "$LOG"
+      ! grep -Fq "session UI I/O failed: No such file or directory" "$LOG"
+
+      success_line=$(grep -nF "luna-system-runtime: boot success confirmed" "$LOG" | head -n1 | cut -d: -f1)
+      drm_line=$(grep -nF "luna-user-session: login UI acquired DRM master" "$LOG" | head -n1 | cut -d: -f1)
+      frame_line=$(grep -nF "luna-user-session: login UI first frame drawn" "$LOG" | head -n1 | cut -d: -f1)
+      input_line=$(grep -nF "luna-user-session: login UI keyboard/pointer input ready" "$LOG" | head -n1 | cut -d: -f1)
+      [ "$success_line" -lt "$drm_line" ]
+      [ "$drm_line" -lt "$frame_line" ]
+      [ "$frame_line" -lt "$input_line" ]
       ;;
     missing-volume-manager)
       grep -Fq "luna-system-runtime: native system service startup failed:" "$LOG"
