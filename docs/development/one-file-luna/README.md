@@ -301,3 +301,37 @@ problem and must not be conflated with Device/Volume Manager readiness.
 
 The reproducible direct-init kernel builder now enables `CONFIG_NET` so this
 contract is preserved when the experiment kernel is rebuilt.
+
+## Stage 4.1 — manager-gate regression tests — 2026-10-09
+
+The real OVMF acceptance harness is now repeatable through
+`experiments/luna-onefile/test-manager-boot.sh`:
+
+```sh
+bash experiments/luna-onefile/test-manager-boot.sh all
+```
+
+The suite has three cases:
+
+- **Positive:** the real Device Manager and Volume Manager run from the System
+  Image. Their readiness and the runtime's gate log must all precede
+  `luna-system-runtime: boot success confirmed`.
+- **Missing Volume Manager:** the manager executable is deliberately omitted
+  from the fixture. Runtime startup must fail and boot success must remain
+  unconfirmed.
+- **No available volumes:** a small static test provider reports
+  `auto_attach=true`, `volume_count=1`, and `available_count=0`. This
+  deterministic fault injection exercises the real runtime's readiness
+  validator without damaging or falsifying the Btrfs DATA fixture. Boot
+  success must remain unconfirmed.
+
+All three individual OVMF cases passed on 2026-10-09. In the two negative
+cases, the serial log contains the expected runtime startup rejection and no
+`boot success confirmed` marker. The current `luna-init` fatal-child path
+then terminates PID 1 and the kernel reports a panic. That is fail-closed, but
+it is not a graceful recovery transition; early runtime failure handling
+remains a separate design task.
+
+The dedicated harness now uses the existing test helpers directly, so there
+are no generated temporary copies or edits to the user's test scripts required
+to run the manager-gate checks.

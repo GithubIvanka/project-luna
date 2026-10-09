@@ -13,6 +13,9 @@ DATA_AMBIGUOUS_TEST="${LUNA_DATA_AMBIGUOUS_TEST:-0}"
 DATA_CONFIG_TEST="${LUNA_DATA_CONFIG_TEST:-0}"
 DATA_EXTERNAL_TEST="${LUNA_DATA_EXTERNAL_TEST:-0}"
 DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
+REAL_SYSTEM_RUNTIME_TEST="${LUNA_REAL_SYSTEM_RUNTIME:-0}"
+MANAGER_GATE_TEST="${LUNA_MANAGER_GATE_TEST:-0}"
+MANAGER_GATE_FAILURE="${LUNA_MANAGER_GATE_FAILURE:-}"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 LOG="$OUT/serial.log"
@@ -167,7 +170,7 @@ cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
 
 echo "[4/4] Booting UEFI fixture"
 set +e
-timeout 15s qemu-system-x86_64 -machine q35 -m 512M -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
+timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
 status=$?
 set -e
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
@@ -213,7 +216,55 @@ if [ "${LUNA_DATA_EXTERNAL_TEST:-0}" = "1" ]; then
   grep -Fq "LUNA-SYSTEM-RUNTIME: READY" "$LOG"
 fi
 
-if [ "${LUNA_REAL_INIT:-0}" = "1" ]; then
+if [ "$MANAGER_GATE_TEST" = "1" ]; then
+  grep -Fq "Luna: luna-init is running as PID 1" "$LOG"
+  grep -Fq "Luna: logical root ready; starting luna-system-runtime" "$LOG"
+  grep -Fq "luna-system-runtime: System Image 0.1.0, init 0.1.0, kernel 0.1.0" "$LOG"
+
+  case "$MANAGER_GATE_FAILURE" in
+    "")
+      grep -Fq "luna-system-runtime: started required system service /usr/bin/luna-device-manager" "$LOG"
+      grep -Fq "luna-system-runtime: started required system service /usr/bin/luna-volume-manager" "$LOG"
+      grep -Fq "luna-device-manager: native kernel uevent monitor ready" "$LOG"
+      grep -Fq "luna-device-manager: ready; discovered" "$LOG"
+      grep -Fq "luna-volume-manager: ready; auto-attach policy enabled=true" "$LOG"
+      grep -Fq "luna-system-runtime: device and volume managers ready (detected=" "$LOG"
+      grep -Fq "luna-system-runtime: boot success confirmed" "$LOG"
+      ! grep -Fq "luna-system-runtime: native system service startup failed:" "$LOG"
+
+      device_ready_line=$(grep -nF "luna-device-manager: ready; discovered" "$LOG" | head -n1 | cut -d: -f1)
+      volume_ready_line=$(grep -nF "luna-volume-manager: ready; auto-attach policy enabled=true" "$LOG" | head -n1 | cut -d: -f1)
+      gate_line=$(grep -nF "luna-system-runtime: device and volume managers ready (" "$LOG" | head -n1 | cut -d: -f1)
+      success_line=$(grep -nF "luna-system-runtime: boot success confirmed" "$LOG" | head -n1 | cut -d: -f1)
+      [ "$device_ready_line" -lt "$gate_line" ]
+      [ "$volume_ready_line" -lt "$gate_line" ]
+      [ "$gate_line" -lt "$success_line" ]
+      ;;
+    missing-volume-manager)
+      grep -Fq "luna-system-runtime: native system service startup failed:" "$LOG"
+      grep -Fq "failed to spawn child process: No such file or directory" "$LOG"
+      ! grep -Fq "luna-system-runtime: boot success confirmed" "$LOG"
+      ! grep -Fq "luna-system-runtime: graphical UserSession launched" "$LOG"
+      ;;
+    no-available-volumes)
+      grep -Fq "luna-volume-manager did not make any volumes available (detected=1, available=0)" "$LOG"
+      ! grep -Fq "luna-system-runtime: boot success confirmed" "$LOG"
+      ! grep -Fq "luna-system-runtime: graphical UserSession launched" "$LOG"
+      ;;
+    *)
+      echo "unknown manager-gate failure mode: $MANAGER_GATE_FAILURE" >&2
+      exit 2
+      ;;
+  esac
+elif [ "$REAL_SYSTEM_RUNTIME_TEST" = "1" ]; then
+  grep -Fq "Luna: luna-init is running as PID 1" "$LOG"
+  grep -Fq "Luna: logical root ready; starting luna-system-runtime" "$LOG"
+  grep -Fq "luna-system-runtime: System Image 0.1.0, init 0.1.0, kernel 0.1.0" "$LOG"
+  grep -Fq "luna-system-runtime: boot success confirmed" "$LOG"
+  grep -Fq "luna-system-runtime: graphical UserSession launched /usr/bin/luna-graphical-session" "$LOG"
+  grep -Fq "LUNA-NATIVE-SESSION: READY" "$LOG"
+  ! grep -Fq "luna-system-runtime: OpenRC starting" "$LOG"
+elif [ "$LUNA_REAL_INIT" = "1" ]; then
   grep -Fq "Luna: luna-init is running as PID 1" "$LOG"
   grep -Fq "Luna: logical root ready; starting luna-system-runtime" "$LOG"
   grep -Fq "LUNA-LOGICAL-ROOT-CONTRACT: READY" "$LOG"
@@ -223,7 +274,18 @@ else
   grep -Fq "LUNA-READY" "$LOG"
 fi
 
-if grep -Eq "Kernel panic|general protection|No working init|Failed to execute" "$LOG"; then
+if [ "$MANAGER_GATE_TEST" = "1" ] && [ -n "$MANAGER_GATE_FAILURE" ]; then
+  # PID 1 exit can trigger the existing luna-init failure path and a downstream
+  # kernel panic after the runtime has logged the deliberate gate rejection.
+  if grep -Eq "No working init|Failed to execute" "$LOG"; then
+    echo "fatal boot error unrelated to the expected manager-gate rejection" >&2
+    exit 1
+  fi
+  if grep -Eq "Kernel panic|general protection" "$LOG" && ! grep -Fq "luna-system-runtime: native system service startup failed:" "$LOG"; then
+    echo "unexpected kernel failure without an expected manager-gate rejection" >&2
+    exit 1
+  fi
+elif grep -Eq "Kernel panic|general protection|No working init|Failed to execute" "$LOG"; then
   echo "fatal boot error detected" >&2
   exit 1
 fi
@@ -231,7 +293,13 @@ if grep -Fq "Failed to execute /init" "$LOG"; then
   echo "kernel attempted a pathname init fallback" >&2
   exit 1
 fi
-if [ "${LUNA_REAL_INIT:-0}" = "1" ]; then
+if [ "$MANAGER_GATE_TEST" = "1" ]; then
+  if [ -z "$MANAGER_GATE_FAILURE" ]; then
+    echo "Luna-native manager boot gate acceptance passed: direct PID1 -> logical root -> Device Manager -> Volume Manager -> boot success"
+  else
+    echo "Luna-native manager boot gate negative acceptance passed: failure=$MANAGER_GATE_FAILURE prevented boot success"
+  fi
+elif [ "${LUNA_REAL_INIT:-0}" = "1" ]; then
   echo "Real luna-init acceptance passed: direct PID1 -> LUNA-SYS/LUNA-DATA -> logical root -> runtime"
 else
   echo "Canonical LUNA-SYS fixture acceptance passed"

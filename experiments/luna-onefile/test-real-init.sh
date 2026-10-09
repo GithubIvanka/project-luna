@@ -12,10 +12,23 @@ DATA_AMBIGUOUS_TEST="${LUNA_DATA_AMBIGUOUS_TEST:-0}"
 DATA_CONFIG_TEST="${LUNA_DATA_CONFIG_TEST:-0}"
 DATA_EXTERNAL_TEST="${LUNA_DATA_EXTERNAL_TEST:-0}"
 DATA_CONFIG_STALE_TEST="${LUNA_DATA_CONFIG_STALE_TEST:-0}"
+REAL_RUNTIME_TEST="${LUNA_REAL_SYSTEM_RUNTIME:-0}"
+MANAGER_GATE_TEST="${LUNA_MANAGER_GATE_TEST:-0}"
+MANAGER_GATE_FAILURE="${LUNA_MANAGER_GATE_FAILURE:-}"
 RECOVERY_ROOT="${LUNA_ONEFILE_REAL_RECOVERY_ROOT:-/tmp/luna-recovery-data-root-$$}"
 
 [ -f "$IMAGE" ] || { echo "missing real-init kernel: $IMAGE" >&2; exit 1; }
 [ -f "$INIT" ] || { echo "missing real luna-init: $INIT" >&2; exit 1; }
+if [ "$REAL_RUNTIME_TEST" = "1" ] && [ "$RECOVERY_TEST" != "1" ] && [ "$MANAGER_GATE_TEST" != "1" ]; then
+  echo "real system runtime test requires Recovery mode unless the manager-gate test is enabled" >&2
+  exit 1
+fi
+if [ "$MANAGER_GATE_TEST" = "1" ]; then
+  case "$MANAGER_GATE_FAILURE" in
+    ""|missing-volume-manager|no-available-volumes) ;;
+    *) echo "unknown manager-gate failure mode: $MANAGER_GATE_FAILURE" >&2; exit 2 ;;
+  esac
+fi
 command -v rustc >/dev/null
 rustup target list --installed | grep -qx x86_64-unknown-linux-musl
 
@@ -23,7 +36,49 @@ rm -rf "$SYSROOT"
 mkdir -p "$SYSROOT/apps/luna-system-runtime" "$SYSROOT/config" "$SYSROOT/libs"
 mkdir -p "$SYSROOT/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 
-cat > "$SYSROOT/runtime.rs" <<'EOF_RUNTIME'
+if [ "$REAL_RUNTIME_TEST" = "1" ]; then
+  RUNTIME="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-system-runtime"
+  [ -x "$RUNTIME" ] || { echo "missing real luna-system-runtime: $RUNTIME" >&2; exit 1; }
+  cp "$RUNTIME" "$SYSROOT/apps/luna-system-runtime/luna-system-runtime"
+  chmod 0755 "$SYSROOT/apps/luna-system-runtime/luna-system-runtime"
+
+  if [ "$MANAGER_GATE_TEST" = "1" ]; then
+    for manager in luna-device-manager luna-volume-manager; do
+      if [ "$MANAGER_GATE_FAILURE" = "missing-volume-manager" ] && [ "$manager" = "luna-volume-manager" ]; then
+        continue
+      fi
+      manager_dir="$SYSROOT/apps/$manager"
+      mkdir -p "$manager_dir"
+      if [ "$MANAGER_GATE_FAILURE" = "no-available-volumes" ] && [ "$manager" = "luna-volume-manager" ]; then
+        # Deterministic faulty provider for the runtime's status-validation path.
+        cat > "$SYSROOT/volume-manager-failure.rs" <<'EOF_VOLUME_MANAGER_FAILURE'
+use std::{fs, thread, time::Duration};
+
+fn main() -> ! {
+    fs::create_dir_all("/run/luna").expect("runtime directory");
+    fs::write(
+        "/run/luna/volume-manager.status",
+        "volume_count=1\navailable_count=0\nauto_attach=true\n",
+    )
+    .expect("write volume status");
+    fs::write("/run/luna/volume-manager.ready", "ready\n")
+        .expect("write ready marker");
+    loop {
+        thread::sleep(Duration::from_secs(60));
+    }
+}
+EOF_VOLUME_MANAGER_FAILURE
+        rustc --target x86_64-unknown-linux-musl -O "$SYSROOT/volume-manager-failure.rs" -o "$manager_dir/luna-volume-manager"
+        rm "$SYSROOT/volume-manager-failure.rs"
+      else
+        source="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/$manager"
+        [ -x "$source" ] || { echo "missing required manager binary: $source" >&2; exit 1; }
+        install -m0755 "$source" "$manager_dir/$manager"
+      fi
+    done
+  fi
+else
+  cat > "$SYSROOT/runtime.rs" <<'EOF_RUNTIME'
 use std::{path::Path, thread, time::Duration};
 
 fn require_file(path: &str) {
@@ -78,23 +133,66 @@ EOF_RUNTIME
 rustc --target x86_64-unknown-linux-musl -O "$SYSROOT/runtime.rs" -o "$SYSROOT/apps/luna-system-runtime/luna-system-runtime"
 rm "$SYSROOT/runtime.rs"
 chmod 0755 "$SYSROOT/apps/luna-system-runtime/luna-system-runtime"
+fi
 
 cat > "$SYSROOT/config/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
 luna:x:1000:1000:Luna User:/home/luna:/bin/sh
+recovery:x:1001:1001:Luna Recovery:/home/recovery:/bin/sh
 EOF_PASSWD
 cat > "$SYSROOT/config/group" <<'EOF_GROUP'
 root:x:0:
 shadow:x:42:
 luna:x:1000:
+recovery:x:1001:
 EOF_GROUP
 cat > "$SYSROOT/config/shadow" <<'EOF_SHADOW'
 root:!*:0:0:99999:7:::
 luna:!*:0:0:99999:7:::
+recovery:!*:0:0:99999:7:::
 EOF_SHADOW
 printf '%s\n' "passwd: files" "group: files" "shadow: files" "gshadow: files" "hosts: files" "services: files" "networks: files" "protocols: files" > "$SYSROOT/config/nsswitch.conf"
-chmod 0644 "$SYSROOT/config/passwd" "$SYSROOT/config/group" "$SYSROOT/config/nsswitch.conf"
+mkdir -p "$SYSROOT/config/luna"
+printf '%s\n' '// minimal Luna native-runtime test configuration' > "$SYSROOT/config/luna/niri-config.kdl"
+chmod 0644 "$SYSROOT/config/passwd" "$SYSROOT/config/group" "$SYSROOT/config/nsswitch.conf" "$SYSROOT/config/luna/niri-config.kdl"
 chmod 0600 "$SYSROOT/config/shadow"
+
+if [ "$REAL_RUNTIME_TEST" = "1" ]; then
+  mkdir -p "$SYSROOT/apps/luna-graphical-session"
+  cat > "$SYSROOT/session.rs" <<'EOF_SESSION'
+use std::{path::Path, thread, time::Duration};
+
+fn require(path: &str) {
+    if !Path::new(path).exists() {
+        eprintln!("LUNA-NATIVE-SESSION: missing {path}");
+        std::process::exit(30);
+    }
+}
+
+fn main() -> ! {
+    for path in [
+        "/etc/luna/niri-config.kdl",
+        "/usr/bin/luna-system-runtime",
+        "/data/system/state/luna-state.redb",
+        "/etc/data-config-marker",
+        "/usr/lib/data-lib-marker",
+        "/usr/share/fonts/data-resource-marker",
+        "/usr/bin/data-probe",
+        "/home/recovery",
+    ] {
+        require(path);
+    }
+    require("/data/users/recovery/home");
+    println!("LUNA-NATIVE-SESSION: READY");
+    loop {
+        thread::sleep(Duration::from_secs(60));
+    }
+}
+EOF_SESSION
+  rustc --target x86_64-unknown-linux-musl -O "$SYSROOT/session.rs" -o "$SYSROOT/apps/luna-graphical-session/luna-graphical-session"
+  rm "$SYSROOT/session.rs"
+  chmod 0755 "$SYSROOT/apps/luna-graphical-session/luna-graphical-session"
+fi
 
 if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   rm -rf "$RECOVERY_ROOT"
@@ -132,6 +230,10 @@ if [ "$DATA_EXTERNAL_TEST" = "1" ]; then
 fi
 if [ "$DATA_CONFIG_STALE_TEST" = "1" ]; then
   export LUNA_DATA_CONFIG_STALE_TEST=1
+fi
+if [ "$REAL_RUNTIME_TEST" = "1" ]; then
+  export LUNA_REAL_SYSTEM_RUNTIME=1
+  export LUNA_NO_RESPAWN=1
 fi
 export LUNA_DIRECT_INIT=1
 export LUNA_REAL_INIT=1
