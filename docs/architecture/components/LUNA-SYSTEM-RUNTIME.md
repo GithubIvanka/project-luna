@@ -33,7 +33,15 @@ UEFI discovery, kernel handoff, выбором System Image, проверкой 
 
 ## Успешная загрузка
 
-После запуска runtime и инициализации необходимого system state он подтверждает `SUCCESS`. Только после этого `LunaBootAttempt` удаляется через `efivarfs`.
+В обычном boot mode runtime запускает OpenRC runlevels и ждёт фактической
+готовности `luna-device-manager` и `luna-volume-manager`. Проверяются native
+kernel uevent monitor, обнаруженные block partitions, включённая auto-attach
+policy и хотя бы один доступный Volume. Если любой из этапов не завершился,
+runtime не подтверждает boot success: ошибка остаётся явной и вход в графическую
+сессию не начинается. Только после этой проверки подтверждается `SUCCESS`, и
+`LunaBootAttempt` удаляется через `efivarfs`.
+
+Recovery mode сохраняет отдельную последовательность с виртуальным DATA provider.
 
 ```text
 SystemRuntime started

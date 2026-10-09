@@ -71,12 +71,34 @@ UEFI
   -> /usr/bin/niri --session
 ~~~
 
-Fresh OVMF tests verify Luna handoff acceptance, direct PID 1 execution, LUNA-DATA btrfs mounting, logical-root preparation, runtime boot success, DRM/KMS login rendering, keyboard/pointer input, development authentication and Niri launch.
+Previously completed OVMF tests verified Luna handoff acceptance, direct PID 1 execution, LUNA-DATA btrfs mounting, logical-root preparation, DRM/KMS login rendering, keyboard/pointer input, development authentication and Niri launch. The additional Device Manager / Volume Manager boot gate was added on 2026-10-09 and requires a new end-to-end OVMF run; see the dated status below.
 The canonical source image is tested through snapshot copies, so its checksum remains stable after boot.
 
 ## QEMU graphics fixture
 
 The production OVMF regression uses -vga none with virtio-gpu-pci. The default QEMU stdvga device is not a supported DRM device in the current Luna kernel configuration.
+
+## 2026-10-09 — Device Manager / Volume Manager boot gate
+
+The normal boot path now makes the two Luna storage managers required startup services.
+OpenRC starts `luna-device-manager` first; it owns kernel uevents, performs coldplug,
+and atomically publishes `/run/luna/device-manager.volumes`. `luna-volume-manager`
+waits for that inventory, applies auto-attach policy, records `volume_count` and
+`available_count`, and publishes its readiness marker.
+
+Before confirming boot success, `luna-system-runtime` verifies that the native
+uevent monitor is active, at least one block partition was discovered, auto-attach
+is enabled, and at least one Volume is available. Failure leaves the boot attempt
+unconfirmed and prevents the login UI from starting. The OVMF regression now
+requires the manager-readiness log to precede the boot-success marker.
+
+Verified locally: focused manager/runtime tests, workspace check, and static
+x86_64-musl builds pass. The actual canonical OVMF boot was **not re-run** in this
+checkout because its ignored build inputs are absent: the expected Alpine runtime
+rootfs under `dist/sources/reference/alpine-3.24/release/`, the current kernel
+under `dist/kernel/current/bzImage`, and the cached provider roots are missing.
+Recreate those inputs before treating the new end-to-end OVMF assertion as
+verified.
 
 ## Transitional Alpine foundation
 

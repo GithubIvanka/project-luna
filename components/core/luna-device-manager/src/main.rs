@@ -97,6 +97,7 @@ fn write_status(
 
 fn run() -> Result<(), String> {
     std::fs::create_dir_all("/run/luna").map_err(|e| format!("create /run/luna: {e}"))?;
+    std::fs::create_dir_all("/run/udev").map_err(|e| format!("create /run/udev: {e}"))?;
     let _ = std::fs::remove_file(READY_PATH);
     let _ = std::fs::remove_file(STATUS_PATH);
     let _ = std::fs::remove_file(VOLUME_SNAPSHOT_PATH);

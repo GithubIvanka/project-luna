@@ -40,9 +40,11 @@ kernel uevent / sysfs / udev metadata
 ```
 
 Сырые `/dev/...` пути остаются backend-деталями и не являются API для
-приложений. Device Manager отправляет аппаратные события при подключении и
-отключении; Volume Manager самостоятельно reconciles актуальный список
-разделов и управляет логическим lifecycle.
+приложений. При старте и изменении block inventory Device Manager публикует
+атомарный snapshot в `/run/luna/device-manager.volumes`; это внутренний
+временный контракт двух core-менеджеров. Volume Manager не сканирует sysfs и
+не открывает kernel uevent monitor — он reconciles этот snapshot и управляет
+логическим lifecycle.
 
 ## Hotplug
 

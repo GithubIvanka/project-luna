@@ -30,6 +30,14 @@ grep -q "luna-system-runtime: OpenRC starting boot runlevel" "$LOG"
 grep -q "luna-system-runtime: OpenRC boot runlevel ready" "$LOG"
 grep -q "luna-system-runtime: OpenRC starting default runlevel" "$LOG"
 grep -q "luna-system-runtime: OpenRC default runlevel ready" "$LOG"
+grep -q "luna-system-runtime: device and volume managers ready (detected=" "$LOG"
+grep -q "auto_attach=true)" "$LOG"
+READY_LINE="$(grep -n -m1 'luna-system-runtime: device and volume managers ready' "$LOG" | cut -d: -f1)"
+SUCCESS_LINE="$(grep -n -m1 'luna-system-runtime: boot success confirmed' "$LOG" | cut -d: -f1)"
+[ -n "$READY_LINE" ] && [ -n "$SUCCESS_LINE" ] && [ "$READY_LINE" -lt "$SUCCESS_LINE" ] || {
+  echo "boot success was confirmed before Device Manager and Volume Manager became ready" >&2
+  exit 1
+}
 grep -Fq "Starting seatd ... [ ok ]" "$LOG"
 grep -Fq "Starting System Message Bus ... [ ok ]" "$LOG"
 grep -Fq "Starting System login manager ... [ ok ]" "$LOG"

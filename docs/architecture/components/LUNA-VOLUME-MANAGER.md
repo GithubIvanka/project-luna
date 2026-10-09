@@ -44,11 +44,13 @@ namespace-local MountInstance
 file open
 ```
 
-На старте Volume Manager дожидается coldplug readiness Device Manager, сканирует
-уже подключённые разделы, загружает durable preferences и подписывается на
-kernel block uevents. При появлении нового USB-носителя или диска выполняется
-повторное обнаружение и обновление Volume registry. Постоянный пользовательский
-mount или каталог `/mnt/<disk>` для этого не создаётся.
+На старте Volume Manager дожидается coldplug readiness Device Manager, читает
+опубликованный им снимок разделов и загружает durable preferences. Затем он
+отслеживает атомарно обновляемый снимок: при появлении или отключении USB-носителя
+Device Manager обрабатывает kernel uevent и публикует новый inventory, а Volume
+Manager выполняет reconcile логического registry. Он сам не читает sysfs и не
+подписывается на kernel uevents. Постоянный пользовательский mount или каталог
+`/mnt/<disk>` для этого не создаётся.
 
 ## Auto-attach policy
 
@@ -84,8 +86,8 @@ F2FS, NTFS/NTFS3, UDF, VFAT и XFS. Неизвестная файловая си
 ## Состояние реализации
 
 Реализованы crate и executable `luna-volume-manager`, policy auto-attach,
-startup coldplug wait, block-event reconciliation, persistent preference
-backend, drive aliases и backend resolution. System Image build scripts
+startup coldplug wait, reconciliation по атомарному inventory snapshot, persistent
+preference backend, drive aliases и backend resolution. System Image build scripts
 пакуют daemon, OpenRC запускает Device Manager и Volume Manager при загрузке,
 а тесты проверяют доступность поддерживаемого тома и отказ для неизвестных
 файловых систем/системных разделов.

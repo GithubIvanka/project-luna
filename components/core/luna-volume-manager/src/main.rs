@@ -145,9 +145,20 @@ fn save_preferences(manager: &VolumeManager, path: &Path) {
 
 fn render_status(manager: &VolumeManager) -> String {
     let volumes = manager.volumes().collect::<Vec<_>>();
+    let available_count = volumes
+        .iter()
+        .filter(|volume| {
+            matches!(
+                volume.state(),
+                luna_volume_manager::VolumeState::Available
+                    | luna_volume_manager::VolumeState::Mounted
+            )
+        })
+        .count();
     let mut text = format!(
-        "volume_count={}\nauto_attach={}\n",
+        "volume_count={}\navailable_count={}\nauto_attach={}\n",
         volumes.len(),
+        available_count,
         manager.auto_attach_policy().is_enabled()
     );
     for volume in volumes {
@@ -223,8 +234,10 @@ fn run() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_inventory;
+    use super::{parse_inventory, render_status};
     use luna_common::{VolumeId, VolumeRole};
+    use luna_device_manager::DiscoveredBlockVolume;
+    use luna_volume_manager::{VolumeManager, VolumeState};
 
     #[test]
     fn parses_device_manager_inventory_into_volume_identity() {
@@ -241,6 +254,31 @@ mod tests {
         assert_eq!(volumes[0].role(), VolumeRole::External);
         assert_eq!(volumes[0].backend_node(), "/dev/sdb1");
         assert!(volumes[0].is_removable());
+    }
+
+    #[test]
+    fn status_reports_attached_and_available_volumes_for_boot_gate() {
+        let mut manager = VolumeManager::new();
+        manager
+            .reconcile_discovered_volumes(vec![DiscoveredBlockVolume::new(
+                VolumeId::from("usb"),
+                Some("USB".into()),
+                "USB drive".into(),
+                Some("exfat".into()),
+                VolumeRole::External,
+                "/dev/sdb1".into(),
+                true,
+            )])
+            .unwrap();
+
+        assert_eq!(
+            manager.volume(&VolumeId::from("usb")).unwrap().state(),
+            VolumeState::Available
+        );
+        let status = render_status(&manager);
+        assert!(status.contains("volume_count=1\n"));
+        assert!(status.contains("available_count=1\n"));
+        assert!(status.contains("auto_attach=true\n"));
     }
 
     #[test]

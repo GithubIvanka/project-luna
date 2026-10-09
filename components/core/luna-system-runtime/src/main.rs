@@ -1,7 +1,5 @@
 use std::ffi::OsString;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::FileTypeExt;
 use std::time::Duration;
 
 use luna_common::{UserId, Version};
@@ -19,38 +17,11 @@ const SYSTEM_SOURCE_FD_ENV: &str = "LUNA_SYSTEM_SOURCE_FD";
 const IMAGE_SOURCE_FD_ENV: &str = "LUNA_IMAGE_SOURCE_FD";
 const SESSION_USER_ENV: &str = "LUNA_SESSION_USER";
 const BOOT_MODE_ENV: &str = "LUNA_BOOT_MODE";
+const DEVICE_MANAGER_READY: &str = "/run/luna/device-manager.ready";
 const DEVICE_MANAGER_STATUS: &str = "/run/luna/device-manager.status";
-
-fn wait_for_path(path: &str, timeout: Duration) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match fs::metadata(path) {
-            Ok(_) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("inspect {path}: {error}")),
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!("timed out waiting for {path}"));
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-}
-
-fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match fs::metadata(path) {
-            Ok(metadata) if metadata.file_type().is_socket() => return Ok(()),
-            Ok(_) => return Err(format!("{path} exists but is not a socket")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("inspect {path}: {error}")),
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!("timed out waiting for {path}"));
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-}
+const DEVICE_MANAGER_INVENTORY: &str = "/run/luna/device-manager.volumes";
+const VOLUME_MANAGER_READY: &str = "/run/luna/volume-manager.ready";
+const VOLUME_MANAGER_STATUS: &str = "/run/luna/volume-manager.status";
 
 fn secure_source_handoff_fds() -> Result<(), String> {
     for variable in [SYSTEM_SOURCE_FD_ENV, IMAGE_SOURCE_FD_ENV] {
@@ -127,6 +98,89 @@ fn graphical_session_command() -> &'static str {
     "/usr/bin/luna-graphical-session"
 }
 
+fn status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
+    status.lines().find_map(|line| {
+        line.strip_prefix(key)
+            .and_then(|value| value.strip_prefix('='))
+    })
+}
+
+fn validate_volume_service_status(
+    device_status: &str,
+    volume_status: &str,
+) -> Result<(usize, usize), String> {
+    if status_value(device_status, "native_uevent_monitor") != Some("1") {
+        return Err("luna-device-manager did not confirm its native kernel uevent monitor".into());
+    }
+
+    let block_volumes = status_value(device_status, "block_volumes")
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "luna-device-manager status has no valid block_volumes count".to_owned())?;
+    if block_volumes == 0 {
+        return Err("luna-device-manager discovered no block partitions".into());
+    }
+
+    if status_value(volume_status, "auto_attach") != Some("true") {
+        return Err("luna-volume-manager auto-attach policy is not enabled".into());
+    }
+
+    let volumes = status_value(volume_status, "volume_count")
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "luna-volume-manager status has no valid volume_count".to_owned())?;
+    let available = status_value(volume_status, "available_count")
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "luna-volume-manager status has no valid available_count".to_owned())?;
+    if volumes == 0 || available == 0 {
+        return Err(format!(
+            "luna-volume-manager did not make any volumes available (detected={volumes}, available={available})"
+        ));
+    }
+
+    Ok((block_volumes, available))
+}
+
+fn wait_for_volume_services(timeout: Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let ready = [
+            DEVICE_MANAGER_READY,
+            DEVICE_MANAGER_INVENTORY,
+            VOLUME_MANAGER_READY,
+        ]
+        .iter()
+        .all(|path| std::path::Path::new(path).is_file());
+        if ready {
+            let device_status = fs::read_to_string(DEVICE_MANAGER_STATUS)
+                .map_err(|error| format!("read Device Manager status: {error}"))?;
+            let volume_status = fs::read_to_string(VOLUME_MANAGER_STATUS)
+                .map_err(|error| format!("read Volume Manager status: {error}"))?;
+            let (detected, available) =
+                validate_volume_service_status(&device_status, &volume_status)?;
+            eprintln!(
+                "luna-system-runtime: device and volume managers ready (detected={detected}, available={available}, auto_attach=true)"
+            );
+            return Ok(());
+        }
+
+        if std::time::Instant::now() >= deadline {
+            let missing = [
+                DEVICE_MANAGER_READY,
+                DEVICE_MANAGER_INVENTORY,
+                VOLUME_MANAGER_READY,
+            ]
+            .iter()
+            .filter(|path| !std::path::Path::new(path).is_file())
+            .copied()
+            .collect::<Vec<_>>();
+            return Err(format!(
+                "timed out waiting for Device Manager / Volume Manager readiness: {}",
+                missing.join(", ")
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 fn start_openrc() -> Result<(), luna_system_runtime::RuntimeError> {
     for runlevel in ["sysinit", "boot", "default"] {
         eprintln!("luna-system-runtime: OpenRC starting {runlevel} runlevel");
@@ -145,176 +199,10 @@ fn start_openrc() -> Result<(), luna_system_runtime::RuntimeError> {
         }
         eprintln!("luna-system-runtime: OpenRC {runlevel} runlevel ready");
     }
+
+    wait_for_volume_services(Duration::from_secs(20))
+        .map_err(luna_system_runtime::RuntimeError::Session)?;
     Ok(())
-}
-
-fn start_system_services(runtime: &mut SystemRuntimeService) -> Vec<(ProcessId, &'static str)> {
-    if std::env::var_os("LUNA_SKIP_SYSTEM_SERVICES").is_some() || !nix_like_root() {
-        return Vec::new();
-    }
-
-    // System services use RAM-backed transient IPC state. These directories
-    // are part of the runtime environment, not persistent DATA.
-    if let Err(error) = fs::create_dir_all("/run/dbus") {
-        eprintln!("luna-system-runtime: cannot prepare /run/dbus: {error}");
-    }
-    if let Err(error) = fs::create_dir_all("/run/luna") {
-        eprintln!("luna-system-runtime: cannot prepare /run/luna: {error}");
-    }
-
-    // Bootstrap ordering is intentional: udev must enumerate devices before
-    // libinput/udisks, and the system D-Bus bus must exist before services that
-    // register objects on it. Luna has no external service manager providing
-    // these dependency edges for us.
-    let ordered: [(&str, &[&str], Option<&str>); 7] = [
-        ("/usr/bin/udevd", &[], None),
-        (
-            "/usr/bin/luna-device-manager",
-            &[],
-            Some("/run/luna/device-manager.ready"),
-        ),
-        (
-            "/usr/bin/seatd",
-            &["-g", "seat", "-l", "info"],
-            Some("/run/seatd.sock"),
-        ),
-        (
-            "/usr/bin/dbus-daemon",
-            &["--system", "--nofork"],
-            Some("/run/dbus/system_bus_socket"),
-        ),
-        ("/usr/bin/NetworkManager", &["--no-daemon"], None),
-        ("/usr/bin/bluetoothd", &["--nodetach"], None),
-        ("/usr/bin/udisksd", &[], None),
-    ];
-
-    let mut services = Vec::new();
-    for (program, args, ready_socket) in ordered {
-        let spawn = if program == "/usr/bin/luna-device-manager"
-            || program == "/usr/bin/udisksd"
-            || program == "/usr/bin/seatd"
-        {
-            runtime.spawn_process_inherited_stdio(program, args.iter().copied())
-        } else {
-            runtime.spawn_process(program, args.iter().copied())
-        };
-        match spawn {
-            Ok(id) => {
-                eprintln!(
-                    "luna-system-runtime: started system service {program} (pid {})",
-                    id.get()
-                );
-                services.push((id, program));
-                if program == "/usr/bin/udevd" {
-                    std::thread::sleep(Duration::from_millis(150));
-                    match std::process::Command::new("/usr/bin/udevadm")
-                        .args(["trigger", "--subsystem-match=input", "--action=add"])
-                        .status()
-                    {
-                        Ok(status) if status.success() => {
-                            eprintln!("luna-system-runtime: udev input coldplug triggered");
-                        }
-                        Ok(status) => {
-                            eprintln!(
-                                "luna-system-runtime: udev input coldplug failed with {status}"
-                            );
-                        }
-                        Err(error) => {
-                            eprintln!("luna-system-runtime: udev input coldplug failed: {error}");
-                        }
-                    }
-                    match std::process::Command::new("/usr/bin/udevadm")
-                        .arg("settle")
-                        .status()
-                    {
-                        Ok(status) if status.success() => {}
-                        Ok(status) => {
-                            eprintln!("luna-system-runtime: udev settle returned {status}");
-                        }
-                        Err(error) => {
-                            eprintln!("luna-system-runtime: udev settle failed: {error}");
-                        }
-                    }
-                    for event in ["event0", "event1", "event2"] {
-                        match std::process::Command::new("/usr/bin/udevadm")
-                            .args([
-                                "info",
-                                "--query=property",
-                                "--name",
-                                &format!("/dev/input/{event}"),
-                            ])
-                            .output()
-                        {
-                            Ok(output) if output.status.success() => {
-                                for line in String::from_utf8_lossy(&output.stdout).lines() {
-                                    if line.starts_with("ID_INPUT_")
-                                        || line.starts_with("ID_SEAT=")
-                                        || line.starts_with("TAGS=")
-                                        || line.starts_with("NAME=")
-                                        || line.starts_with("SUBSYSTEM=")
-                                    {
-                                        eprintln!("luna-system-runtime: udev {event} {line}");
-                                    }
-                                }
-                            }
-                            Ok(output) => {
-                                eprintln!(
-                                    "luna-system-runtime: udev {event} info returned {}",
-                                    output.status
-                                );
-                            }
-                            Err(error) => {
-                                eprintln!("luna-system-runtime: udev {event} info failed: {error}");
-                            }
-                        }
-                    }
-                }
-                if let Some(path) = ready_socket {
-                    let readiness = if program == "/usr/bin/luna-device-manager" {
-                        wait_for_path(path, Duration::from_secs(5))
-                    } else {
-                        wait_for_socket(path, Duration::from_secs(3))
-                    };
-                    if readiness.is_err() {
-                        eprintln!(
-                            "luna-system-runtime: system service {program} did not become ready at {path}"
-                        );
-                        if program == "/usr/bin/luna-device-manager"
-                            || std::env::var_os("LUNA_STRICT_SYSTEM_SERVICES").is_some()
-                        {
-                            std::process::exit(1);
-                        }
-                    } else if program == "/usr/bin/luna-device-manager" {
-                        match fs::read_to_string(DEVICE_MANAGER_STATUS) {
-                            Ok(status) => {
-                                for line in status.lines() {
-                                    eprintln!("luna-system-runtime: device-manager {line}");
-                                }
-                            }
-                            Err(error) => eprintln!(
-                                "luna-system-runtime: cannot read device-manager status: {error}"
-                            ),
-                        }
-                    }
-                }
-            }
-            Err(error) if std::env::var_os("LUNA_STRICT_SYSTEM_SERVICES").is_none() => {
-                eprintln!(
-                    "luna-system-runtime: optional system service {program} unavailable: {error}"
-                );
-            }
-            Err(error) => {
-                eprintln!("luna-system-runtime: required system service {program} failed: {error}");
-                std::process::exit(1);
-            }
-        }
-    }
-    services
-}
-
-fn nix_like_root() -> bool {
-    std::env::var_os("LUNA_SYSTEM_RUNTIME_ROOT").is_some_and(|value| value == "1")
-        || std::fs::metadata("/etc/luna/services/network.toml").is_ok()
 }
 
 fn launch_graphical_user_session(
@@ -649,5 +537,42 @@ fn main() {
         if !respawn {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod volume_service_tests {
+    use super::validate_volume_service_status;
+
+    #[test]
+    fn volume_services_require_kernel_monitor_and_auto_attached_volume() {
+        let device =
+            "input_devices=4\nblock_volumes=4\nnative_uevent_monitor=1\nudev_compat_backend=1\n";
+        let volume = "volume_count=4\navailable_count=1\nauto_attach=true\n";
+        assert_eq!(
+            validate_volume_service_status(device, volume).unwrap(),
+            (4, 1)
+        );
+    }
+
+    #[test]
+    fn boot_gate_rejects_missing_block_discovery() {
+        let device = "input_devices=4\nblock_volumes=0\nnative_uevent_monitor=1\n";
+        let volume = "volume_count=0\navailable_count=0\nauto_attach=true\n";
+        assert!(validate_volume_service_status(device, volume).is_err());
+    }
+
+    #[test]
+    fn boot_gate_rejects_volume_manager_without_auto_attach() {
+        let device = "block_volumes=4\nnative_uevent_monitor=1\n";
+        let volume = "volume_count=4\navailable_count=4\nauto_attach=false\n";
+        assert!(validate_volume_service_status(device, volume).is_err());
+    }
+
+    #[test]
+    fn boot_gate_rejects_no_available_volumes() {
+        let device = "block_volumes=4\nnative_uevent_monitor=1\n";
+        let volume = "volume_count=4\navailable_count=0\nauto_attach=true\n";
+        assert!(validate_volume_service_status(device, volume).is_err());
     }
 }
