@@ -1,65 +1,70 @@
 # Project Luna
 
-Project Luna is a custom operating-system project built around the Linux kernel, with its own boot, immutable System Image, runtime, application and recovery architecture.
+Project Luna — операционная система на основе ядра Linux с собственной
+архитектурой загрузки, неизменяемых системных образов, приложений и восстановления.
+Компоненты Luna написаны на Rust; собственная среда выполнения использует musl.
+Лицензия — Apache License 2.0.
 
-## Source of Truth
+## С чего начать
 
-The architectural source of truth is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Start there, then follow the linked detailed architecture, accepted-decision summary and component documents.
+- [Архитектура и принятые решения](docs/ARCHITECTURE.md) — нормативный источник.
+- [Правила работы с проектом](AGENTS.md) и [правила разработки](docs/development/AI-DEVELOPMENT-RULES.md).
+- [Аудит и объединение работы 2026-10-14](docs/development/AUDIT-AND-CONSOLIDATION-2026-10-14.md) — состояние реализации и доказательства.
+- [Спецификация оформления Alpha](docs/design/luna-alpha-20261013/SPEC.md) и [состояние переноса в ОС](docs/design/luna-alpha-20261013/IMPLEMENTATION.md).
 
-## Canonical boot chain
-
-```text
-UEFI
-  ↓
-luna-boot.efi
-  ↓
-Linux kernel
-  ↓
-luna-init
-  ↓
-luna-system-runtime
-  ↓
-UserSession
-  ↓
-luna-app-runtime
-```
-
-`luna-init` performs early bootstrap, remains PID 1 for the normal system lifetime, and starts `luna-system-runtime` as a child process.
-
-## Canonical storage
+## Загрузка и среда выполнения
 
 ```text
-Disk
-├── EFI
-├── LUNA-SYS
-├── LUNA-DATA
-└── SWAP
+UEFI → luna-boot.efi → ядро Linux → luna-init (PID 1)
+  → luna-system-runtime → UserSession → luna-app-runtime → ApplicationInstance
 ```
 
-`LUNA-SYS` is OS-managed. `LUNA-DATA` is persistent mutable storage.
+`luna-init` остаётся PID 1 и запускает `luna-system-runtime` дочерним процессом.
+Нативный вход обслуживает `luna-user-session`; рабочий стол — niri и Noctalia Shell.
+Бандл превращается в план запуска, проходит проверку прав через `luna-security`,
+после чего AppRuntime создаёт разрешённое окружение и запускает приложение.
+Изоляция монтирований обязательна; отдельное пространство PID обычному приложению
+не требуется. Подробные границы закреплены в архитектуре и контрактах.
 
-A System Image is directly `luna-X.Y.Z.squashfs` with an adjacent `luna-X.Y.Z.toml` manifest. `.lbp` is the Luna Bundle Format and is unrelated to System Image storage.
-
-## Runtime
+## Хранилище и приложения
 
 ```text
-luna-init (PID 1)
-└── luna-system-runtime
-    └── UserSession
-        └── luna-app-runtime
-            └── ApplicationInstance
+EFI | LUNA-SYS (ext4) | LUNA-DATA (Btrfs) | SWAP
 ```
 
-Application launch is authorization-first: Bundle → ApplicationPlan → MappingPlan → `luna-security` → AuthorizedApplicationPlan → trusted setup → `luna-namespace` → process.
+System Image — `luna-X.Y.Z.squashfs` с соседним `luna-X.Y.Z.toml`.
+Системные образы неизменяемы. Рабочий корень состоит из разрешённых ресурсов
+System Image, постоянных ресурсов DATA и ресурсов времени выполнения.
 
-Mount namespace isolation is mandatory. A PID namespace is not required for ordinary applications.
+`.lbp` — транспортный архив приложения. Установленное приложение — проверяемый
+каталог `.lunaapp` с `manifest.toml`, `integrity.toml` и `payload/`.
+ID, версия и ContentIdentity находятся в метаданных; архив `.lbp` не вкладывается
+в установленное приложение. [Контракт бандлов](docs/architecture/components/LUNA-BUNDLE.md)
+и [этапы реализации](docs/development/application-bundles/) описывают точный статус.
 
-## Development
+## Разработка и проверка
 
-Luna components are written in Rust. The Luna kernel integration is maintained separately under `components/kernel/`.
+Основная локальная ветка — `develop`, по решению пользователя от 2026-10-14.
+Исторические и экспериментальные ветки сохраняются. Защита удалённой ветки
+не обходится принудительной отправкой.
 
-Development changes follow [`docs/development/AI-DEVELOPMENT-RULES.md`](docs/development/AI-DEVELOPMENT-RULES.md).
+Сборки и QEMU идут через канонический процесс с двумя слотами:
 
-## Archive
+```sh
+python3 tools/canonical-luna-workbench.py status
+python3 tools/canonical-luna-workbench.py view
+```
 
-Pre-audit documentation is temporarily retained under `docs/archive/2026-09-14-pre-audit/`. It is non-normative reference material and must not be used to infer current architecture.
+Изменения исполняемого кода требуют новой сборки; оформление и неизменяемые
+ресурсы можно менять точечно. Для сборки нужны закреплённые входные ресурсы,
+SDK и проверочный Wayland fixture. Команды и управление дисковыми артефактами
+описаны в [ARTIFACT-WORKFLOW.md](docs/development/alpine-foundation/ARTIFACT-WORKFLOW.md).
+Отчёт должен различать тесты компонентов, QEMU и проверку физического оборудования.
+
+## Исторические материалы
+
+`docs/design/visual-concepts/` хранит исходные изображения и варианты оформления.
+`docs/design/audits/2026-10-13/` содержит первоначальный аудит концептов.
+`docs/archive/2026-09-14-pre-audit/` — ненормативные материалы старой архитектуры.
+Исторические отчёты подтверждают состояние на свою дату и не заменяют текущие
+контракты или свежие результаты проверки.

@@ -1,13 +1,11 @@
 ---
 name: luna-kernel
-description: Work on Luna's Linux kernel overlay, direct luna-init execution, handoff validation, and Alpha hardware configuration.
+description: Работать с Linux-overlay Luna, прямым запуском luna-init, handoff и оборудованием Alpha.
 ---
-# Luna Kernel
-Keep Luna-specific kernel integration small and explicit.
-Validate `LunaBootHandoffV1`, memory ranges, init ELF constraints, and init digest.
-Use the existing `components/kernel/rust/luna_boot.rs` and `luna_exec.rs` path unless evidence requires redesign.
-Preserve direct initial-userspace execution from the memory-resident luna-init handoff.
-Alpha hardware priority: Intel UHD 630/i915, AX200 Wi-Fi/Bluetooth, r8169 Ethernet,
-Intel HDA audio, USB xHCI, NVMe and SATA.
-Prefer required early drivers built-in for Alpha; avoid premature module orchestration.
-Ensure Btrfs, SquashFS, EFI/GPT and required namespaces/cgroups/security features are enabled.
+# Ядро Luna
+
+Сохраняйте небольшую явную интеграцию Luna с Linux. Проверяйте `LunaBootHandoffV1`, диапазоны памяти, ограничения init ELF и digest; используйте существующие `components/kernel/rust/luna_boot.rs` и `luna_exec.rs`, пока доказательства не требуют изменения.
+
+Сохраняйте прямой запуск начального пользовательского процесса из переданного в памяти luna-init. Приоритет Alpha: Intel UHD 630/i915, AX200 Wi-Fi/Bluetooth, r8169, Intel HDA audio, USB xHCI, NVMe и SATA.
+
+Необходимые ранние драйверы для Alpha предпочтительно встраивать в ядро. Проверяйте Btrfs, SquashFS, EFI/GPT и необходимые namespaces/cgroups/security-функции по текущим контрактам и конфигурации; не усложняйте управление модулями заранее.

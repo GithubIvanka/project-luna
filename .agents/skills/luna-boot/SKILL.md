@@ -1,13 +1,11 @@
 ---
 name: luna-boot
-description: Implement and debug the Luna UEFI to kernel to luna-init boot path and boot-target resolution.
+description: Реализовывать и проверять загрузку Luna от UEFI до luna-init и выбор совместимой цели загрузки.
 ---
-# Luna Boot
-Canonical chain: UEFI -> luna-boot.efi -> Linux kernel -> luna-init PID 1.
-Resolve atomic targets as System Image -> compatible init -> compatible kernel.
-System Images are `.squashfs`; init artifacts are versioned ELF `.init` files.
-Preserve `LunaBootHandoffV1` and its integrity/compatibility semantics.
-Keep detailed attempt progress in RAM; durable boot state changes only on meaningful events.
-B at startup requests the boot/recovery menu; normal boot remains direct and quiet.
-Preserve the direct initial-userspace path with luna-init as the only PID 1.
-Test bootloader changes with the QEMU/OVMF harness before hardware deployment.
+# Загрузка Luna
+
+Каноническая цепочка: UEFI -> `luna-boot.efi` -> ядро Linux -> `luna-init` (PID 1). Затем `luna-init` запускает дочерний `luna-system-runtime`.
+
+Цель выбирается как System Image -> совместимый init -> совместимое ядро. System Image — `.squashfs`, init — версионированный ELF `.init`. Сохраняйте контракт `LunaBootHandoffV1`, проверки целостности и совместимости.
+
+Подробный ход попытки храните в RAM; постоянное состояние меняйте только при значимом событии. Обычная загрузка остаётся прямой. Изменение загрузчика проверяйте через действующий канонический QEMU/OVMF-набор до физического развёртывания.

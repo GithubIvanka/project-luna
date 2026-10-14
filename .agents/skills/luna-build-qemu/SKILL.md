@@ -1,13 +1,13 @@
 ---
 name: luna-build-qemu
-description: Build Luna artifacts and validate the bootable PC image through QEMU before physical deployment.
+description: Собирать и проверять образы Luna через канонический двухслотовый процесс и QEMU перед физическим развёртыванием.
 ---
-# Luna Build and QEMU
-Use the current project build scripts as the starting point; repair stale assumptions rather than duplicating them.
-Build Luna userspace natively for musl; glibc is optional compatibility runtime for applications.
-The PC image must contain EFI, ext4 LUNA-SYS, Btrfs LUNA-DATA, and SWAP.
-System Images belong in `LUNA-SYS/images/`; versioned init artifacts in `cores/`; kernels in `kernels/`.
-Remove stale legacy boot inputs and paths from builders and tests.
-QEMU must reach kernel -> luna-init -> system runtime before hardware installation is attempted.
-Capture serial/kernel logs on failure and iterate until the failure is explained and fixed.
-Never overwrite a user's physical disk from an automated build/test step.
+# Сборка и QEMU
+
+Используйте `tools/canonical-luna-workbench.py` и `docs/development/alpine-foundation/ARTIFACT-WORKFLOW.md`. Сохраняйте два рабочих слота, отдельные доказательства и автоматическую очистку временных дисков. Проверьте доступные команды через `--help`; не придумывайте параметры.
+
+Для неизменяемых ресурсов используйте предусмотренное точечное изменение образа, когда оно подходит; изменение исполняемого кода требует соответствующей сборки. Нативный пользовательский стек Luna собирается для musl; glibc — отдельная необязательная среда совместимости.
+
+Образ диска содержит EFI, ext4 LUNA-SYS, Btrfs LUNA-DATA и SWAP. System Images лежат в `LUNA-SYS/images/`, init — в `cores/`, ядра — в `kernels/`.
+
+Продвигайте экспериментальный слот только после требуемой проверки. Сохраняйте журнал ядра/serial и объясняйте отказ по доказательствам. Перед изменением разделов или стиранием физического диска требуется непосредственное явное подтверждение пользователя.

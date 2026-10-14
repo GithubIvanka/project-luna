@@ -1,13 +1,11 @@
 ---
 name: luna-init
-description: Implement and debug luna-init as the real persistent PID 1 and bridge from boot handoff to system runtime.
+description: Реализовывать luna-init как постоянный PID 1 и безопасную передачу от загрузчика к системной среде.
 ---
-# Luna Init
-`luna-init` is PID 1 for the entire normal system lifetime.
-Validate the read-only FD 3 boot handoff before using its contents.
-Use the selected System Image, DATA binding, kernel identity, and boot mode from the handoff.
-LUNA-SYS is ext4; LUNA-DATA is Btrfs.
-Build the logical root from approved System Image and DATA resources without whole-image copying.
-Start `luna-system-runtime` as a child; never replace PID 1 with it.
-Provide correct shutdown/reboot lifecycle and child reaping.
-Recovery uses the normal System Image/init/kernel plus virtual DATA from a Recovery DATA Image.
+# luna-init
+
+`luna-init` остаётся PID 1 на всём протяжении работы системы. Перед использованием проверьте доступный только для чтения дескриптор FD 3 с данными загрузки; применяйте выбранные System Image, DATA, идентичность ядра и режим из принятого handoff-контракта.
+
+Собирайте логический корень из разрешённых ресурсов образа и DATA без копирования всего образа. LUNA-SYS — ext4, LUNA-DATA — Btrfs. Запускайте `luna-system-runtime` дочерним процессом, обеспечивайте сбор завершившихся детей и корректные shutdown/reboot.
+
+Recovery использует обычные совместимые System Image/init/kernel и виртуальную DATA восстановления. Не подменяйте физическую DATA и не вводите параллельный PID 1.

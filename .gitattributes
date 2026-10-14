@@ -1,0 +1,2 @@
+# Пробел в начале пустой строки unified diff — обязательный маркер контекста.
+tools/alpine-foundation/ghostty-wayland-app-id.patch whitespace=-blank-at-eol

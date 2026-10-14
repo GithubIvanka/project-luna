@@ -1,13 +1,11 @@
 ---
 name: luna-filesystem
-description: Implement and review Luna storage, logical root, LUNA-SYS, LUNA-DATA, SquashFS, and Btrfs behavior.
+description: Реализовывать хранилище и логический корень Luna согласно контрактам LUNA-SYS, LUNA-DATA, SquashFS и Btrfs.
 ---
-# Luna Filesystem
-LUNA-SYS is ext4 and contains images, cores, kernels, config, and recovery artifacts.
-LUNA-DATA is Btrfs and contains `system`, `users`, and `cache`.
-A System Image is directly `luna-X.Y.Z.squashfs` with an adjacent TOML manifest.
-Recovery DATA is a separate artifact under `LUNA-SYS/recovery/`.
-Do not substitute unrelated DATA partitions silently.
-Do not use `/run` as whole-system staging or copy the entire System Image into RAM.
-Keep `system/state/` and `system/volumes/` distinct durable resource classes.
-Drivers and firmware remain separate resource classes.
+# Файловые системы Luna
+
+LUNA-SYS — ext4 с `images`, `cores`, `kernels`, `config` и ресурсами восстановления. LUNA-DATA — Btrfs: `system` содержит apps, drivers, firmware, libs, config, state, volumes; `users/<user>` содержит home, data, config.
+
+System Image — непосредственно `luna-X.Y.Z.squashfs` с соседним TOML-манифестом. `.lbp` — транспортный бандл, а не System Image. DATA восстановления берётся из `LUNA-SYS/recovery/`; физическая DATA является объектом ремонта.
+
+Не подставляйте посторонний раздел DATA. Собирайте логический корень из разрешённых ресурсов; не копируйте весь образ в RAM и не используйте `/run` для подготовки всего корня. `system/state/` и `system/volumes/` обязательны; драйверы и прошивки — отдельные классы ресурсов.

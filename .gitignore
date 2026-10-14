@@ -17,3 +17,8 @@ components/boot/tests/ovmf/out*
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Локальные графы навигации и настройки окружения Codex пересоздаются отдельно.
+/graphify-out
+/components/graphify-out/
+/.codex/environments/

@@ -421,3 +421,171 @@ Linux 7.2.4 direct-init kernel with `CONFIG_NET`, `CONFIG_DRM`,
 In the interactive case the serial trace contains both
 `login credentials accepted` and `LUNA-NATIVE-SESSION: READY`, with no kernel
 panic after the authenticated user process is launched.
+
+## Stage 4.4 — Niri Wayland compositor through Luna UserSession — 2026-10-09
+
+The interactive direct-init fixture now launches the real Niri compositor
+from the DATA provider after the native Luna login succeeds. The guest uses
+Luna's repository-built Mesa VirGL artifact from
+dist/.build/alpine-foundation-graphics/mesa/out, not Alpine's generic Mesa
+package, because the latter does not supply the required VirGL Gallium driver.
+The QEMU acceptance case uses virtio-gpu-gl-pci with egl-headless; the kernel
+reports +virgl and both capability sets.
+
+This run also identified three minimal-kernel contracts that were missing from
+tinyconfig:
+
+- CONFIG_BINFMT_SCRIPT=y to execute the user-session launcher via its
+  #!/bin/sh interpreter.
+- CONFIG_FILE_LOCKING=y because Wayland creates its socket with a flock
+  lock file. Without file locking, Niri's automatic socket selection returns
+  AlreadyInUse despite an empty runtime directory.
+- CONFIG_INOTIFY_USER=y so the DATA-provided eudev/udevd compatibility
+  service can initialize inotify instead of failing the Device Manager gate.
+
+luna-init now assigns ownership of persistent per-user home, data, and
+config directories using UID/GID values from the selected auth provider.
+This lets the authenticated user create its fontconfig cache and normal home
+files. luna-system-runtime starts only the optional seatd provider as a
+transitional libseat compatibility layer for the Niri test. It does not
+replace Luna-native UserSession seat ownership. The Device Manager remains
+the single owner of udevd startup, coldplug and supervision.
+
+The verified OVMF trace reaches:
+
+    luna-system-runtime: boot success confirmed
+    luna-user-session: login credentials accepted
+    luna-system-runtime: graphical UserSession launched /usr/bin/luna-graphical-session
+    Niri: Wayland socket /run/user/1000/wayland-1
+    Niri: render node /dev/dri/renderD128
+    Niri: new connector Virtual-1
+    Niri: connecting connector Virtual-1
+    Niri: mode 1280x800 selected
+
+The compositor remains running through the test's 60-second QEMU window. The
+trace no longer contains "virtio_gpu: driver missing", "software EGL renderers
+are skipped", or "no allocator available for device". Mesa still logs a warning
+that EGL_WL_bind_wayland_display is unsupported; the compositor continues to
+initialize the DRM output. A pixel screenshot was attempted through QEMU's
+HMP screendump, but the egl-headless backend reports "Error: no surface".
+Therefore the test proves Wayland, renderer and output setup, not a visually
+inspected framebuffer or a window-containing desktop frame.
+
+### Host acceptance rerun — 2026-10-10
+
+The current `luna-init`, `luna-system-runtime`, Device Manager, Volume Manager,
+and direct-init kernel were rebuilt from the working tree before rerunning the
+Niri acceptance. This Codex host has no `/dev/dri`, and its QEMU 10.2 GTK backend
+was built without OpenGL support, so the default `egl-headless` display could
+not start VirGL. The harness now accepts `LUNA_NIRI_QEMU_DISPLAY`; using
+`sdl,gl=on` supplied the required host GL surface while keeping the guest's
+virtio-gpu VirGL path unchanged.
+
+The full five-case manager-gate suite passed with the rebuilt artifacts:
+
+```text
+positive manager gate
+missing Volume Manager blocks boot success
+zero available volumes blocks boot success
+interactive login launches the native session
+Niri session creates its output and remains running for 60 seconds
+```
+
+The Niri case passed the complete 60-second session acceptance:
+
+```text
+manager gate and boot success
+-> DRM master, login frame, and keyboard input ready
+-> keyboard-entered test password accepted
+-> seatd started as the optional libseat compatibility provider
+-> Wayland socket /run/user/1000/wayland-1
+-> Niri connected Virtual-1 at 1280x800
+-> compositor remained alive through the test timeout
+```
+
+Run it on a host that needs the SDL backend with a fresh output directory:
+
+```sh
+test_out="$(mktemp -d /tmp/luna-niri-session.XXXXXX)"
+LUNA_MANAGER_GATE_TEST_OUT="$test_out" \
+LUNA_NIRI_QEMU_DISPLAY='sdl,gl=on' \
+bash experiments/luna-onefile/test-manager-boot.sh niri-session
+```
+
+This verifies compositor startup and continued operation through QEMU's SDL
+surface. The acceptance still checks serial/DRM state rather than captured and
+visually inspected pixels.
+
+The reproducible direct-init kernel builder now enables and verifies
+CONFIG_NET, CONFIG_DRM_VIRTIO_GPU, CONFIG_BINFMT_SCRIPT,
+CONFIG_FILE_LOCKING, CONFIG_INOTIFY_USER, and the earlier DRM, evdev and
+multi-user settings. The Niri provider adapter overlays only the existing
+Luna-built VirGL Mesa files into an isolated DATA tree; it does not change the
+system-installed Mesa or build the full Alpine desktop.
+
+## Stage 4.5 — Noctalia shell through Luna UserSession — 2026-10-10
+
+The tracked Alpine graphics build recipe now produces a complete Noctalia
+runtime instead of relying on an untracked package-cache layout. It stages the
+Noctalia executable and assets, resolves APK virtual package providers, and
+includes a D-Bus session configuration for the test user bus. The canonical
+disk builder now copies Noctalia's assets into DATA alongside the executable;
+the runtime maps them to `/usr/share/noctalia` and the wrapper exports
+`NOCTALIA_ASSETS_DIR`.
+
+The separate `noctalia-session` OVMF case keeps the existing Niri acceptance
+and native Luna login path, then starts Noctalia with `spawn-at-startup`. Its
+serial assertions require an authenticated user session, a live Wayland
+socket, the D-Bus session bus, Wayland layer-shell, EGL 1.5, the Mesa VirGL
+renderer, the default wallpaper and top bar, and a Noctalia process that stays
+alive until QEMU ends the observation window. The staged DATA provider is
+about 367 MiB, so this case gets a 1 GiB LUNA-DATA partition; the existing
+Niri-only test retains its 768 MiB partition.
+
+The test passed on 2026-10-10 with Alpine 3.24.2, Noctalia 5.2.0, and the
+repository-built Mesa 26.1.6 VirGL stack. The guest log reports a 1280x800
+`Virtual-1` output, EGL 1.5, `virgl (Mesa Intel(R) UHD Graphics 630 (CFL GT2))`,
+the default wallpaper and bar, and a working session bus. This is serial-log
+evidence of Noctalia initialization and shell surface creation; no guest pixel
+capture was available for visual inspection. PipeWire/audio and plugin
+installation are outside this test case.
+
+On this host the build needed the cached Alpine image and host networking:
+
+```sh
+LUNA_ALPINE_GRAPHICS_BUILD_ROOT=/tmp/luna-alpine-graphics-build \
+LUNA_ALPINE_IMAGE=alpine:3.24.2 \
+LUNA_DOCKER_NETWORK=host \
+bash tools/build-alpine-foundation-graphics.sh
+
+LUNA_ALPINE_GRAPHICS_BUILD_ROOT=/tmp/luna-alpine-graphics-build \
+LUNA_MANAGER_GATE_TEST_OUT="$(mktemp -d /tmp/luna-noctalia-session.XXXXXX)" \
+LUNA_NIRI_QEMU_DISPLAY='sdl,gl=on' \
+bash experiments/luna-onefile/test-manager-boot.sh noctalia-session
+```
+
+The test-only provider and its cached binaries stay under the selected build
+root. This acceptance does not make Alpine, Niri, Noctalia, or the D-Bus
+provider Luna-owned architecture layers.
+
+## Stage 4.6 — full canonical desktop and lifecycle audit — 2026-10-10
+
+The full GPT canonical disk was compared with the working Alpine direct-root
+launcher. Existing user changes and the untracked fixture provider were kept.
+The audit found private Mesa being overwritten by service libraries, missing
+ordinary fonts, overlapping D-Bus/Polkit resource mounts, incomplete service
+accounts/FHS aliases, and desktop processes not registered with UserSession.
+These are repaired in the existing Luna boot/init/runtime/provider boundaries.
+
+The full-image tests now cover native login, a 60-second Niri/Noctalia session,
+logout followed by a second login, actual guest poweroff and reboot, and QEMU
+firmware display continuity. The display default is `virtio-vga-gl`; the old
+`virtio-gpu-gl-pci` intentionally fails the new firmware display check. Native
+boot shares the existing Alpine GOP framebuffer handoff helper.
+
+Full analysis, exact evidence and current limits are recorded in
+[GRAPHICS-BRANCH-AUDIT.md](../alpine-foundation/GRAPHICS-BRANCH-AUDIT.md).
+The ordinary image and separate action-injecting test images are under
+`target/luna-foundation-audit-20261010/`. This full-image acceptance is distinct
+from the earlier one-file Niri/Noctalia fixtures; those fixtures and user work
+were preserved. No commit or physical deployment was performed.

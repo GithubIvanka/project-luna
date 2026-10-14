@@ -1,13 +1,11 @@
 ---
 name: luna-rust
-description: Follow Project Luna Rust workspace conventions and safely implement, test, and refactor native musl components.
+description: Реализовывать и проверять нативные musl-компоненты Rust в workspace Project Luna.
 ---
-# Luna Rust
-Read the local crate and its contracts before editing public APIs.
-Prefer explicit types, clear errors, small modules, and tests for behavior changes.
-Use workspace dependencies consistently; do not introduce duplicate crates without reason.
-Target musl for native Luna userspace components.
-Keep unsafe code narrowly scoped and document its safety invariants.
-Run focused tests first, then the workspace checks relevant to the change.
-Do not hide build failures behind disabled checks or weakening compiler/linter settings.
-Keep compatibility code isolated from the native Luna path.
+# Rust в Luna
+
+Перед правкой публичного API прочитайте текущий crate и его контракт. Предпочитайте явные типы, понятные ошибки и небольшие модули. Используйте общие workspace-зависимости; не создавайте дублирующие crates без обязанности.
+
+Нативные пользовательские компоненты предназначены для musl. Ограничивайте `unsafe` минимальной областью и объясняйте инварианты безопасности на русском; маркер `SAFETY` сохраняйте.
+
+Проверяйте изменённое поведение целевыми тестами, затем относящимися к правке сборками и проверками. Для обратимых низкорисковых правок не добавляйте тесты, повторяющие реализацию. Не скрывайте ошибки отключением проверок или ослаблением компилятора/линтера. Код совместимости отделяйте от нативного пути.

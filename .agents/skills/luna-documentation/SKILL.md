@@ -1,13 +1,11 @@
 ---
 name: luna-documentation
-description: Keep Project Luna architecture, contracts, RFCs, status, and agent-facing documentation consistent with implementation.
+description: Согласовывать русскую документацию Luna с действующими решениями, контрактами и подтверждённой реализацией.
 ---
-# Luna Documentation
-Treat current accepted decisions and contracts as normative; archive content is historical.
-Before changing code, locate the relevant contract or architecture document.
-After meaningful behavior changes, update the smallest authoritative document needed.
-Do not document rejected architecture as a current option.
-Keep active documentation clear and consistent in Russian unless an existing contract requires another form.
-Do not turn status notes into architecture decisions.
-Use exact names for `LUNA-SYS`, `LUNA-DATA`, `luna-boot.efi`, `luna-init`, and boot roles.
-Validate documentation paths and examples against the actual repository before committing.
+# Документация Luna
+
+Действующие решения и контракты нормативны; архивы описывают историю. Перед правкой поведения найдите соответствующий контракт, после значимого изменения обновите минимальный необходимый авторитетный документ.
+
+Документацию и пояснения пишите на русском. Сохраняйте имена API, файлов, форматов, ключей и точные диагностики. Не представляйте отвергнутую архитектуру действующим вариантом и не превращайте отчёт проверки в архитектурное решение.
+
+Проверяйте ссылки, примеры и команды по текущему репозиторию. Отделяйте планы от реализованного поведения, а снимки графа и прежние результаты — от текущей проверки. Коммит выполняйте только в разрешённых пользователем границах.

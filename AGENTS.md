@@ -1,106 +1,142 @@
-# Project Luna — Agent Context
+# Project Luna — контекст для агентов
 
-## Authority
+## Приоритет источников
 
-This file is the operational context for coding agents working in Project Luna.
-Current architecture and contracts are authoritative.
-Direct user requests and repository contracts override this file when they conflict.
-Do not invent new architecture when an accepted Luna decision already exists.
+Этот файл задаёт правила работы агентов с Project Luna.
+Действующая архитектура и контракты являются обязательными.
+При противоречиях прямые указания пользователя и контракты репозитория имеют
+приоритет над этим файлом. Если решение Luna уже принято, не придумывайте
+вместо него новую архитектуру.
 
-## Project identity
+## Язык документации и комментариев
 
-Project: Project Luna. Internal name: `luna`.
-Implementation language: Rust. License: Apache License 2.0.
-Linux kernel is the foundation; Luna is its own OS architecture.
-Primary target: a real, bootable and usable Alpha on the developer laptop.
+Документацию проекта, пояснения для пользователя и комментарии в собственном
+коде Luna пишите на русском языке. Это прямое требование пользователя от
+2026-10-13. При изменении существующего английского пояснения переводите его
+на русский, сохраняя технический смысл.
 
-## Canonical storage
+Объясняйте назначение компонентов, причины нетривиальных решений, ограничения
+и условия безопасности. Добавляйте полезные комментарии к сложной логике,
+публичным границам компонентов и операциям `unsafe`; не пересказывайте каждую
+очевидную строку. В комментариях `SAFETY` сам маркер можно сохранить для
+инструментов, но обоснование безопасности должно быть на русском.
 
-Physical layout:
+Имена API, типов, функций, файлов, ключей TOML/JSON, команды, идентификаторы,
+контрольные суммы и точные диагностические сообщения сохраняйте без перевода.
+Незнакомые технические термины поясняйте русскими словами при первом упоминании.
+
+## Назначение проекта
+
+Проект: Project Luna. Внутреннее имя: `luna`.
+Язык реализации: Rust. Лицензия: Apache License 2.0.
+Основа — ядро Linux; у Luna собственная архитектура ОС.
+Основная цель — реально загружаемая и пригодная для работы Alpha на ноутбуке
+разработчика.
+
+## Каноническое хранилище
+
+Физическая схема разделов:
 EFI | LUNA-SYS | LUNA-DATA | SWAP
-LUNA-SYS = ext4. LUNA-DATA = Btrfs.
-For Alpha, EFI, LUNA-SYS and LUNA-DATA are on the same physical disk.
-`LUNA-SYS/config/luna-data.toml` binds the expected DATA disk and partition GUIDs.
+LUNA-SYS — ext4. LUNA-DATA — Btrfs.
+Для Alpha разделы EFI, LUNA-SYS и LUNA-DATA находятся на одном физическом диске.
+`LUNA-SYS/config/luna-data.toml` закрепляет ожидаемые GUID диска и раздела DATA.
 
-## System image
+## Системный образ
 
-A normal System Image is directly `luna-X.Y.Z.squashfs`.
-Its manifest is `luna-X.Y.Z.toml` beside it in `LUNA-SYS/images/`.
-`.lbp` is a Bundle format, never a System Image format.
-System Images are immutable and versioned.
+Обычный System Image — непосредственно `luna-X.Y.Z.squashfs`.
+Его манифест `luna-X.Y.Z.toml` лежит рядом в `LUNA-SYS/images/`.
+`.lbp` — формат бандла (Bundle), он никогда не является форматом System Image.
+Системные образы неизменяемы и имеют версии.
 
-## Boot chain
+## Цепочка загрузки
 
-UEFI -> luna-boot.efi -> Linux kernel -> luna-init (PID 1)
+UEFI -> luna-boot.efi -> ядро Linux -> luna-init (PID 1)
 -> luna-system-runtime -> UserSession -> luna-app-runtime -> ApplicationInstance
-`luna-init` remains PID 1. `luna-system-runtime` is its child.
-`luna-boot.efi` resolves System Image -> compatible init -> compatible kernel.
+`luna-init` остаётся PID 1. `luna-system-runtime` — его дочерний процесс.
+`luna-boot.efi` выбирает System Image, затем совместимые init и ядро.
 
-## Architecture boundaries
+## Архитектурные границы
 
-Keep luna-init as the only PID 1 and preserve the direct handoff execution path.
-Do not restore `luna-core`, generic `luna-runtime`, or `luna-session` as mandatory layers.
-Do not use `luna-run-session` as an architectural layer.
-Do not use user boot profiles or trusted-setup as architecture.
-Do not make `/run` a whole-system staging directory.
-Do not silently substitute unrelated LUNA-DATA.
+Сохраняйте `luna-init` единственным PID 1 и прямую передачу управления при загрузке.
+Не возвращайте `luna-core`, общий `luna-runtime` или `luna-session` как обязательные
+слои. Не используйте `luna-run-session` как архитектурный слой.
+Пользовательские профили загрузки и trusted-setup не являются архитектурой Luna.
+Не превращайте `/run` во временное хранилище всего системного корня.
+Не подставляйте незаметно посторонний раздел LUNA-DATA.
 
-## Logical root
+## Логический корень
 
-Running `/` is assembled from approved immutable System Image resources and mutable DATA.
-Do not copy the whole System Image into RAM.
-`/run` may exist as a normal runtime filesystem, but it is not a root staging mechanism.
-`/dev`, `/proc`, `/sys`, `/run`, and `/tmp` are runtime resources.
+Рабочий `/` собирается из разрешённых неизменяемых ресурсов System Image
+и изменяемых ресурсов DATA. Не копируйте весь System Image в оперативную память.
+`/run` может быть обычной файловой системой для временных ресурсов выполнения,
+но не механизмом подготовки всего корня.
+`/dev`, `/proc`, `/sys`, `/run` и `/tmp` — ресурсы времени выполнения.
 
-## DATA model
+## Модель DATA
 
-LUNA-DATA/system contains apps, drivers, firmware, libs, config, state and volumes.
-LUNA-DATA/users/<user> contains home, data and config.
-`system/state/` and `system/volumes/` are required.
-Drivers and firmware are distinct resource classes.
+LUNA-DATA/system содержит apps, drivers, firmware, libs, config, state и volumes.
+LUNA-DATA/users/<user> содержит home, data и config.
+Каталоги `system/state/` и `system/volumes/` обязательны.
+Драйверы и прошивки являются разными классами ресурсов.
 
-## Recovery and boot state
+## Восстановление и состояние загрузки
 
-Recovery is a normal System Image + compatible init + compatible kernel + virtual DATA.
-Recovery DATA comes from `LUNA-SYS/recovery/`; physical DATA is a repair object.
-`current`, `fallback`, `factory`, and `recovery` are semantic boot roles.
-Boot attempt NVRAM state is minimal and durable; detailed progress is RAM-only.
-Normal boot must not rewrite durable boot state without a meaningful state change.
+Recovery — обычный System Image, совместимые init и ядро, а также виртуальная DATA.
+DATA восстановления берётся из `LUNA-SYS/recovery/`; физическая DATA является
+объектом ремонта.
+`current`, `fallback`, `factory` и `recovery` — смысловые роли загрузки.
+Состояние попытки загрузки в NVRAM должно быть минимальным и устойчивым к сбоям;
+подробный ход загрузки хранится только в оперативной памяти.
+Обычная загрузка не переписывает постоянное состояние без значимого изменения.
 
-## Runtime and libc
+## Среда выполнения и libc
 
-Luna's native userspace stack is musl-native.
-`RuntimeSpec` distinguishes `musl` and optional `glibc` compatibility runtime.
-Old `RuntimeKind::{Luna,Glibc,Bundle}` semantics are stale.
-Bundled applications are a future ecosystem; Bundle installation is not an Alpha blocker.
+Собственный пользовательский стек Luna использует musl.
+`RuntimeSpec` различает `musl` и необязательную среду совместимости `glibc`.
+Старая семантика `RuntimeKind::{Luna,Glibc,Bundle}` устарела.
+Экосистема бандлов развивается отдельно; установка бандлов не блокирует Alpha.
 
-## Alpha desktop
+## Рабочий стол Alpha
 
-Baseline: niri, Noctalia Shell, Noctalia Greeter, Ghostty, fish,
-Luna Files GUI for Yazi, Yazi, Firefox, and a CLI editor (prefer micro/nano plus nvim).
-Alpha hardware priority: Intel UHD 630/i915, Intel AX200 Wi-Fi/Bluetooth,
-Realtek r8169 Ethernet, Intel HDA audio, USB xHCI, NVMe and SATA.
-NVIDIA proprietary support is not an Alpha blocker.
+Базовый набор: нативный вход `luna-user-session`, niri, Noctalia Shell, Ghostty, fish,
+графический Luna Files на движке Yazi, Yazi, Firefox и консольный редактор
+(предпочтительно micro/nano вместе с nvim).
+Приоритетное оборудование Alpha: Intel UHD 630/i915, Intel AX200 Wi-Fi/Bluetooth,
+Realtek r8169 Ethernet, Intel HDA audio, USB xHCI, NVMe и SATA.
+Поддержка проприетарного драйвера NVIDIA не блокирует Alpha.
 
-## Development workflow
+## Порядок разработки
 
-Primary development branch is `alpha-development`; keep `develop` protected.
-Inspect existing work before modifying files. Never reset or discard unrelated changes.
-Prefer small, testable changes and logical Git commits.
-Build and test after meaningful changes; use QEMU before physical-disk deployment.
-Never claim a feature works without evidence.
+По указанию пользователя от 2026-10-14 основная локальная ветка разработки —
+`develop`. В неё переносится проверенная работа из `luna-onefile-experiment`.
+Старые ветки сохраняются для истории. Защита удалённой `develop` сохраняется;
+не обходите её принудительной отправкой Git.
+Перед изменениями изучайте существующую работу. Не сбрасывайте и не удаляйте
+посторонние изменения. Предпочитайте небольшие проверяемые изменения
+и логические коммиты Git; прямые ограничения пользователя на коммиты обязательны.
+После значимых изменений собирайте и проверяйте проект; перед развёртыванием
+на физическом диске используйте QEMU.
+Для канонических сборок и экспериментов с ресурсами используйте
+`tools/canonical-luna-workbench.py`; сохраняйте два слота и автоматическую очистку
+временных дисков. См. `docs/development/alpine-foundation/ARTIFACT-WORKFLOW.md`.
+Не утверждайте, что функция работает, без подтверждающих результатов.
 
-## Safety
+## Безопасность
 
-Autonomous repository, build, test, QEMU and documentation work is allowed.
-Never repartition or erase a physical disk without explicit confirmation immediately before it.
-Do not expose secrets in files, logs, commits, prompts or reports.
+Автономная работа с репозиторием, сборками, тестами, QEMU и документацией разрешена.
+Перед изменением разделов или стиранием физического диска необходимо явное
+подтверждение пользователя непосредственно перед операцией.
+Не раскрывайте секреты в файлах, журналах, коммитах, запросах или отчётах.
 
-## Required engineering behavior
+## Обязательный инженерный подход
 
-Prefer the smallest implementation that satisfies the accepted architecture and contract.
-Reuse existing Luna components when they already provide the needed boundary.
-Treat compilation, tests, QEMU output and hardware tests as evidence, not assumptions.
-When implementation and current accepted documentation disagree, reconcile them explicitly.
-For non-trivial work, use `.agents/skills/luna-agent-workflow/SKILL.md`: research first when needed, decompose large tasks, verify meaningful changes, and review the resulting diff.
-After context compaction or session recovery, reload this file and the relevant current architecture/contracts before continuing.
+Выбирайте минимальную реализацию, соответствующую принятой архитектуре и контракту.
+Используйте существующие компоненты Luna, если они уже обеспечивают нужную границу.
+Считайте результаты компиляции, тестов, QEMU и аппаратных проверок доказательствами,
+а не предположениями. При расхождении реализации и действующей документации
+явно согласуйте их.
+Для нетривиальной работы используйте `.agents/skills/luna-agent-workflow/SKILL.md`:
+при необходимости сначала исследуйте вопрос, разбивайте большие задачи на этапы,
+проверяйте значимые изменения и просматривайте итоговую разницу файлов.
+После сокращения контекста или восстановления сессии перечитайте этот файл
+и соответствующие действующие архитектурные документы и контракты.
