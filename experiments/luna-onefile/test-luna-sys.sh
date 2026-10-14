@@ -17,6 +17,10 @@ REAL_SYSTEM_RUNTIME_TEST="${LUNA_REAL_SYSTEM_RUNTIME:-0}"
 MANAGER_GATE_TEST="${LUNA_MANAGER_GATE_TEST:-0}"
 MANAGER_GATE_FAILURE="${LUNA_MANAGER_GATE_FAILURE:-}"
 MANAGER_GATE_INTERACTIVE_TEST="${LUNA_MANAGER_GATE_INTERACTIVE_TEST:-0}"
+NIRI_SESSION_TEST="${LUNA_NIRI_SESSION_TEST:-0}"
+NOCTALIA_SESSION_TEST="${LUNA_NOCTALIA_SESSION_TEST:-0}"
+NIRI_QEMU_DISPLAY="${LUNA_NIRI_QEMU_DISPLAY:-egl-headless}"
+NIRI_PROVIDER_ROOT="${LUNA_ONEFILE_EXTRA_DATA_ROOT:-}"
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 LOG="$OUT/serial.log"
@@ -119,8 +123,20 @@ if [ -n "${LUNA_REAL_INIT:-}" ]; then
     : > "$OUT/data-root/system/resources/$resource_class/data-resource-marker"
   done
 fi
+if [ "$NIRI_SESSION_TEST" = "1" ]; then
+  [ -d "$NIRI_PROVIDER_ROOT/system" ] || { echo "missing staged Niri DATA provider: $NIRI_PROVIDER_ROOT" >&2; exit 1; }
+  cp -a "$NIRI_PROVIDER_ROOT/system/." "$OUT/data-root/system/"
+  if [ "$NOCTALIA_SESSION_TEST" = "1" ]; then
+    DATA_SIZE=1024M
+  else
+    DATA_SIZE=768M
+  fi
+else
+  DATA_SIZE=128M
+fi
+
 if [ "$RECOVERY_TEST" != "1" ]; then
-  truncate -s 128M "$OUT/data.img"
+  truncate -s "$DATA_SIZE" "$OUT/data.img"
   mkfs.btrfs -q -f -L LUNA-DATA --rootdir "$OUT/data-root" "$OUT/data.img"
   if [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_TEST" = "1" ]; then
     cp "$OUT/data.img" "$OUT/data2.img"
@@ -128,7 +144,13 @@ if [ "$RECOVERY_TEST" != "1" ]; then
 fi
 
 DISK_SIZE=448M
-if [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_EXTERNAL_TEST" = "1" ]; then
+if [ "$NIRI_SESSION_TEST" = "1" ]; then
+  if [ "$NOCTALIA_SESSION_TEST" = "1" ]; then
+    DISK_SIZE=1344M
+  else
+    DISK_SIZE=1088M
+  fi
+elif [ "$RECOVERY_TEST" = "1" ] || [ "$DATA_EXTERNAL_TEST" = "1" ]; then
   DISK_SIZE=320M
 elif [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_TEST" = "1" ]; then
   DISK_SIZE=576M
@@ -147,7 +169,15 @@ elif [ "$DATA_AMBIGUOUS_TEST" = "1" ] || [ "$DATA_CONFIG_TEST" = "1" ]; then
   sgdisk --disk-guid=11111111-1111-4111-8111-111111111111 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+128M -t 3:8300 -c 3:LUNA-DATA -n 4:788480:+128M -t 4:8300 -c 4:LUNA-DATA "$OUT/disk.img" >/dev/null
   sgdisk --partition-guid=1:22222222-2222-4222-8222-222222222222 --partition-guid=2:33333333-3333-4333-8333-333333333333 --partition-guid=3:44444444-4444-4444-8444-444444444444 --partition-guid=4:55555555-5555-4555-8555-555555555555 "$OUT/disk.img" >/dev/null
 else
-  sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+128M -t 3:8300 -c 3:LUNA-DATA "$OUT/disk.img" >/dev/null
+  if [ "$NIRI_SESSION_TEST" = "1" ]; then
+    if [ "$NOCTALIA_SESSION_TEST" = "1" ]; then
+      sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+1024M -t 3:8300 -c 3:LUNA-DATA "$OUT/disk.img" >/dev/null
+    else
+      sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+768M -t 3:8300 -c 3:LUNA-DATA "$OUT/disk.img" >/dev/null
+    fi
+  else
+    sgdisk --disk-guid=7A6D5A7A-0000-4C55-4E41-53444449534B --partition-guid=1:7A6D5A7A-0001-4C55-4E41-454649202020 --partition-guid=2:7A6D5A7A-0002-4C55-4E41-53595354454D --partition-guid=3:7A6D5A7A-0003-4C55-4E41-444154412020 -n 1:2048:+64M -t 1:ef00 -c 1:EFI -n 2:133120:+192M -t 2:8300 -c 2:LUNA-SYS -n 3:526336:+128M -t 3:8300 -c 3:LUNA-DATA "$OUT/disk.img" >/dev/null
+  fi
 fi
 dd if="$OUT/esp.img" of="$OUT/disk.img" bs=512 seek=2048 conv=notrunc status=none
 dd if="$OUT/system.img" of="$OUT/disk.img" bs=512 seek=133120 conv=notrunc status=none
@@ -171,19 +201,32 @@ cp "$OVMF_VARS" "$OUT/OVMF_VARS.fd"
 
 echo "[4/4] Booting UEFI fixture"
 QEMU_MONITOR_ARGS=()
+QEMU_MEMORY=512M
+QEMU_VIDEO_ARGS=(-vga std)
+QEMU_DISPLAY_ARGS=(-display none)
+if [ "$NIRI_SESSION_TEST" = "1" ]; then
+  QEMU_MEMORY=2G
+  # Niri rejects software EGL renderers. Use VirGL and a host EGL display;
+  # select egl-headless by default or another GL-capable QEMU backend for
+  # hosts where egl-headless cannot access a DRM render node.
+  QEMU_VIDEO_ARGS=(-vga none -device virtio-gpu-gl-pci)
+  QEMU_DISPLAY_ARGS=(-display "$NIRI_QEMU_DISPLAY")
+fi
 QEMU_MONITOR_SOCKET="/tmp/luna-hmp-$$.sock"
 INPUT_INJECTOR_PID=""
 if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
   QEMU_MONITOR_ARGS=(-monitor "unix:$QEMU_MONITOR_SOCKET,server=on,wait=off")
   python3 - "$QEMU_MONITOR_SOCKET" "$LOG" <<'PY_INPUT' &
 from pathlib import Path
+import os
 import socket
 import sys
 import time
 
 monitor_path = sys.argv[1]
 serial_log = Path(sys.argv[2])
-deadline = time.monotonic() + 10.0
+ready_timeout = 20.0 if os.environ.get("LUNA_NIRI_SESSION_TEST") == "1" else 10.0
+deadline = time.monotonic() + ready_timeout
 ready_marker = "luna-user-session: login UI keyboard/pointer input ready"
 while time.monotonic() < deadline:
     if serial_log.exists() and ready_marker in serial_log.read_text(errors="replace"):
@@ -215,7 +258,7 @@ PY_INPUT
   INPUT_INJECTOR_PID=$!
 fi
 set +e
-timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m 512M -vga std -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" "${QEMU_MONITOR_ARGS[@]}" -serial "file:$LOG" -display none -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
+timeout "${LUNA_ONEFILE_QEMU_TIMEOUT:-15s}" qemu-system-x86_64 -machine q35 -m "$QEMU_MEMORY" "${QEMU_VIDEO_ARGS[@]}" "${QEMU_DISPLAY_ARGS[@]}" -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" -drive if=pflash,format=raw,file="$OUT/OVMF_VARS.fd" -drive format=raw,file="$OUT/disk.img" "${QEMU_EXTRA_DRIVES[@]}" "${QEMU_MONITOR_ARGS[@]}" -serial "file:$LOG" -no-reboot -no-shutdown >"$OUT/qemu.log" 2>&1
 status=$?
 set -e
 if [ -n "$INPUT_INJECTOR_PID" ]; then
@@ -309,7 +352,45 @@ if [ "$MANAGER_GATE_TEST" = "1" ]; then
       if [ "$MANAGER_GATE_INTERACTIVE_TEST" = "1" ]; then
         grep -Fq "luna-user-session: login credentials accepted" "$LOG"
         grep -Fq "luna-system-runtime: graphical UserSession launched /usr/bin/luna-graphical-session" "$LOG"
-        grep -Fq "LUNA-NATIVE-SESSION: READY" "$LOG"
+        if [ "$NIRI_SESSION_TEST" = "1" ]; then
+          grep -Fq "luna-device-manager: udev compatibility backend ready" "$LOG"
+          grep -Fq "luna-system-runtime: started optional seat compatibility provider /usr/bin/seatd" "$LOG"
+          grep -Fq "LUNA-NIRI: LAUNCHING /usr/bin/niri --session" "$LOG"
+          grep -Fq "LUNA-NIRI: WAYLAND_READY " "$LOG"
+          grep -Fq "new connector: Virtual-1" "$LOG"
+          grep -Fq "connecting connector: Virtual-1" "$LOG"
+          grep -Fq 'picking mode: Mode { name: "1280x800"' "$LOG"
+          if [ "$NOCTALIA_SESSION_TEST" = "1" ]; then
+            grep -Fq "LUNA-NOCTALIA: LAUNCHING /usr/bin/noctalia" "$LOG"
+            grep -Fq "LUNA-NOCTALIA: PROCESS_ALIVE" "$LOG"
+            if grep -Eq "LUNA-NOCTALIA: PROCESS_(NOT_FOUND|EXITED)" "$LOG"; then
+              echo "Noctalia did not stay alive through the observation window" >&2
+              exit 1
+            fi
+            grep -Fq "connected to session bus" "$LOG"
+            grep -Fq "connected compositor=yes shm=yes layer-shell=yes" "$LOG"
+            grep -Fq "initialized EGL 1.5" "$LOG"
+            grep -Fq 'OpenGL ES vendor="Mesa" renderer="virgl' "$LOG"
+            grep -Fq "path=/usr/share/noctalia/assets/noctalia-wallpaper.png" "$LOG"
+            grep -Fq 'creating #0 "default" on Virtual-1' "$LOG"
+          fi
+          if grep -Fq "LUNA-NIRI: WAYLAND_NOT_READY" "$LOG"; then
+            echo "Niri did not create its Wayland socket" >&2
+            exit 1
+          fi
+          if grep -Fq "no allocator available for device" "$LOG" ||
+             grep -Fq "software EGL renderers are skipped" "$LOG"; then
+            echo "Niri started without a working DRM/GBM allocator" >&2
+            exit 1
+          fi
+          if grep -Fq "graphical desktop exited" "$LOG" ||
+             grep -Eq "thread 'main'.*panicked|^Aborted$" "$LOG"; then
+            echo "Niri graphical session exited or panicked during acceptance" >&2
+            exit 1
+          fi
+        else
+          grep -Fq "LUNA-NATIVE-SESSION: READY" "$LOG"
+        fi
       fi
       ;;
     missing-volume-manager)

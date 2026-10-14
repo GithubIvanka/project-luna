@@ -33,6 +33,8 @@ fn manifest() -> LbpManifest {
         entry: Some(EntryPoint {
             exec: "bin/app".into(),
             logical: Some("/usr/bin/app".into()),
+            args: Vec::new(),
+            file_open: None,
         }),
         dependencies: Vec::new(),
         capabilities: Capabilities::default(),
@@ -112,4 +114,31 @@ fn corrupting_payload_is_rejected() {
     ));
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn entry_defaults_are_canonical_and_part_of_content_identity() {
+    let root = temp_dir();
+    fixture(&root);
+    let original = manifest();
+    assert!(!original.to_toml().unwrap().contains("args"));
+    let original_archive =
+        LbpArchive::from_bytes(build_from_directory(&original, &root).unwrap()).unwrap();
+    let mut defaults = original.clone();
+    defaults.entry.as_mut().unwrap().args = vec!["--option".into(), "a b".into()];
+    let archive = LbpArchive::from_bytes(build_from_directory(&defaults, &root).unwrap()).unwrap();
+    assert_eq!(archive.manifest, defaults);
+    assert_ne!(
+        archive.content_identity().unwrap(),
+        original_archive.content_identity().unwrap()
+    );
+    for invalid in [
+        vec!["x".into(); 65],
+        vec!["x".repeat(4097)],
+        vec!["a\0b".into()],
+    ] {
+        defaults.entry.as_mut().unwrap().args = invalid;
+        assert!(defaults.to_toml().is_err());
+    }
+    fs::remove_dir_all(root).unwrap();
 }

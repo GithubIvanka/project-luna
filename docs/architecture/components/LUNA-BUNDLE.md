@@ -10,8 +10,9 @@
 - проверкой manifest;
 - чтением и записью RFC-0002 `.lbp`;
 - вычислением `ContentIdentity`;
-- проверкой поддерживаемых подписей;
+- границей кодека/проверки подписей (полная Ed25519 verification ещё не реализована);
 - извлечением payload для `luna-app-manager`.
+- проверкой archive-independent directory application Bundle v1.
 
 ## Не владеет
 
@@ -45,4 +46,23 @@ Manifest использует логические resource paths. Физиче�
 
 ## Статус
 
-Кодек и round-trip/integration tests существуют. Полное соответствие RFC и интеграция trust policy ещё дорабатываются.
+Кодек и round-trip/integration tests существуют. Извлечение требует пустую
+реальную директорию; implicit directories получают безопасные нормализованные
+права независимо от umask. `verify_extracted_payload` проверяет все bytes,
+files, directories, права и владельца; лишние entries, symlinks и hard links
+отклоняются. Decompression ограничена объявленным размером секции до выделения
+неограниченного объёма памяти. Формы `[[mapping]]` / `[[dependency]]` из RFC
+читаются как aliases существующих `mappings` / `dependencies`; канонический
+writer сохраняет прежние имена и ContentIdentity существующего кодека.
+
+SIGNATURE можно прочитать с проверкой section hash, но это **не** проверка
+Ed25519. App Manager пока отклоняет установку с SIGNATURE. Полное соответствие
+RFC и signature backend продолжаются.
+
+`directory::DirectoryBundle` распознаёт содержимое `.lunaapp`, проверяет
+canonical TOML, полный inventory, owner/modes и ContentIdentity без `.lbp`.
+Pinned `openat`/`O_PATH` reader отклоняет links/special files, ограничивает
+фактическое чтение и стримит общий canonical TAR encoding в BLAKE3. Format
+inspection не означает регистрацию или authorization. Первый materializer
+принимает application с canonical TAR writer, без RESOURCES/SIGNATURE.
+Контракт: [`DIRECTORY-BUNDLE-CONTRACT.md`](../../contracts/DIRECTORY-BUNDLE-CONTRACT.md).

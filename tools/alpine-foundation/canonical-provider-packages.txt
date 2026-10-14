@@ -1,0 +1,14 @@
+# Direct providers for the canonical image. Transitive APKs are recorded in inputs.lock.json.
+niri=25.11-r2
+niri-portalsconf=25.11-r2
+# Niri loads the server library through dlopen; APK/ELF dependency checks miss it.
+wayland-libs-server=1.25.0-r0
+seatd=0.9.3-r0
+adwaita-fonts=50.0-r0
+adwaita-icon-theme=50.0-r1
+libudev-zero=1.0.4-r0
+eudev=3.2.14-r6
+eudev-libs=3.2.14-r6
+udev-init-scripts=35-r1
+udisks2=2.11.0-r2
+udisks2-libs=2.11.0-r2

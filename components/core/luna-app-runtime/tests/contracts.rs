@@ -87,7 +87,7 @@ fn plan(session: &UserSession) -> ApplicationPlan {
         manifest,
         mapping,
         session,
-        RuntimeSpec::luna(),
+        RuntimeSpec::musl(),
         ExecutableSpec::new("/bin/app"),
         Vec::new(),
     )

@@ -1,0 +1,60 @@
+# Поддерживаемые ключи закреплённой Noctalia 5.2.0.
+[shell]
+lang = "ru"
+font_family = "Adwaita Sans"
+corner_radius_scale = 0.85
+setup_wizard_enabled = false
+time_format = "%H:%M"
+date_format = "%d.%m.%Y"
+
+[shell.panel]
+transparency_mode = "solid"
+borders = true
+shadow = true
+launcher_placement = "floating"
+launcher_position = "center"
+control_center_placement = "floating"
+control_center_position = "top_right"
+floating_offset = 15
+
+[shell.launcher]
+app_grid = true
+compact = true
+show_icons = true
+fetch_exchange_rates = false
+
+[theme]
+source = "custom"
+custom_palette = "luna-alpha"
+mode = "dark"
+shell_mode = "dark"
+
+[wallpaper]
+enabled = true
+fill_mode = "crop"
+transition_on_startup = false
+[wallpaper.default]
+path = "/resources/images/wallpaper-night-sky.png"
+
+[bar.default]
+thickness = 43
+background_opacity = 0.93
+border = "#31435f"
+border_width = 1
+radius = 11
+margin_ends = 12
+margin_edge = 10
+padding = 10
+widget_spacing = 12
+start = ["launcher", "workspaces"]
+center = ["clock"]
+end = ["tray", "notifications", "volume", "network", "battery", "control-center"]
+
+[control_center]
+width = 380
+show_shortcut_labels = true
+
+[dock]
+enabled = true
+radius = 17
+margin_edge = 21

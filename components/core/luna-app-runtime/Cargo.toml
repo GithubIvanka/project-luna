@@ -12,14 +12,17 @@ name = "luna-app-runtime"
 path = "src/main.rs"
 
 [dependencies]
+luna-app-manager = { path = "../../system/luna-app-manager" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
 luna-common = { path = "../luna-common" }
 luna-volume-manager = { path = "../luna-volume-manager" }
 luna-bundle = { path = "../luna-bundle" }
 luna-root-mapping = { path = "../luna-root-mapping" }
 luna-namespace = { path = "../luna-namespace" }
 luna-security = { path = "../luna-security" }
-luna-system-runtime = { path = "../luna-system-runtime" }
 luna-user-session = { path = "../luna-user-session" }
 
 [dev-dependencies]
-libc = "0.2"
+luna-system-runtime = { path = "../luna-system-runtime" }

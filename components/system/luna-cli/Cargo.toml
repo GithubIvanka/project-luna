@@ -12,3 +12,8 @@ name = "luna"
 path = "src/main.rs"
 
 [dependencies]
+luna-app-runtime = { path = "../../core/luna-app-runtime" }
+luna-app-manager = { path = "../luna-app-manager" }
+luna-bundle = { path = "../../core/luna-bundle" }
+luna-common = { path = "../../core/luna-common" }
+luna-security = { path = "../../core/luna-security" }

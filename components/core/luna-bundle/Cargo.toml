@@ -8,6 +8,7 @@ license = "Apache-2.0"
 blake3 = "1.8"
 ed25519-dalek = { version = "2.1", features = ["std"] }
 luna-common = { path = "../luna-common" }
+libc = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 tar = "0.4"
 toml = "0.9"

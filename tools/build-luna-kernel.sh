@@ -111,6 +111,10 @@ if ! grep -q '^CONFIG_RUST=y$' "$SRC/build/.config"; then
     echo "Check RUST_IS_AVAILABLE and other CONFIG_RUST dependencies above." >&2
     exit 1
 fi
+if ! grep -q '^CONFIG_SECURITY_LANDLOCK=y$' "$SRC/build/.config"; then
+    echo "Project Luna application runtime requires CONFIG_SECURITY_LANDLOCK=y" >&2
+    exit 1
+fi
 
 "${MAKE[@]}" rustavailable
 

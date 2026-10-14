@@ -43,7 +43,7 @@ fn plan(requests: Vec<AuthorizationRequest>) -> ApplicationPlan {
         manifest,
         mapping,
         &active_session(),
-        RuntimeSpec::luna(),
+        RuntimeSpec::musl(),
         ExecutableSpec::new("/bin/app"),
         requests,
     )
@@ -88,7 +88,7 @@ fn runtime_authorization_precedes_explicit_resource_requests() {
     assert_eq!(seen.len(), 3);
     assert_eq!(
         seen[0].resource,
-        Resource::Runtime(luna_common::RuntimeKind::Luna)
+        Resource::Runtime(luna_common::RuntimeKind::Musl)
     );
     assert_eq!(seen[0].permission, Permission::Use);
     assert_eq!(
@@ -128,7 +128,7 @@ fn explicit_denial_stops_authorization_pipeline() {
     assert_eq!(seen.len(), 4);
     assert_eq!(
         seen[0].resource,
-        Resource::Runtime(luna_common::RuntimeKind::Luna)
+        Resource::Runtime(luna_common::RuntimeKind::Musl)
     );
     assert_eq!(
         seen[1].resource,

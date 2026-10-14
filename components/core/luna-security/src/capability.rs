@@ -121,8 +121,13 @@ impl CapabilityRegistry {
             ("audio.input", "audio"),
             ("device.camera", "device"),
             ("device.microphone", "device"),
+            ("desktop.wayland", "desktop"),
             ("desktop.clipboard", "desktop"),
             ("desktop.portal", "desktop"),
+            ("user.home", "user-session"),
+            ("user.selected-file", "user-session"),
+            ("application.open", "system-runtime"),
+            ("terminal.pty", "namespace"),
         ] {
             registry
                 .register(

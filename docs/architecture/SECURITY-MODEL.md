@@ -67,11 +67,33 @@ Trust особенно нужен для внешних и переносимы�
 
 Trust связывает как минимум identity Bundle (`BundleId` + `ContentIdentity`) с trust scope. Решение о trust принадлежит `luna-security`.
 
+В API это `Resource::BundleTrust { application, content_identity, scope }` с
+`BundleTrustScope::{Install, Launch}` и отдельным permission `Use`.
+Разрешение установки требует также `Manage` для `Resource::Application`.
+Install trust не является Launch trust, а оба не выдают capabilities запуска.
+
 Валидная Ed25519-подпись подтверждает соответствие подписи содержимому, но сама по себе не означает, что Bundle доверен или может быть запущен.
 
 ## Capability
 
 `CapabilityRegistry` знает capability и его provider. `CapabilityGrant` появляется только после authorization. Provider не принимает policy decisions и не может расширить выданный grant.
+
+Текущий installed adapter авторизует `desktop.wayland` и exact socket Read в
+sealed ApplicationPlan. System-selected endpoint proof сверяется с session/UID,
+approved provider и mapping. Он не создаёт новые grants. После secure bind
+проверяется тот же inode/peer; приложение подключается со своими credentials.
+Namespace требует Landlock ABI9 ResolveUnix плюс AbstractUnixSocket scope;
+обычные directory grants не разрешают external-domain UNIX endpoints. Это
+доступ к Wayland protocol выбранного compositor; per-interface фильтр отсутствует.
+
+`user.home` с отдельными path grants отображает `/home` только из проверенного
+home активной сессии: no-follow chain, ожидаемый UID, закреплённый mount fd.
+`terminal.pty` разрешает synthetic basic devices и новый приватный devpts.
+Process host отделяется от controlling TTY через setsid до запуска; hardware
+devices и host PTY не предоставляются. Ghostty и его shell находятся в одном
+ApplicationInstance/cgroup. Терминалу также разрешены scratch files и named
+UNIX socket внутри собственного `/tmp`; внешние UNIX endpoints остаются закрыты.
+Точный scope указан в [launch contract](../contracts/APPLICATION-LAUNCH-CONTRACT.md).
 
 ## Файловая изоляция
 

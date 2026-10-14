@@ -10,6 +10,18 @@ path = "src/lib.rs"
 [[bin]]
 name = "luna-files"
 path = "src/main.rs"
+required-features = ["gui"]
+
+[features]
+default = ["gui"]
+gui = ["dep:gtk4", "dep:async-channel", "dep:luna-app-runtime"]
 
 [dependencies]
-gtk4 = "0.11.4"
+gtk4 = { version = "0.11.4", optional = true }
+async-channel = { version = "2.5.0", optional = true }
+luna-app-runtime = { path = "../../../core/luna-app-runtime", optional = true }
+tokio = { version = "1", features = ["rt", "fs", "sync", "time", "io-util"] }
+libc = "0.2"
+# Закрепляем движок терминального Yazi: эта версия не опубликована в crates.io.
+yazi-fs = { git = "https://github.com/sxyazi/yazi", rev = "8dd895c695a5950330c2623eb43debf323b60654" }
+yazi-shared = { git = "https://github.com/sxyazi/yazi", rev = "8dd895c695a5950330c2623eb43debf323b60654" }

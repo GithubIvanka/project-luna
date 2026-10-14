@@ -17,7 +17,7 @@ use luna_namespace::{
 };
 use luna_root_mapping::{LogicalPath, MappingKind, MappingSource, MappingTable};
 use luna_security::{CapabilityName, CapabilityRegistry};
-use luna_system_runtime::SystemRuntimeService;
+use crate::ApplicationProcessHost;
 use luna_user_session::UserSession;
 use luna_volume_manager::VolumeManager;
 
@@ -138,6 +138,12 @@ pub struct ApplicationLaunchContext {
     staging_parent: PathBuf,
     trusted_source_roots: Vec<PathBuf>,
     volume_resolver: Option<StaticVolumeResolver>,
+    profile: RuntimeProfile,
+    credentials: Option<(luna_user_session::UserCredentials, Vec<u32>)>,
+    environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    wayland: Option<crate::wayland::WaylandEndpoint>,
+    application_endpoint: Option<crate::file_handoff::ApplicationEndpoint>,
+    selected_file: Option<crate::file_handoff::SelectedFile>,
 }
 
 impl ApplicationLaunchContext {
@@ -152,7 +158,39 @@ impl ApplicationLaunchContext {
             staging_parent: staging_parent.into(),
             trusted_source_roots: Vec::new(),
             volume_resolver: None,
+            profile: RuntimeProfile::minimal(),
+            credentials: None,
+            environment: Vec::new(),
+            wayland: None,
+            application_endpoint: None,
+            selected_file: None,
         }
+    }
+
+    pub fn with_profile(mut self, profile: RuntimeProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+    pub fn with_credentials(mut self, credentials: luna_user_session::UserCredentials,
+        groups: Vec<u32>) -> Self {
+        self.credentials = Some((credentials, groups));
+        self
+    }
+    pub fn with_environment(mut self, environment: Vec<(std::ffi::OsString, std::ffi::OsString)>) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    pub fn with_wayland_endpoint(mut self, endpoint: crate::wayland::WaylandEndpoint) -> Self {
+        self.wayland = Some(endpoint);
+        self
+    }
+
+    pub fn with_application_endpoint(mut self, endpoint: crate::file_handoff::ApplicationEndpoint) -> Self {
+        self.application_endpoint = Some(endpoint); self
+    }
+    pub fn with_selected_file(mut self, file: crate::file_handoff::SelectedFile) -> Self {
+        self.selected_file = Some(file); self
     }
 
     /// Attach an owned Volume Manager snapshot for Volume mapping materialization.
@@ -329,14 +367,14 @@ pub trait ApplicationPlanLauncher {
     ///     ApplicationLaunchContext, ApplicationPlan, ApplicationPlanLauncher,
     ///     LinuxApplicationRuntime,
     /// };
-    /// use luna_system_runtime::SystemRuntimeService;
+    /// use crate::ApplicationProcessHost;
     /// use luna_user_session::UserSession;
     ///
     /// fn invalid_launch(
     ///     launcher: &mut LinuxApplicationRuntime,
     ///     plan: ApplicationPlan,
     ///     session: &UserSession,
-    ///     runtime: &mut SystemRuntimeService,
+    ///     runtime: &mut dyn ApplicationProcessHost,
     ///     context: &ApplicationLaunchContext,
     /// ) {
     ///     launcher.launch_authorized_plan(plan, session, runtime, context);
@@ -346,7 +384,7 @@ pub trait ApplicationPlanLauncher {
         &mut self,
         plan: AuthorizedApplicationPlan,
         session: &UserSession,
-        runtime: &mut SystemRuntimeService,
+        runtime: &mut dyn ApplicationProcessHost,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError>;
 }
@@ -357,13 +395,39 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         &mut self,
         plan: AuthorizedApplicationPlan,
         session: &UserSession,
-        runtime: &mut SystemRuntimeService,
+        runtime: &mut dyn ApplicationProcessHost,
         context: &ApplicationLaunchContext,
     ) -> Result<ApplicationInstanceId, RuntimeError> {
         InMemoryApplicationRuntime::validate_session(plan.value().session(), session)?;
         context.validate()?;
         validate_mapping_access(&plan)?;
         validate_capabilities(&plan)?;
+        let needs_terminal = plan.value().manifest().capabilities()
+            .any(|cap| cap == crate::installed::TERMINAL_CAPABILITY);
+        if needs_terminal && !context.credentials.as_ref().is_some_and(|(credentials, _)|
+            credentials.uid != 0 && credentials.username == session.user().as_str()) {
+            return Err(RuntimeError::Security("Terminal requires matching non-root session credentials".into()));
+        }
+        let needs_wayland = plan.value().manifest().capabilities()
+            .any(|cap| cap == crate::wayland::WAYLAND_CAPABILITY);
+        if needs_wayland != context.wayland.is_some() {
+            return Err(RuntimeError::Security("Wayland capability requires its session endpoint".into()));
+        }
+        if let Some(endpoint) = &context.wayland {
+            let (credentials, _) = context.credentials.as_ref().ok_or_else(||
+                RuntimeError::Security("Wayland endpoint requires session credentials".into()))?;
+            endpoint.validate_plan(&plan, credentials).map_err(|error| RuntimeError::Security(error.to_string()))?;
+        }
+        let needs_open = plan.value().manifest().capabilities().any(|cap| cap == crate::file_handoff::OPEN_CAPABILITY);
+        let needs_selected = plan.value().manifest().capabilities().any(|cap| cap == crate::file_handoff::SELECTED_CAPABILITY);
+        if needs_open != context.application_endpoint.is_some() || needs_selected != context.selected_file.is_some() {
+            return Err(RuntimeError::Security("handoff capability requires matching resource proof".into()));
+        }
+        if needs_open || needs_selected {
+            let (credentials, _) = context.credentials.as_ref().ok_or_else(|| RuntimeError::Security("handoff requires user credentials".into()))?;
+            if let Some(endpoint) = &context.application_endpoint { endpoint.validate_plan(&plan, credentials).map_err(|e| RuntimeError::Security(e.to_string()))?; }
+            if let Some(file) = &context.selected_file { file.validate_plan(&plan, credentials).map_err(|e| RuntimeError::Security(e.to_string()))?; }
+        }
 
         let program = plan.value().executable().path().to_str().ok_or_else(|| {
             RuntimeError::InvalidExecutable(plan.value().executable().path().display().to_string())
@@ -409,10 +473,14 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
         let root_for_child = staging.path().to_path_buf();
         let args = plan.value().executable().args().to_vec();
         let namespace = context.namespace();
-        let profile = RuntimeProfile::minimal();
-        let process = runtime.spawn_process_with_pre_exec(program, args, move || {
+        let profile = context.profile.clone();
+        let credentials = context.credentials.clone();
+        let wayland = context.wayland.clone();
+        let application_endpoint = context.application_endpoint.clone();
+        let selected_file = context.selected_file.clone();
+        let process = runtime.spawn_application(program, &args, &context.environment, Box::new(move || {
             LinuxMountNamespace::enter_private()
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                .map_err(|error| std::io::Error::other(format!("enter private mount namespace: {error}")))?;
             let logical = materialize_profiled_logical_root(
                 &root_for_child,
                 &base_root,
@@ -420,7 +488,7 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 &mapping,
                 &profile,
             )
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            .map_err(|error| std::io::Error::other(format!("materialize logical root: {error}")))?;
 
             if let Some(resolver) = volume_resolver.as_ref() {
                 let mut volume_mounts = VolumeMountManager::new();
@@ -434,14 +502,32 @@ impl ApplicationPlanLauncher for LinuxApplicationRuntime {
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             }
 
+            if let Some(endpoint) = &wayland {
+                endpoint.verify_mounted(logical.path())
+                    .map_err(|error| std::io::Error::other(format!("verify Wayland endpoint: {error}")))?;
+            }
+            // Проверяем уже закреплённые монтирования до смены корня и exec.
+            if let Some(endpoint) = &application_endpoint { endpoint.verify_mounted(logical.path())?; }
+            if let Some(file) = &selected_file { file.verify_mounted(logical.path())?; }
+            if needs_terminal {
+                let (credentials, _) = credentials.as_ref().expect("validated terminal credentials");
+                if unsafe { libc::getsid(0) } != unsafe { libc::getpid() } {
+                    return Err(std::io::Error::other("Terminal process host did not detach the inherited session"));
+                }
+                luna_namespace::materialize_private_terminal(logical.path(), credentials.gid)
+                    .map_err(|error| std::io::Error::other(format!("materialize private terminal: {error}")))?;
+            }
             namespace
                 .enter_logical_root(&logical)
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                .map_err(|error| std::io::Error::other(format!("enter logical root: {error}")))?;
             namespace
-                .enforce_filesystem_access(&profile, &mapping)
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                .enforce_filesystem_access_with_terminal(&profile, &mapping, needs_terminal)
+                .map_err(|error| std::io::Error::other(format!("enforce filesystem access: {error}")))?;
+            if let Some((credentials, groups)) = &credentials {
+                credentials.apply_with_groups(groups)?;
+            }
             Ok(())
-        });
+        }));
 
         let process = match process {
             Ok(process) => process,

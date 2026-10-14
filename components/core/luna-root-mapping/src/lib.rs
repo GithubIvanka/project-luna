@@ -575,13 +575,13 @@ mod tests {
         assert_eq!(table.runtime(), None);
         table.bind_runtime(RuntimeKind::Glibc).unwrap();
         assert!(table.accepts_runtime(RuntimeKind::Glibc));
-        assert!(!table.accepts_runtime(RuntimeKind::Luna));
+        assert!(!table.accepts_runtime(RuntimeKind::Musl));
         table.bind_runtime(RuntimeKind::Glibc).unwrap();
         assert_eq!(
-            table.bind_runtime(RuntimeKind::Bundle),
+            table.bind_runtime(RuntimeKind::Musl),
             Err(MappingError::RuntimeConflict {
                 existing: RuntimeKind::Glibc,
-                requested: RuntimeKind::Bundle,
+                requested: RuntimeKind::Musl,
             })
         );
         let materialized = table.materialize().unwrap();

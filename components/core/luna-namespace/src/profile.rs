@@ -162,6 +162,27 @@ pub fn materialize_profiled_logical_root(
     })
 }
 
+/// Create only synthetic basic devices and a private devpts instance. This is
+/// called in the child's private namespace for an authorized terminal.pty plan.
+pub fn materialize_private_terminal(root: &Path, gid: u32) -> Result<(), NamespaceError> {
+    let dev = root.join("dev");
+    mount_filesystem("tmpfs", &dev, libc::MS_NOSUID | libc::MS_NOEXEC, Some("mode=0755"))?;
+    for (name, major, minor) in [("null", 1, 3), ("zero", 1, 5), ("random", 1, 8), ("urandom", 1, 9), ("tty", 5, 0)] {
+        let path = CString::new(dev.join(name).as_os_str().as_bytes()).map_err(|_| NamespaceError::InvalidPath)?;
+        if unsafe { libc::mknod(path.as_ptr(), libc::S_IFCHR | 0o666, libc::makedev(major, minor)) } != 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        if unsafe { libc::chmod(path.as_ptr(), 0o666) } != 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+    }
+    let pts = dev.join("pts");
+    fs::create_dir(&pts)?;
+    mount_filesystem("devpts", &pts, libc::MS_NOSUID | libc::MS_NOEXEC, Some(&format!("newinstance,ptmxmode=0666,mode=0620,gid={gid}")))?;
+    std::os::unix::fs::symlink("pts/ptmx", dev.join("ptmx"))?;
+    Ok(())
+}
+
 struct MountTransaction {
     mounted: Vec<PathBuf>,
     committed: bool,

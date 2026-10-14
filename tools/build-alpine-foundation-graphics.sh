@@ -7,10 +7,12 @@ MESA_OUT="$BUILD_ROOT/mesa/out"
 NOCTALIA_OUT="$BUILD_ROOT/noctalia/out"
 RUNTIME_APKS="$BUILD_ROOT/noctalia-runtime-apks"
 NOCTALIA_PACKAGES="$REPO_ROOT/tools/alpine-foundation/noctalia-runtime-packages.txt"
+DESKTOP_SERVICE_PACKAGES="$REPO_ROOT/tools/alpine-foundation/desktop-service-packages.txt"
 
 MESA_VERSION="${LUNA_MESA_VERSION:-26.1.6}"
 NOCTALIA_REF="${LUNA_NOCTALIA_REF:-v5.2.0}"
-ALPINE_IMAGE="${LUNA_ALPINE_IMAGE:-alpine:3.24}"
+ALPINE_IMAGE="${LUNA_ALPINE_IMAGE:-alpine:3.24.2}"
+DOCKER_NETWORK="${LUNA_DOCKER_NETWORK:-default}"
 
 for tool in docker sha256sum git; do
     command -v "$tool" >/dev/null || {
@@ -23,6 +25,8 @@ mkdir -p "$BUILD_ROOT"
 
 echo "==> Building tracked Mesa virgl recipe ($MESA_VERSION)..."
 docker build \
+    --network "$DOCKER_NETWORK" \
+    --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" \
     --build-arg "MESA_VERSION=$MESA_VERSION" \
     --build-arg "MESA_SHA256=5296b88a0f1e012e2cb9ada150a2bbadf728ca81e5a4fb2ab43c83a4d2158606" \
     -f "$REPO_ROOT/tools/alpine-foundation/mesa-virgl.Dockerfile" \
@@ -44,15 +48,27 @@ echo "==> Fetching tracked Noctalia runtime closure from $ALPINE_IMAGE..."
 rm -rf "$RUNTIME_APKS"
 mkdir -p "$RUNTIME_APKS"
 docker run --rm \
+    --network "$DOCKER_NETWORK" \
     -v "$RUNTIME_APKS:/out" \
     -v "$NOCTALIA_PACKAGES:/packages:ro" \
+    -v "$DESKTOP_SERVICE_PACKAGES:/desktop-packages:ro" \
     "$ALPINE_IMAGE" sh -ec '
-        apk update
-        apk fetch --recursive --output /out $(cat /packages)
+        for attempt in 1 2 3; do
+            if apk update && \
+               apk fetch --recursive --output /out $(cat /packages) && \
+               apk fetch --recursive --output /out $(cat /desktop-packages); then
+                exit 0
+            fi
+            echo "Noctalia runtime APK fetch attempt $attempt failed" >&2
+            sleep 3
+        done
+        exit 1
     '
 
 echo "==> Building tracked Noctalia recipe ($NOCTALIA_REF)..."
 docker build \
+    --network "$DOCKER_NETWORK" \
+    --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" \
     --build-arg "NOCTALIA_REF=$NOCTALIA_REF" \
     -t "luna-alpine-noctalia:${NOCTALIA_REF#v}" \
     -f "$REPO_ROOT/tools/alpine-foundation/noctalia.Dockerfile" \

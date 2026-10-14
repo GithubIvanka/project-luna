@@ -212,6 +212,10 @@ pub fn boot_flow() -> BootResult<()> {
         _ => return Err(BootError::TargetNotFound),
     };
 
+    if let Some(reservation) = prepared.boot_params.preserve_efi_framebuffer()? {
+        prepared.allocations.push(reservation);
+        debug_stage("Luna: EFI framebuffer handoff prepared\r\n");
+    }
     debug_stage("Luna: flow 14 kernel prepared\r\n");
     let attempt_id = BootAttemptMarker::next_attempt_id(
         previous_attempt,

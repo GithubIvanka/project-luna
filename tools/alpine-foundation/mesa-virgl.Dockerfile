@@ -1,4 +1,5 @@
-FROM alpine:3.24
+ARG ALPINE_IMAGE=alpine:3.24
+FROM ${ALPINE_IMAGE}
 RUN apk add --no-cache \
     build-base libdrm-dev libxdamage-dev libxshmfence-dev binutils bison cbindgen \
     elfutils-dev eudev-dev expat-dev findutils flex gettext glslang-dev libdisplay-info-dev \

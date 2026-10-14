@@ -11,6 +11,9 @@ use std::fmt;
 #[path = "lbp_v1.rs"]
 pub mod lbp;
 
+/// Verified installed application representation, independent of transport.
+pub mod directory;
+
 pub use luna_common::ResourceAccess;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

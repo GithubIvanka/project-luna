@@ -7,7 +7,6 @@
 use alloc::string::String;
 
 use uefi::boot::{self, open_protocol_exclusive};
-use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 use uefi::runtime::{self, ResetType};
 
 use crate::e820::E820Extension;
@@ -70,49 +69,9 @@ pub fn boot_flow() -> BootResult<()> {
         prepared
     };
 
-    let framebuffer = boot_gop_framebuffer()?;
-    let mut framebuffer_reservation = None;
-    match framebuffer {
-        Some((
-            base,
-            size,
-            width,
-            height,
-            stride,
-            red_pos,
-            red_size,
-            green_pos,
-            green_size,
-            blue_pos,
-            blue_size,
-            reserved_pos,
-            reserved_size,
-        )) => {
-            prepared.boot_params.set_efi_framebuffer(
-                base,
-                size,
-                width as usize,
-                height as usize,
-                stride,
-                red_pos,
-                red_size,
-                green_pos,
-                green_size,
-                blue_pos,
-                blue_size,
-                reserved_pos,
-                reserved_size,
-            )?;
-            debug_stage("Luna: EFI framebuffer handoff prepared\r\n");
-            let page_size = uefi::boot::PAGE_SIZE as u64;
-            let start = base & !(page_size - 1);
-            let end = base
-                .checked_add(size as u64)
-                .ok_or(crate::error::BootError::InvalidKernel)?;
-            let end = end.div_ceil(page_size) * page_size;
-            framebuffer_reservation = Some((start, ((end - start) / page_size) as usize));
-        }
-        None => debug_stage("Luna: EFI GOP unavailable\r\n"),
+    let framebuffer_reservation = prepared.boot_params.preserve_efi_framebuffer()?;
+    if framebuffer_reservation.is_some() {
+        debug_stage("Luna: EFI framebuffer handoff prepared\r\n");
     }
 
     let mut e820_ext = E820Extension::allocate()?;
@@ -148,58 +107,6 @@ pub fn boot_flow() -> BootResult<()> {
             page_table,
         );
     }
-}
-
-fn boot_gop_framebuffer()
--> BootResult<Option<(u64, usize, u32, u32, usize, u8, u8, u8, u8, u8, u8, u8, u8)>> {
-    let gop_handle = boot::get_handle_for_protocol::<GraphicsOutput>()?;
-    let mut gop = open_protocol_exclusive::<GraphicsOutput>(gop_handle)
-        .map_err(|_| crate::error::BootError::Unsupported("graphics output unavailable"))?;
-    let mode = gop.current_mode_info();
-    let (width, height) = mode.resolution();
-    let stride_pixels = mode.stride();
-    let pixel_format = mode.pixel_format();
-    let bytes_per_pixel = match pixel_format {
-        PixelFormat::Rgb => 4usize,
-        PixelFormat::Bgr => 4usize,
-        _ => return Ok(None),
-    };
-    let stride =
-        stride_pixels
-            .checked_mul(bytes_per_pixel)
-            .ok_or(crate::error::BootError::Unsupported(
-                "EFI framebuffer stride overflow",
-            ))?;
-    let (
-        red_pos,
-        red_size,
-        green_pos,
-        green_size,
-        blue_pos,
-        blue_size,
-        reserved_pos,
-        reserved_size,
-    ) = match pixel_format {
-        PixelFormat::Rgb => (0, 8, 8, 8, 16, 8, 24, 8),
-        PixelFormat::Bgr => (16, 8, 8, 8, 0, 8, 24, 8),
-        _ => return Ok(None),
-    };
-    let mut fb = gop.frame_buffer();
-    Ok(Some((
-        fb.as_mut_ptr() as u64,
-        fb.size(),
-        width as u32,
-        height as u32,
-        stride,
-        red_pos,
-        red_size,
-        green_pos,
-        green_size,
-        blue_pos,
-        blue_size,
-        reserved_pos,
-        reserved_size,
-    )))
 }
 
 fn gpt_guid_string(raw: [u8; 16]) -> String {

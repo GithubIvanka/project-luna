@@ -44,6 +44,13 @@ System Image, `luna-init` и kernel остаются независимо вер
 
 Незавершённая update operation должна быть обнаружена по durable state и либо безопасно завершена, либо приведена к согласованному состоянию до следующего conflicting update.
 
+`UpdateBackend::rollback` идемпотентен и применим также к текущему `apply`,
+вернувшему ошибку после частичного физического изменения. Engine откатывает
+текущую операцию и затем предыдущие в обратном порядке. Неудача записи журнала
+не скрывается; backend сохраняет checkpoint для последующей reconciliation.
+
 ## Статус
 
-Planning, transactional state и test backends существуют. Полные artifact/filesystem mutation backends ещё интегрируются.
+Planning, transactional state и test backends существуют. Application filesystem
+backend подключён через `luna-app-manager`; полные System Image/kernel mutation
+backends продолжают интегрироваться.

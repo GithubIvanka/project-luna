@@ -8,16 +8,19 @@ use std::fmt;
 use luna_common::UserId;
 
 mod accounts;
+mod boot_presentation;
 mod auth;
 mod credentials;
 mod graphics;
 mod input;
 mod keymap;
 mod renderer;
+mod rings;
 mod seat;
 mod session_ui;
 
 pub use accounts::{AccountDirectory, LocalAccount};
+pub use boot_presentation::BootPresentation;
 pub use auth::{AuthenticationError, handoff_current_identity};
 pub use credentials::UserCredentials;
 pub use graphics::{DrmDevice, DrmHandle};

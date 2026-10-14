@@ -1,8 +1,310 @@
-# Alpine Foundation — Session Continuity
+# Alpine Foundation — состояние для продолжения разработки
 
-Updated: 2026-10-02
-Branch: `alpine-foundation`
-Workspace: `/home/sibitti/source/alpine-luna`
+Документация обновлена: 2026-10-14. Последняя полная приёмка: 2026-10-13.
+Ветка: `luna-onefile-experiment`, HEAD `a1ea279`.
+Рабочий каталог: `/home/sibitti/source/project-luna`.
+
+## 2026-10-14: аудит оформления и подготовка объединения
+
+Текущее состояние и рабочий план — в
+[отчёте аудита](../AUDIT-AND-CONSOLIDATION-2026-10-14.md).
+Принятый дизайн — [SPEC](../../design/luna-alpha-20261013/SPEC.md),
+перенос в настоящую ОС — [IMPLEMENTATION](../../design/luna-alpha-20261013/IMPLEMENTATION.md).
+Полная приёмка оформления 2026-10-13 прошла; указатель и передача выбранного
+файла проходят свежую проверку перед объединением.
+
+Пользователь прямо разрешил объединить работу в `develop` и продолжать там.
+Прежние записи ниже о запрете коммитов и сохранении экспериментальной ветки
+описывают условия своих этапов; для текущего объединения действуют новый запрос
+и обновлённый AGENTS. Старые ветки и чужие исходники сохраняются.
+Сервис памяти сейчас недоступен; рабочий отчёт остаётся в репозитории.
+
+## 2026-10-13: язык документации и комментариев
+
+Документация, пояснения и комментарии в собственном коде Luna — на русском,
+по прямому указанию пользователя. Правило закреплено в `AGENTS.md`.
+Переведены последние отчёты и комментарии Files, добавлены пояснения сложной
+логики. Исполняемый код и принятые образы не меняются; новая сборка/QEMU
+для перевода не запускались. Хеши исходников в прежних отчётах и графе
+относятся к снимку до перевода комментариев.
+
+## 2026-10-12: принятые файловые операции
+
+Приняты графические копирование/вырезание/вставка/переименование, корзина,
+прогресс, отмена и клавиатурное выделение на закреплённом движке Yazi Local.
+Открытые объекты закрепляются дескрипторами; окончательное перемещение
+не заменяет назначение. Перенос между разными монтированиями отказывает
+без удаления источника. Корзина хранит содержимое и исходный путь/время;
+ручной возврат работает. Доступ ограничен HOME. Открытие другим приложением
+и восстановление по исходному пути — следующие задачи.
+
+SDK std::File удалял O_PATH, вызывая EACCES при закреплении корня внутри
+изоляции. Анализ ELF и скриншот Niri подтвердили причину. Прямой SYS_openat
+исправил её без расширения доступа к корню или /proc. Проверки F_GETFL
+и файлового движка в настоящем SDK теперь обязательны для обычной сборки.
+Исправлены клавиатурное выделение GTK, ввод точки/заглавных букв помощником
+и ложные отказы разбора перемежающихся сообщений OpenRC.
+Все исходники и пользовательские изменения сохранены; ветка/HEAD прежние,
+коммитов и сброса изменений не было.
+
+Полный канонический прогон **PASS**, `20261012-220339-357404`:
+файловые действия/отмена, меню Noctalia, Ghostty/fish/Bash/sh/Yazi,
+три сессии рабочего стола, выход/повторный вход, перезагрузка/выключение
+и предыдущие проверки бандлов. Эталон A:
+`391e18e4ffd240d81dc14da0567aeec0960307a8da18f098be1a7626adc583c5`;
+предыдущий B сохранён:
+`8a31147e9a9526f28f6be3c2b67b18195ba35389e7edfb08ba9703f25c903c2e`.
+Входной снимок: `target/luna-files-operations-20261012/inputs-final`, 8517 объектов.
+30 тестов движка на musl хоста и настоящем SDK, 3 вспомогательных теста GUI,
+18 тестов пространств имён, 15 проверок упаковки, 5 проверок разбора сервисов
+и 3 клавиатуры; Clippy в области изменений и независимый просмотр завершены.
+Граф: 147 файлов, 3145 узлов, 8479 связей, 132 группы, без вызовов LLM.
+[Подробности и ограничения](../application-bundles/FILES-OPERATIONS-STAGE.md).
+
+## 2026-10-12: каталог зарегистрированных приложений
+
+Принят общий ограниченный каталог рабочего стола через существующий посредник
+запуска с проверкой отправителя. Менеджер проверяет запись о регистрации,
+раскладку файлов и ContentIdentity; общий планировщик AppRuntime — собственный
+ELF, ресурсы, аргументы и политику пользователя. Получение списка не проверяет
+сокет композитора, не создаёт хранилище и не выдаёт пригодный для запуска план.
+Временные записи XDG принадлежат root, создаются до Noctalia и обновляются
+явной командой `luna app list`. Фиксированные записи начального набора убраны;
+меню использует понятные имена TOML и запуск CLI с закреплённым содержимым.
+Noctalia сохраняет обычный сканер записей системы/пользователя; меню не решает
+вопросы доступа.
+
+Необязательное неизменяемое `entry.args` передаёт аргументы по умолчанию
+перед аргументами вызова. Пустое поле сохраняет прежнее представление манифеста
+и ContentIdentity. Настройки Ghostty задаются манифестом; каталог не знает
+специальных идентификаторов приложений. Mod+Space открывает меню запуска.
+Управление установкой через IPC, собственные значки, «Показать содержимое»
+и доступ из изолированного Terminal к посреднику ещё не добавлены.
+
+Настоящее меню Noctalia и виртуальная клавиатура запустили Files, Terminal
+и отдельно зарегистрированный тестовый Weston. Навигация/создание папки Files,
+сопоставление PID с экземпляром (выход 0, без сигнала, успешная очистка),
+fish/Bash/sh/Yazi, приватный PTY и сохранение данных после выхода/перезагрузки
+проходят. Другой UID или процесс вне нужной cgroup получает отказ;
+записи без разрешений и консольные приложения скрыты. Устаревший ожидаемый
+хеш отклоняется до создания хранилища.
+
+Первый помощник ошибочно выбирал wayland-0; настоящий сокет и исходники
+подтвердили причину. Выбирается единственная пара Wayland/Noctalia.
+Повторный `run test` использовал тот же образ без новой сборки.
+Полный канонический прогон **PASS**:
+`target/canonical-workbench/evidence/20261012-084226-226038/results.txt`,
+включая загрузку/видеопереход, три сессии, выход/повторный вход,
+перезагрузку/выключение и прежние проверки бандлов.
+Эталон B того этапа:
+`8a31147e9a9526f28f6be3c2b67b18195ba35389e7edfb08ba9703f25c903c2e`;
+прежний A сохранён:
+`f60172474267f266e971d0a67b415bc0a88501c3db74dffcde70ab3669d0953f`.
+Входной снимок: `target/luna-desktop-discovery-20261012/inputs`.
+132 теста musl, 13 проверок упаковки/сценариев, Clippy в области изменений
+и независимый просмотр PASS; канонические 29 тестов состояния/runtime,
+119 app-runtime, 4 init. Один привилегированный тест пропущен, настоящая
+настройка процесса проверена QEMU. Временные диски и сборочные каталоги очищены.
+361 исходный путь сохранён, ветка/HEAD прежние, коммитов/сброса не было.
+[Подробности](../application-bundles/DESKTOP-DISCOVERY-STAGE.md).
+Следующей задачей тогда были безопасные операции Files; они приняты выше.
+
+## 2026-10-12: графический Files и интерактивный терминал
+
+Принят начальный самостоятельный GUI на GTK с настоящим закреплённым
+движком Yazi `yazi-fs` Local: навигация, список/метаданные, Home/Up/Refresh,
+адрес, создание папки, --reveal. Это часть файлового движка, а не полный
+Scheduler или готовый сервер Yazi без интерфейса. Файловые изменения
+на этом этапе ещё отсутствовали; реализованы в следующем принятом этапе.
+Ghostty 1.3.1, fish 4.6.0, настоящий Bash 5.3.9, BusyBox POSIX sh и Yazi 26.9.1
+собраны и упакованы на native musl. Системный sh остаётся BusyBox ash.
+
+`luna-files.lbp` / `terminal.lbp` устанавливаются App Manager в directory-v1
+`.lunaapp`: метаданные TOML, обычные файлы полезной нагрузки, без вложенного
+архива. Начальные записи меню и Niri Mod+E/Mod+Return используют существующий
+`luna app run`. Разрешения Launch на точное содержимое, явные `user.home`
+и приватный `terminal.pty` проходят через существующие runtime, namespace,
+security и cgroup; новых фоновых сервисов нет. Общий каталог реализован
+в следующем этапе, описанном выше.
+
+Проверки настоящего GUI в QEMU прошли: навигация и создание папки в Files,
+выход 0; Ghostty принимает ввод в fish, Bash/sh выполняют команды,
+интерактивный Yazi работает на том же приватном devpts и после `q` возвращается
+в оболочку. Идентификатор окна/PID Niri, UID 1000, общее пространство
+монтирования/cgroup, устройство/номер объекта PTY, очистка потомков при выходе,
+сохранение HOME и реестра/данных/настроек после перезагрузки подтверждены.
+
+Полный канонический прогон **PASS**:
+`target/canonical-workbench/evidence/20261012-073541-834991/results.txt`:
+16 прежних отметок проверки бандлов, загрузка/видеопереход, три сессии,
+выход/повторный вход и перезагрузка/выключение гостевой системы.
+Эталон A того этапа:
+`f60172474267f266e971d0a67b415bc0a88501c3db74dffcde70ab3669d0953f`;
+предыдущий B сохранён:
+`a512704c8070ae010c24241cd093461a9beabd5a36495ec19539fc717deee858`.
+Входной снимок: `target/luna-terminal-files-20261011/inputs-gui-terminal`.
+Временные диски/сборочные каталоги очищены. Итоговые пакеты, сведения
+о происхождении, SDK/кэш и результаты сохранены; лишние диагностические
+копии данных/архивов удалены после принятия. 354 исходных пути сверены,
+ни один не потерян; ветка/HEAD прежние, коммитов/сброса не было.
+
+Исправлены подтверждённые дефекты: DATA 1GiB не вмещала пакеты и mkfs.btrfs
+увеличивал файловую систему за GPT; отсутствовали ресурсы XKB/Compose GTK;
+без сессионного D-Bus Files/Ghostty теряли app_id. Сборщик измеряет DATA
+и проверяет размер, упаковщик добавляет ресурсы, Files задаёт prgname,
+Ghostty получает документированную поправку Wayland. Запись о сборке
+связывает поправку, накладку, SDK, базу пакетов, ревизии и двоичные файлы
+до упаковки. Очистка данных выполняется и при обычной ошибке упаковки;
+закреплённый дескриптор защищает очистку сборки от подмены ссылкой.
+Тесты/Clippy в области изменений и независимый просмотр завершены.
+[Версии, команды, ограничения и результаты](../application-bundles/TERMINAL-FILES-STAGE.md).
+Ниже сохранены исторические записи; их незавершённые задачи относятся
+к прежнему состоянию, если не подтверждены более новыми этапами выше.
+
+## 2026-10-11 installed Bundle launch checkpoint
+
+Текущий `.lunaapp` теперь запускается в active authenticated UserSession через
+существующие App Manager → App Runtime → root-mapping/security/namespace →
+System Runtime supervisor. Exact-content Launch grant независим от Install;
+caller определяется по SO_PEERCRED и точной desktop cgroup. Принят первый
+static x86_64/musl subset: payload read/execute, отдельные persistent application
+data/config, credentials пользователя, Landlock, cgroup descendants и exit status.
+PID 1 остаётся `luna-init`; новый supervisor/daemon не добавлен.
+
+Реальный Bundle acceptance в QEMU прошёл **11 сценариев/markers и три sessions**,
+включая установленный Luna CLI, denied callers/content, изоляцию, exit/signal,
+fork/setsid cleanup, logout/relogin и registry/data/config после guest reboot.
+Evidence: `target/canonical-workbench/evidence/20261011-175953-392615/bundle-launch/results.txt`.
+Полный canonical suite: **PASS**, включая свежую сборку, structure/ownership,
+production/display, три независимые 60-second desktop sessions и отдельные
+logout/reboot/shutdown. Новый эталон — slot `a`, SHA256
+`4c0c6459712b8b4f3c85d4740b4260fef8294d5e783a5c94e9a267ef40530a10`;
+slot `b` сохраняет прежний эталон. Accepted inputs:
+`target/luna-app-launch-20261011/inputs-landlock`. Временные test disks и build
+scratch очищены, evidence остаются отдельно. Итоги и границы:
+[LAUNCH-STAGE.md](../application-bundles/LAUNCH-STAGE.md).
+
+Проверки выявили две реальные причины отказа: DATA inode metadata обходили
+fakeroot через libc nftw; в выбранном старом kernel отсутствовал Landlock.
+Builder получил build-only bridge + независимый raw inode gate. Новое ядро
+построено из того же recipe с Landlock/SECURITY_PATH; прежние kernel/provider
+snapshot и эталон сохранены. `inputs-landlock` закрепляет новый kernel/config.
+Host harness использует fakeroot при restore metadata; rejected peer responses
+доставляются после bounded input drain, с отдельным denied-client budget.
+
+90 focused musl tests, 25 state/system runtime, 4 init, 26 artifact checks и
+6 negative input checks проходят; privileged unit test отдельно ignored,
+его фактический process setup проверен QEMU. Scoped Clippy и independent read-only
+review завершены. Полная GUI/terminal integration и dynamic musl dependency/resource
+closure, desktop discovery, реальные Alpha/third-party packages, live management
+IPC, signatures/glibc и legacy registry migration остаются следующими этапами.
+Ниже сохранены предыдущие checkpoint; их pending launch statements исторические.
+
+## 2026-10-11 storage and two-slot workflow checkpoint
+
+По запросу пользователя принята ротация двух образов разработки: эталон и
+эксперимент/предыдущий эталон. Реализация и команды:
+[ARTIFACT-WORKFLOW.md](ARTIFACT-WORKFLOW.md). `AGENTS.md` направляет дальнейшие
+canonical builds через этот controller.
+
+Освобождено **97,08 GiB**: 58 проверенных generated build trees/test disks
+(82,83 GiB) и шесть obsolete source raw images (14,25 GiB). Удаление образов
+выполнено после полного принятия нового эталона, под блокировкой, со сверкой SHA.
+Входные snapshots, serial/QMP/build logs, Graphify, первоначальный пользовательский
+образ и все пользовательские source/harness files сохранены. Evidence:
+`target/luna-storage-audit-20261011/{cleanup-result,obsolete-image-cleanup-result}.json`.
+`target` теперь около 20 GiB, свободно около 98 GiB. Рабочие slots занимают
+2,5 GiB allocated, evidence — 13 MiB; первоначальный пользовательский образ
+`target/luna-canonical-noctalia-20261010/luna-0.1.0.img` вне автоматической ротации.
+
+В `target/canonical-workbench` импортирован последний принятый regression-final
+образ. Resource experiment заменил тот же login font через новый путь: затронуто
+262144 байта SYS, без полной сборки DATA/raw image. 24 focused safety/rotation
+checks PASS: symlinks/navigation/devices, failed acceptance, successive role swaps,
+init recovery, unknown-file preservation, SIGKILL lock inheritance, ранние
+setup failures, ошибочный QEMU exit=0 и input snapshot/lock mismatch.
+Независимый read-only review завершён;
+выявленные замечания исправлены.
+
+Первый live suite `evidence/20261011-121350-448289` прошёл production/display и
+три desktop login cases, но остановился до lifecycle: agent изменил выполняемый
+Bash script. Эталон не был продвинут. Последующая диагностика исправила marker
+инъекции lifecycle helper, qemu-io filename и выбор WAYLAND_DISPLAY по реальным
+Wayland/Noctalia sockets. Финальный стабильный `run test` использовал тот же
+эксперимент без rebuild: **полный PASS**, evidence
+`target/canonical-workbench/evidence/20261011-123539-844060/results.txt`.
+Production/display, три desktop login, logout → повторный native login/desktop,
+настоящие guest reboot/shutdown, HOME/config и state revision проверены.
+Новый эталон — slot `b` (SHA256 `e5794bd66bc5dbda01743b72f5fbecf9d7dae2ff2012b2d13de46859e5abd6f5`);
+slot `a` хранит прежний эталон и переиспользуется для следующего эксперимента.
+Из 339 исходных файлов baseline 328 byte-identical, только 11 согласованных
+script/docs files изменены; отсутствующих или неожиданных изменений нет.
+`target/luna-storage-audit-20261011/source-preservation.json` фиксирует сверку.
+
+Текущий Bundle launch stage содержит незавершённые uncommitted process-host,
+installed static-ELF launch plan, per-user authorization broker и CLI run.
+Host compilation и state/runtime/init tests проходят после освобождения места.
+Реальный Bundle launch в активной UserSession ещё не принят: QEMU storage test
+использует прежний принятый userspace image. До принятия этого этапа нельзя
+заявлять, что сторонние Bundles уже запускаются в текущем desktop.
+
+## 2026-10-11 application Bundle checkpoint
+
+The installed application representation now uses ordinary filenames such as
+`luna-cli.lunaapp`, with canonical `manifest.toml`, `integrity.toml` and `payload/`.
+ID/version are metadata; no transport `.lbp` is embedded. App Manager keeps its
+receipt outside the package in opaque `.bundles-v2` registration slots. Existing
+legacy `.bundles` is preserved and requires a separate explicit migration.
+
+Verified: 54 Rust tests, Clippy `--all-targets -D warnings`, runtime compilation,
+24 offline acceptance scenarios + COMPLETE, final independent static review.
+Directory identity survives rename and removal of the input transport archive.
+Evidence: `target/luna-bundles-20261011/`; current status:
+[`DIRECTORY-STAGE.md`](../application-bundles/DIRECTORY-STAGE.md).
+
+Next: verified Bundle launch in a real active UserSession through existing
+app-runtime, RuntimeSpec/ELF closure, authorized mappings, persistent data/config
+and exit status; then canonical QEMU and Alpha/third-party packaging. This stage
+did not run QEMU or change boot/init/desktop scripts. All work remains uncommitted.
+
+## Active checkpoint — canonical desktop regression audit
+
+Current changes are uncommitted. The original 19 modified files and untracked
+test harness were inspected and preserved; do not reset or switch this checkout.
+The comparison reference is `alpine-foundation` at `1e5ece3`, inspected without
+checking it out. Full findings: [GRAPHICS-BRANCH-AUDIT.md](GRAPHICS-BRANCH-AUDIT.md).
+
+The complete canonical image now restores isolated Mesa VirGL, system fonts,
+Noctalia data/dependencies and provider policies. System Runtime registers the
+desktop process with UserSession, so logout returns to native login. The
+elogind power path has the expected FHS aliases, service accounts and scoped
+Polkit policy; PID 1 handles the final shutdown/reboot signals and syscall.
+QEMU uses `virtio-vga-gl` to preserve its firmware display surface. The user
+confirmed that the reported monitor-disconnected message occurred in QEMU.
+
+Current production path:
+
+`UEFI -> luna-boot -> kernel -> luna-init PID 1 -> immutable System Image + DATA -> luna-system-runtime -> required Luna manager readiness + boot success -> optional compatibility providers -> native login -> authenticated Niri/Noctalia`
+
+Artifact/evidence root: `target/luna-foundation-audit-20261010/`.
+The ordinary image is `image-complete/luna-0.1.0.img`; lifecycle test images are
+separate and inject session actions only for acceptance. Source image checksums
+are checked after the tests. No physical disk was written and no commit created.
+
+Recheck with `tools/test-canonical-luna-disk-image.sh`, production/login OVMF
+tests, `tools/test-canonical-luna-lifecycle-ovmf.sh logout|shutdown|reboot`, and
+`tools/test-canonical-luna-boot-display-ovmf.sh`. Use the audit graphics/fonts
+roots when rebuilding from this host's prepared artifacts.
+
+Remaining Alpha work includes DNS/network integration, real audio and hardware
+acceptance, native seat/login1 lifecycle, missing baseline applications and
+installer/recovery acceptance. The old foundation DATA schema still omits the
+architecturally required `system/state` and `system/volumes`; this is tracked
+debt, not an accepted replacement schema.
+
+The dated entries below are historical. In particular, OpenRC `[ok]`, a
+Noctalia PID and the old inverted grep assertions did not prove functional
+desktop/power integration. The audit's stricter fresh tests supersede them.
 
 ## Current objective
 
@@ -10,11 +312,11 @@ Use Alpine Linux 3.24.2 x86_64/musl as a known-good userspace while progressivel
 
 Immediate validation path:
 
-`UEFI -> luna-boot -> Luna kernel -> luna-init -> canonical LUNA-SYS/LUNA-DATA -> luna-system-runtime -> OpenRC -> native Luna login -> Niri/Noctalia`
+`UEFI -> luna-boot -> Luna kernel -> luna-init -> canonical LUNA-SYS/LUNA-DATA -> luna-system-runtime -> Luna manager gate -> optional compatibility providers -> native Luna login -> Niri/Noctalia`
 
 Direct-root remains a separate control experiment and is not the canonical runtime path. Do not move this design to `develop` automatically.
 
-## 2026-10-02 canonical Luna graphical foundation — verified
+## 2026-10-02 canonical Luna graphical foundation — historical reported result
 
 The current canonical disk-image experiment now reaches a complete graphical user-session lifecycle without the direct-root Alpine launcher.
 
@@ -182,9 +484,9 @@ Known non-blocking warnings in this minimal test environment:
 
 Current direct-root graphical test plumbing:
 - `components/boot/tests/ovmf/run-alpine-luna-kernel-direct-root.sh`
-- `dist/.build/mesa-virgl-build/direct/`
-- `dist/.build/noctalia-build/`
-- `dist/.build/noctalia-runtime-apks/`
+- `dist/.build/alpine-foundation-graphics/mesa/out/`
+- `dist/.build/alpine-foundation-graphics/noctalia/out/`
+- `dist/.build/alpine-foundation-graphics/noctalia-runtime-apks/`
 
 Immediate next action:
 
@@ -316,3 +618,185 @@ UDisks2 is intentionally still pending. Its Alpine package is available, but the
 The canonical login regression now keeps the QEMU guest alive for 20 seconds after injecting the development login credentials. The test requires successful authentication and Niri launch, and rejects graphical desktop exit, session-child start/wait failures, login UI I/O failure and kernel panic markers.
 
 The fresh canonical image passes this sustained session check: luna/luna authentication is accepted, /usr/bin/niri --session is launched, and no graphical desktop exit is reported during the 20-second observation window. The structural canonical disk verification also passes on the same rebuilt image; GPT remains EFI / LUNA-SYS / LUNA-DATA / SWAP with the accepted partition sizes.
+
+
+## 2026-10-10 — tracked graphics build and Noctalia login acceptance
+
+The tracked Alpine graphics build now builds Mesa VirGL and Noctalia from the
+repository recipe, saves Noctalia's full asset tree beside its executable, and
+places both in canonical DATA. The recipe also supplies the Alpine `stb`
+headers in the directory layout expected by Noctalia's Meson build. Runtime
+APK caches, Noctalia assets, and Mesa outputs share one configurable build
+root so the canonical image builder and the OVMF provider test consume the
+same artifacts.
+
+The new `noctalia-session` QEMU case passed after native Luna authentication.
+Noctalia connected to its D-Bus session bus and Niri's Wayland layer-shell,
+initialized EGL 1.5 on Mesa VirGL, reported the QEMU Intel UHD 630 renderer,
+created its wallpaper and top bar, and remained alive through the QEMU
+observation window. This test verifies initialization through logs; it does
+not capture guest pixels and does not validate PipeWire/audio or plugin
+installation. The existing Niri-only case remains available independently.
+
+The current build and test artifacts were placed under `/tmp` to avoid
+overwriting the repository's existing `dist/.build` and canonical disk
+outputs. Continue on `luna-onefile-experiment`; do not promote the experiment
+to `develop` without a separate integration review.
+
+## 2026-10-10 — canonical audit and stabilization continuation
+
+Continue from [GRAPHICS-BRANCH-AUDIT.md](GRAPHICS-BRANCH-AUDIT.md) and
+[ALPHA-STABILIZATION.md](ALPHA-STABILIZATION.md), rather than treating older
+direct-root/provider-only milestones as proof of the current full image.
+Actual branch is `luna-onefile-experiment`, HEAD
+`a1ea27951c188320d19b067be3f071f39ab9f19b`; preserve existing tracked/untracked work
+and do not commit or switch branches without a new request.
+
+The current stage supplies tracked canonical input preparation and integrity
+checks, required DATA namespaces, boot timing diagnostics, and one full QEMU
+regression entrypoint. A fresh input closure exposed Niri's unlisted dlopen
+dependency on `libwayland-server.so.0`; it is now an explicit package requirement.
+Consult the stabilization report and actual final regression evidence for results.
+The final run in `target/luna-alpha-stabilization-20261010/regression-final`
+completed with PASS: 26 focused Rust tests, six input-verifier negative checks,
+structure/production/display, three 60-second desktop sessions, logout, reboot
+with a second authenticated desktop and persistent HOME/config, and guest
+shutdown. System state revision remained 1 across reboot. The exact host syscall
+behind the original sporadic timeout remains unproven; fixture copy syncing and
+state-opening diagnostics are now in place.
+
+The user explicitly chose the next stage: a real application Bundle lifecycle
+for system and third-party applications through the existing `luna-bundle`,
+`luna-app-manager`, and `luna-app-runtime` boundaries. This requires installation,
+registration, authorized launch, data/config persistence, update/rollback and
+uninstall with retained user data; loose binaries with an added label do not
+complete the stage. Keep System Image, kernel and init artifact formats unchanged.
+
+The user explicitly approved ongoing Project Luna technical notes in claude-mem
+on 2026-10-10. `save_memory` confirmed note #4, titled
+`2026-10-10 Project Luna: Alpha stabilization verified; next application Bundle lifecycle`,
+in project `project-luna`. It records the completed stabilization and the pending
+Bundle stage. The initial search/task failures were traced to a Codex plugin
+13.35.0 / Claude worker 13.25.3 conflict. Both installations are now aligned to
+13.35.0 after a database backup. Search retrieved note #4 through all three
+layers; task writes/reads and startup rendering of the open Bundle stage passed.
+Chroma connected and completed backfill. The automatic observer still requires
+Claude Code authentication; explicit saves and retrieval work independently.
+
+The user clarified that the requested graph skill is Graphify. Its official
+Codex skill and references are installed from the existing CLI 0.9.57. The local
+code-only graph covers 133 component files; `graphify-out` at the repository root
+links to `target/luna-graphify-20261010/graphify-out`. The graph is navigation,
+not an authoritative architecture or a semantic conversation history. Repair
+details and limitations: [MEMORY-AND-GRAPHIFY.md](../MEMORY-AND-GRAPHIFY.md),
+also recorded in claude-mem note #5.
+
+## 2026-10-10 — application Bundle storage and CLI
+
+The first application storage stage is implemented and verified on the same
+`luna-onefile-experiment` branch and `a1ea279` HEAD, without commits. Existing
+boot/init/desktop changes and untracked test harness files are preserved.
+See [STORAGE-STAGE.md](../application-bundles/STORAGE-STAGE.md) for commands,
+evidence, storage layout and remaining lifecycle work.
+
+The actual musl `luna` executable plus a resource now form an LBP1 application
+Bundle using `examples/bundles/luna-cli/manifest.toml` and
+`tools/build-luna-cli-bundle.sh`. The CLI delegates inspect, install, independent
+version update, verify, remove and interrupted-operation recovery to the existing
+Bundle/AppManager/UpdateEngine/State/Security components. Management authorization
+and trust in the exact content identity are separate checks; neither grants
+execution capabilities. Signed Bundles and unresolved dependencies are rejected
+with explicit errors until their verification/resolution exists.
+
+The private version registry is `DATA/system/apps/.bundles/<id>/<version>`.
+It retains old versions, user data/config and loose legacy providers. Transactions
+use the existing `system/state/luna-state.redb`, exclusive DATA locking, complete
+filesystem checkpoints, atomic directory publication and idempotent rollback.
+Recovery checks the durable plan and phase before reverting an interrupted apply.
+Offline CLI requires an explicitly chosen, operator-owned DATA root and must not
+share its database with a live runtime.
+
+Final evidence: 44 existing Rust tests passed; Clippy with `-D warnings` and
+app-runtime/system-runtime compilation passed. All 20 storage acceptance scenarios
+passed in `target/luna-bundles-20261010/runs/verified/`, including corruption,
+permission/link rejection, process interruption after publication, rollback,
+durable journal write failure and data retention. An independent read-only review
+was completed. QEMU and physical disks were not exercised in this storage stage.
+
+The next stage is real installed Bundle launch through the existing active
+UserSession and app-runtime, including RuntimeSpec/ELF closure, logical resources,
+persistent application mappings and exit status, followed by canonical QEMU
+acceptance and provider/third-party packaging. Offline commands do not fake an
+active session. Full application lifecycle remains open.
+
+The root Graphify link now points to
+`target/luna-graphify-bundles-20261010/graphify-out`: code-only extraction covers
+134 component files, 2678 nodes, 7166 edges and 110 communities. The old snapshot
+is retained; source fingerprint and AST normalization/collapse diagnostics are
+saved beside the graph. It is a navigation aid with incomplete parallel relation
+types, not execution evidence. Explicit claude-mem
+notes and work-state writes can be saved/read independently of the automatic
+observer, whose Claude Code authentication remains unavailable.
+
+## 2026-10-11 — registered native Bundle and Wayland launch
+
+Current branch/HEAD remain `luna-onefile-experiment` / `a1ea27951c188320d19b067be3f071f39ab9f19b`.
+All earlier tracked/untracked source and test harness work is preserved; no commits,
+reset or branch switch. Directory-v1 installation is `name.lunaapp` with TOML
+metadata and `payload/`; ID/version stay in metadata, `.lbp` is transport only.
+See [DIRECTORY-STAGE.md](../application-bundles/DIRECTORY-STAGE.md), the accepted
+[directory contract](../../contracts/DIRECTORY-BUNDLE-CONTRACT.md), and
+[LAUNCH-STAGE.md](../application-bundles/LAUNCH-STAGE.md) for the prior completed
+offline storage and static-musl active-UserSession stages.
+
+The next implemented subset is explicit Bundle-owned dynamic musl closure and
+one authorized compositor endpoint: see
+[DYNAMIC-WAYLAND-STAGE.md](../application-bundles/DYNAMIC-WAYLAND-STAGE.md).
+It uses existing components and `luna-init` remains sole PID 1. Loader/library
+sources require verified content and separate grants; Wayland proof is tied to
+UserSession, UID, pinned inode and desktop peer PID/cgroup. Exact socket
+`ResolveUnix` plus abstract UNIX scope require Landlock ABI9, fail closed.
+The selected Linux 7.2.4/input snapshot already has this support and is unchanged.
+
+Host verification: 118 focused musl tests, one privileged test ignored, scoped
+Clippy `-D warnings` PASS. Independent review found and closed loader-equivalence
+corner cases: repeated/forged headers, page-rounded LOAD/BSS replacement, partial
+or distinct PHDR aliases, missing in-range DT_NULL and the interpreter/no-dynamic
+early-return bypass. Earlier QEMU `20261011-190128-154613` verified a real Weston
+registered Bundle window, UID1000/payload libraries, named/abstract UNIX denial,
+logout cleanup and persistence after reboot. Its controller was cancelled before
+promotion after review; it is partial evidence. Latest source was built in
+`target/canonical-workbench/evidence/20261011-192344-220583`, with Bundle, production,
+display, three desktop sessions and logout PASS; reboot case was interrupted by
+unplanned UI input and QMP host-ui closure. Retest through EGL headless exposed a
+split serial marker from concurrent provider output, while guest reached login.
+Boot runlevel/readiness/revision diagnostics now format a whole line before
+writing; strict acceptance assertions are unchanged. Final full latest-source
+regression **PASS** at `target/canonical-workbench/evidence/20261011-225619-427520/results.txt`:
+production/display, all 16 Bundle markers plus suite PASS, three desktop sessions,
+logout/reboot/shutdown. EGL headless retains actual VirGL rendering and controlled
+keyboard input. Weston window/UID1000/payload libraries, capability/library/UNIX
+denials, descendant logout cleanup and registry/data/config reboot persistence
+are verified; pixels and physical hardware were not tested.
+
+Workbench now has reference B SHA256
+`a512704c8070ae010c24241cd093461a9beabd5a36495ec19539fc717deee858`;
+previous reference A SHA256
+`4c0c6459712b8b4f3c85d4740b4260fef8294d5e783a5c94e9a267ef40530a10`
+is retained as the next experimental/return slot. Temporary test disks and marked
+build scratch are removed automatically. All 350 baseline source/link entries
+remain: 328 byte-identical, 22 intended edits, no missing/unexpected edits;
+three new source/doc files and one generated graph cache. All 13 frozen code
+hashes match the completed test build. Both input snapshots and kernel remain
+unchanged. Final checks: `target/luna-dynamic-apps-20261011/evidence/final-verification.json`.
+
+Root `graphify-out` now links to `target/luna-graphify-dynamic-20261011/graphify-out`:
+143 indexed component files, 2949 nodes, 7803 edges and 139 communities. Extraction
+was local code-only with no semantic LLM; all indexed file fingerprints and old
+graphs/query memory are retained. It remains partial code navigation, not runtime
+proof or semantic conversation memory.
+
+Still pending: authorized terminal stdio, registered app desktop discovery, real
+Alpha/third-party application packaging and required GPU/audio/portal resources;
+live management IPC, signatures/glibc and explicit journalled legacy migration.
+Production does not include test grants/fixtures or install Weston automatically.

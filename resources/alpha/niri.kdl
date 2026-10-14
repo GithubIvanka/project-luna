@@ -1,0 +1,37 @@
+// Настройки Alpha: настоящие прокручиваемые колонки niri.
+input {
+    keyboard {
+        xkb {
+            layout "us"
+        }
+    }
+}
+cursor { xcursor-theme "Adwaita"; xcursor-size 24; }
+layout {
+    gaps 14
+    center-focused-column "never"
+    default-column-width { proportion 0.5; }
+    focus-ring { width 2; active-color "#74d5f3"; inactive-color "#31435f"; }
+    border { off; }
+}
+hotkey-overlay { skip-at-startup; }
+spawn-at-startup "/usr/bin/luna-noctalia-test"
+binds {
+    Mod+Return repeat=false { spawn "/usr/bin/luna-terminal"; }
+    Mod+E repeat=false { spawn "/usr/bin/luna-files"; }
+    Mod+Space repeat=false { spawn "/usr/bin/noctalia" "msg" "panel-toggle" "launcher"; }
+    Mod+Comma repeat=false { spawn "/usr/bin/noctalia" "msg" "panel-toggle" "control-center"; }
+    Mod+Q { close-window; }
+    Mod+Left { focus-column-left; }
+    Mod+Right { focus-column-right; }
+    Mod+Up { focus-window-up; }
+    Mod+Down { focus-window-down; }
+    Mod+Page_Up { focus-workspace-up; }
+    Mod+Page_Down { focus-workspace-down; }
+    Mod+Shift+E repeat=false { quit skip-confirmation=true; }
+}
+window-rule {
+    geometry-corner-radius 13
+    clip-to-geometry true
+}
+prefer-no-csd

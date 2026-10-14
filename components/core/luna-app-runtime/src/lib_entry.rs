@@ -15,3 +15,9 @@ pub use elf_closure::{
     ElfClass, ElfDependencyClosure, ElfDependencyNode, ElfDependencyResolver, ElfEndian, ElfError,
     ElfMachine, ElfMetadata, FilesystemElfResolver, TrustedElfSource, parse_elf,
 };
+
+pub mod installed;
+pub mod protocol;
+pub mod file_handoff;
+
+pub mod wayland;

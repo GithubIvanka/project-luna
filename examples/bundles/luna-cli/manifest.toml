@@ -1,0 +1,29 @@
+format = 1
+
+[bundle]
+id = "org.luna.cli"
+name = "Luna CLI"
+version = "0.1.0"
+type = "application"
+
+[platform]
+arch = "x86_64"
+min_system = "0.1.0"
+
+[entry]
+exec = "bin/luna"
+logical = "/bin/luna"
+
+[[mapping]]
+logical = "/bin/luna"
+source = "bin/luna"
+access = ["read", "execute"]
+
+[[mapping]]
+logical = "/share/about.txt"
+source = "share/about.txt"
+access = ["read"]
+
+[metadata]
+author = "Project Luna"
+license = "Apache-2.0"

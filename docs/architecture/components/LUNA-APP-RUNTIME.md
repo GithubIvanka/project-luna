@@ -108,7 +108,10 @@ Running → Crashed
 Stopping → Failed
 ```
 
-`Stopped`, `Crashed` и `Failed` — конечные состояния.
+`Stopped`, `Crashed` и `Failed` — конечные lifecycle states. Failed stop может
+временно сохранять active process handle: завершение cleanup освобождает его,
+сохраняя первую ошибку и фактический process outcome. Конечное состояние само
+по себе не является доказательством, что процесс уже освобождён.
 
 ## Session boundary
 
@@ -127,5 +130,22 @@ Stopping → Failed
 Домен `ApplicationInstance`, планирование, authorization pipeline и базовый Linux runtime backend реализованы.
 Volume mappings используют path-scoped authorization (`VolumePath` / `VolumeSubtree`),
 реальный Volume Manager snapshot и namespace-local `MountInstance`; layout validation
-отклоняет пересекающиеся targets до запуска. Production privileged mount testing,
-secure eject lifecycle и provider IPC продолжаются.
+отклоняет пересекающиеся targets до запуска. Installed native-musl launch соединён
+с реальной UserSession, отдельной Launch policy, приватными data/config и process
+host System Runtime. Dynamic closure ограничен declared verified Bundle resources,
+с grants каждого ELF node. Wayland handoff закрепляет один approved session socket,
+с proof SessionId/UID/inode/peer и обязательным UNIX endpoint enforcement.
+Границы и acceptance:
+[DYNAMIC-WAYLAND-STAGE.md](../../development/application-bundles/DYNAMIC-WAYLAND-STAGE.md).
+`user.home` добавляет проверенный home текущей сессии с отдельными path grants;
+`terminal.pty` создаёт приватные synthetic devices/devpts и scratch tmpfs rights.
+Ghostty/fish работают внутри одного AppInstance/cgroup; stdio GUI остаётся null.
+Реализация и текущие проверки:
+[TERMINAL-FILES-STAGE.md](../../development/application-bundles/TERMINAL-FILES-STAGE.md).
+Shared installed planner также проверяет desktop catalog eligibility без
+endpoint probe/materialization и не выдаёт executable plan. Immutable manifest
+`entry.args` предшествует caller argv; суммарные limits проверяются. Desktop
+content pin не заменяет ordinary Launch authorization. См.
+[DESKTOP-DISCOVERY-STAGE.md](../../development/application-bundles/DESKTOP-DISCOVERY-STAGE.md).
+Общие multi-provider dependencies, external CLI stdio handoff, Volume secure
+eject lifecycle и provider IPC продолжаются.

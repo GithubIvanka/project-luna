@@ -1,6 +1,8 @@
 //! System-wide runtime supervision boundary for Project Luna.
 //! `system-runtime` is the sole owner of supervised processes.
 
+mod application_process;
+pub mod process_cgroup;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -66,6 +68,7 @@ pub enum ProcessState {
 #[derive(Debug)]
 struct SupervisedProcess {
     child: Child,
+    cgroup: Option<process_cgroup::ProcessCgroup>,
 }
 #[derive(Default)]
 pub struct ProcessSupervisor {
@@ -227,7 +230,13 @@ impl ProcessSupervisor {
         }
         let child = command.spawn().map_err(ProcessError::Spawn)?;
         let id = ProcessId::new(child.id());
-        self.processes.insert(id, SupervisedProcess { child });
+        self.processes.insert(
+            id,
+            SupervisedProcess {
+                child,
+                cgroup: None,
+            },
+        );
         Ok(id)
     }
     pub fn poll(&mut self, id: ProcessId) -> Result<ProcessState, ProcessError> {
@@ -235,6 +244,24 @@ impl ProcessSupervisor {
             .processes
             .get_mut(&id)
             .ok_or(ProcessError::Unknown(id))?;
+        if let Some(group) = &process.cgroup {
+            // Detect leader exit without reaping; reclaim every descendant first.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            if unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    id.get(),
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            } != 0
+            {
+                return Err(ProcessError::Wait(std::io::Error::last_os_error()));
+            }
+            if unsafe { info.si_pid() } != 0 {
+                group.kill_and_wait().map_err(ProcessError::Kill)?;
+            }
+        }
         match process.child.try_wait().map_err(ProcessError::Wait)? {
             Some(status) => {
                 self.processes.remove(&id);
@@ -244,12 +271,18 @@ impl ProcessSupervisor {
         }
     }
     pub fn terminate(&mut self, id: ProcessId) -> Result<ExitStatus, ProcessError> {
-        let mut process = self
+        let process = self
             .processes
-            .remove(&id)
+            .get_mut(&id)
             .ok_or(ProcessError::Unknown(id))?;
-        process.child.kill().map_err(ProcessError::Kill)?;
-        process.child.wait().map_err(ProcessError::Wait)
+        if let Some(group) = &process.cgroup {
+            group.kill_and_wait().map_err(ProcessError::Kill)?;
+        } else {
+            process.child.kill().map_err(ProcessError::Kill)?;
+        }
+        let status = process.child.wait().map_err(ProcessError::Wait)?;
+        self.processes.remove(&id);
+        Ok(status)
     }
     pub fn reap_finished(&mut self) -> Result<Vec<(ProcessId, ExitStatus)>, ProcessError> {
         let ids: Vec<_> = self.processes.keys().copied().collect();
@@ -591,6 +624,33 @@ impl SystemRuntimeService {
     pub fn launch_niri_session(&mut self, id: SessionId) -> Result<ProcessId, RuntimeError> {
         self.launch_graphical_session(id, "/usr/bin/niri", ["--session"])
     }
+    #[cfg(unix)]
+    pub fn launch_graphical_session_with_env_and_pre_exec<I, S, K, V, F>(
+        &mut self,
+        id: SessionId,
+        program: &str,
+        args: I,
+        env: impl IntoIterator<Item = (K, V)>,
+        setup: F,
+    ) -> Result<ProcessId, RuntimeError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+        F: FnMut() -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        if self.session(id)?.state() != SessionState::Active {
+            return Err(RuntimeError::Session(
+                "graphical process requires an active session".into(),
+            ));
+        }
+        let process = self
+            .supervisor
+            .spawn_with_env_and_pre_exec_inherited_stdio(program, args, env, setup)?;
+        self.session_processes.insert(process, id);
+        Ok(process)
+    }
     pub fn terminate_process(&mut self, process: ProcessId) -> Result<(), RuntimeError> {
         self.supervisor.terminate(process)?;
         if let Some(session_id) = self.session_processes.remove(&process) {
@@ -770,5 +830,28 @@ mod tests {
             session.login_state(),
             luna_user_session::LoginState::Visible
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn desktop_with_credentials_setup_ends_its_session_on_exit() {
+        let mut rt = SystemRuntimeService::new();
+        rt.start();
+        let id = rt.create_session(UserId::from("alice")).unwrap();
+        rt.launch_graphical_session_with_env_and_pre_exec(
+            id,
+            "sh",
+            ["-c", "test \"$LUNA_SESSION_TEST\" = yes"],
+            [("LUNA_SESSION_TEST", "yes")],
+            || Ok(()),
+        )
+        .unwrap();
+        for _ in 0..100 {
+            rt.supervise().unwrap();
+            if rt.session(id).unwrap().state() == SessionState::Ended {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("exited desktop left its UserSession active");
     }
 }

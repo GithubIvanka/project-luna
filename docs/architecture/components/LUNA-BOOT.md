@@ -68,3 +68,12 @@ manifest выбранного luna-init
 ## Статус
 
 Discovery, GPT/ext4 access, target selection, menu, kernel loading, external boot, memory preparation и handoff реализованы в репозитории. Полная production hardening ещё продолжается.
+
+## Firmware framebuffer
+
+Normal boot и отдельный Alpine test используют общий GOP handoff: при наличии
+RGB/BGR framebuffer текущий адрес, размер, stride и pixel layout передаются в
+Linux screen_info, а область сохраняется в E820 reservations. Отсутствие GOP
+или BltOnly mode допускает headless boot. Передача framebuffer сама по себе
+не доказывает непрерывность сигнала при takeover конкретным DRM driver;
+физический i915 переход требует проверки на целевом ноутбуке.

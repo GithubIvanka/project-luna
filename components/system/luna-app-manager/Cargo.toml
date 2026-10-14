@@ -13,3 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 luna-common = { path = "../../core/luna-common" }
+luna-bundle = { path = "../../core/luna-bundle" }
+luna-security = { path = "../../core/luna-security" }
+luna-state = { path = "../../core/luna-state" }
+luna-update-manager = { path = "../../core/luna-update-manager" }
+libc = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.9"

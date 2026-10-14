@@ -65,3 +65,12 @@ partition, best-effort filesystem metadata из udev database, read-only native
 probe ext4/Btrfs, input discovery и native kernel uevent monitor. Политика
 auto-attach, volume registry, aliases и
 Volume backend resolution вынесены в отдельный crate `luna-volume-manager`.
+
+## Udev compatibility process ownership
+
+When an external udev-compatible daemon is available, Device Manager starts
+and supervises it, waits for its control socket, then runs coldplug
+trigger/settle before publishing readiness. If the daemon exits unexpectedly,
+Device Manager fails rather than claiming its compatibility backend remains
+ready. System Runtime must not start a duplicate udevd; it owns only the
+optional seat broker required by a native graphics session.

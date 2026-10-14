@@ -84,3 +84,53 @@ shutdown or reboot
 ## Статус
 
 Process supervision, UserSession integration и durable state integration присутствуют в коде. Полная production startup orchestration, lifecycle reconciliation и resource limits ещё требуют реализации.
+## Transitional seat compatibility provider
+
+The one-file Niri acceptance DATA provider includes seatd. When no external
+service manager is present, System Runtime may launch and supervise it as a
+transitional libseat compatibility provider. This is not Luna-native seat
+ownership or a required runtime component. It is not part of the critical
+boot-success gate: a missing seat provider must not undo an already-confirmed
+boot. The compatibility path can be removed when luna-user-session owns the
+compositor's seat resource handoff.
+
+System Runtime does not launch a second udev daemon. Device Manager is the
+single owner of the udev compatibility process, coldplug trigger/settle and
+process supervision. UserSession remains the Luna boundary for seat/session
+lifecycle; this temporary seatd broker serves only the authenticated Wayland
+provider.
+
+## Возврат к login после logout
+
+Запуск authenticated desktop с окружением и сменой credentials регистрирует
+PID в существующей связи process → UserSession. Завершение compositor переводит
+UserSession в Ended; runtime завершает ApplicationInstances, очищает cgroup desktop и `/run/user/<uid>`
+завершившего сессию пользователя, затем возвращается к native login UI.
+Повторный вход создаёт новый desktop, без перезагрузки PID 1 или manager services.
+
+## Запуск установленных приложений
+
+Локальный application broker принадлежит текущей authenticated UserSession.
+UID и точная cgroup peer PID проверяются до обработки запроса. Broker получает
+verified Bundle через существующий App Manager и передаёт его App Runtime;
+authorization выполняет `luna-security`. System Runtime предоставляет process
+host своему supervisor и cgroup v2 descendant cleanup, включая `setsid` children.
+При недоступной boundary запуск Bundle закрыт. Native-musl subset теперь включает
+Bundle-owned dynamic closure и один explicitly authorized Wayland socket текущего
+UserSession. Broker выбирает endpoint/cgroup/UID, App Runtime проверяет sealed
+mapping и proof; child подключается после credentials drop. См.
+[DYNAMIC-WAYLAND-STAGE.md](../../development/application-bundles/DYNAMIC-WAYLAND-STAGE.md).
+
+Home capability выбирает проверенный user home с no-follow/UID validation.
+Process host вызывает setsid перед child setup; private terminal setup требует
+session leadership. Ghostty сам создаёт PTY и fish child в том же AppInstance,
+не добавляя supervisor. Explicit desktop environment выбирает Wayland/Cairo и
+terminal software Mesa; host device/library fallback не предоставляется. См.
+[TERMINAL-FILES-STAGE.md](../../development/application-bundles/TERMINAL-FILES-STAGE.md).
+
+Existing application broker также публикует bounded verified desktop catalog
+до Noctalia и при authenticated `luna app list`, без новых services. Root-owned
+runtime entries — presentation cache; Exec повторно проходит manager verification
+и policy, expected content сравнивается до probe/storage. Ошибка refresh и logout
+очищают собственные entries; неизвестные objects не удаляются. См.
+[DESKTOP-DISCOVERY-STAGE.md](../../development/application-bundles/DESKTOP-DISCOVERY-STAGE.md).

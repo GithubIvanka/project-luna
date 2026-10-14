@@ -355,6 +355,14 @@ RFC-0002 Bundle Format v1 принят.
 - Неизвестные major versions и malformed/unsafe containers отклоняются.
 - Импорт `.deb` и `.rpm` относится к `luna-app-manager`, а не изменяет формат Bundle.
 
+Уточнения пользователя 2026-10-11 для установленного application Bundle:
+обычное имя приложения без добавленного ID/Version; metadata в TOML;
+собственное расширение; транспортный `.lbp` не хранится внутри приложения.
+Первый реализованный directory representation использует рабочий suffix
+`.lunaapp` и сохраняет RFC ContentIdentity. Конкретный layout, проверка
+содержимого и ограничения этапа определены в
+[`DIRECTORY-BUNDLE-CONTRACT.md`](../contracts/DIRECTORY-BUNDLE-CONTRACT.md).
+
 ## 20. Runtime и асинхронность
 
 - Для каждого процесса выбирается одна libc: `musl` или `glibc`.

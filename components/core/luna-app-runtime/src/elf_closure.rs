@@ -67,6 +67,7 @@ pub struct ElfMetadata {
     needed: Vec<String>,
     rpath: Vec<String>,
     runpath: Vec<String>,
+    search_path_tags: bool,
 }
 
 impl ElfMetadata {
@@ -96,6 +97,11 @@ impl ElfMetadata {
 
     pub fn runpath(&self) -> &[String] {
         &self.runpath
+    }
+
+    /// Includes empty DT_RPATH/DT_RUNPATH values, which affect loader semantics.
+    pub fn has_search_path_tags(&self) -> bool {
+        self.search_path_tags
     }
 
     pub fn has_dynamic_loader(&self) -> bool {
@@ -201,6 +207,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
             needed: Vec::new(),
             rpath: Vec::new(),
             runpath: Vec::new(),
+            search_path_tags: false,
         });
     }
 
@@ -218,33 +225,50 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
 
     let mut segments = Vec::with_capacity(phnum as usize);
     let mut interpreter = None;
+    let mut interpreter_range = None;
     let mut dynamic = None;
+    let mut phdr = None;
 
     for index in 0..phnum {
         let base = phoff + index * phentsize;
         let p_type = read_u32(bytes, base as usize, endian)?;
-        let (offset, vaddr, filesz) = match class {
+        let (offset, vaddr, filesz, memsz) = match class {
             ElfClass::Class32 => (
                 read_u32(bytes, base as usize + 4, endian)? as u64,
                 read_u32(bytes, base as usize + 8, endian)? as u64,
                 read_u32(bytes, base as usize + 16, endian)? as u64,
+                read_u32(bytes, base as usize + 20, endian)? as u64,
             ),
             ElfClass::Class64 => (
                 read_u64(bytes, base as usize + 8, endian)?,
                 read_u64(bytes, base as usize + 16, endian)?,
                 read_u64(bytes, base as usize + 32, endian)?,
+                read_u64(bytes, base as usize + 40, endian)?,
             ),
         };
         range(bytes, offset, filesz)?;
 
         match p_type {
-            1 => segments.push(Segment {
-                vaddr,
-                offset,
-                filesz,
-            }),
-            2 => dynamic = Some((offset, filesz)),
+            1 => {
+                if filesz > memsz || vaddr.checked_add(memsz).is_none() {
+                    return Err(ElfError::MalformedHeader("PT_LOAD memory range"));
+                }
+                segments.push(Segment {
+                    vaddr,
+                    offset,
+                    filesz,
+                    memsz,
+                });
+            }
+            2 => {
+                if dynamic.replace((offset, vaddr, filesz)).is_some() {
+                    return Err(ElfError::MalformedHeader("repeated PT_DYNAMIC"));
+                }
+            }
             3 => {
+                if interpreter.is_some() {
+                    return Err(ElfError::MalformedHeader("repeated PT_INTERP"));
+                }
                 let raw = slice(bytes, offset, filesz)?;
                 let nul = raw
                     .iter()
@@ -257,12 +281,19 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
                     return Err(ElfError::InvalidInterpreterPath);
                 }
                 interpreter = Some(path);
+                interpreter_range = Some((offset, vaddr, filesz));
+            }
+            6 if phdr.replace((offset, vaddr, filesz, memsz)).is_some() => {
+                return Err(ElfError::MalformedHeader("repeated PT_PHDR"));
             }
             _ => {}
         }
     }
 
-    let Some((dynamic_offset, dynamic_size)) = dynamic else {
+    let Some((dynamic_offset, dynamic_vaddr, dynamic_size)) = dynamic else {
+        if interpreter.is_some() {
+            return Err(ElfError::MalformedHeader("PT_INTERP without PT_DYNAMIC"));
+        }
         return Ok(ElfMetadata {
             class,
             endian,
@@ -271,9 +302,40 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
             needed: Vec::new(),
             rpath: Vec::new(),
             runpath: Vec::new(),
+            search_path_tags: false,
         });
     };
 
+    // The accepted native target has 4 KiB ELF mapping pages. Other machines
+    // retain generic metadata parsing, not a claim about their kernel loader.
+    let load_page_size = (machine == ElfMachine::X86_64).then_some(4096);
+    if load_page_size.is_some() {
+        validate_mapped_file_range(&segments, 0, 64, load_page_size)?;
+        let phdr_address =
+            validate_mapped_file_range(&segments, phoff, ph_table_size, load_page_size)?;
+        if let Some((offset, address, filesz, memsz)) = phdr
+            && (offset != phoff
+                || address != phdr_address
+                || filesz != ph_table_size
+                || memsz != ph_table_size)
+        {
+            return Err(ElfError::MalformedHeader(
+                "PT_PHDR does not match loaded table",
+            ));
+        }
+        if let Some((offset, address, size)) = interpreter_range
+            && vaddr_to_offset(&segments, address, size, load_page_size)? != offset
+        {
+            return Err(ElfError::MalformedHeader(
+                "PT_INTERP does not match PT_LOAD",
+            ));
+        }
+    }
+    if vaddr_to_offset(&segments, dynamic_vaddr, dynamic_size, load_page_size)? != dynamic_offset {
+        return Err(ElfError::MalformedHeader(
+            "PT_DYNAMIC does not match PT_LOAD",
+        ));
+    }
     let entry_size = match class {
         ElfClass::Class32 => 8,
         ElfClass::Class64 => 16,
@@ -289,6 +351,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
     let mut runpath_offset = None;
 
     let count = dynamic_size / entry_size;
+    let mut terminated = false;
     for index in 0..count {
         let base = dynamic_offset + index * entry_size;
         let (tag, value) = match class {
@@ -303,14 +366,31 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
         };
 
         match tag {
-            0 => break,
+            0 => {
+                terminated = true;
+                break;
+            }
             1 => needed_offsets.push(value),
             5 => strtab_vaddr = Some(value),
             10 => strtab_size = Some(value),
-            15 => rpath_offset = Some(value),
-            29 => runpath_offset = Some(value),
+            15 | 29 => {
+                let slot = if tag == 15 {
+                    &mut rpath_offset
+                } else {
+                    &mut runpath_offset
+                };
+                match slot.replace(value) {
+                    None => {}
+                    Some(_) => {
+                        return Err(ElfError::MalformedDynamicTable("repeated search path tag"));
+                    }
+                }
+            }
             _ => {}
         }
+    }
+    if !terminated {
+        return Err(ElfError::MalformedDynamicTable("missing DT_NULL"));
     }
 
     let Some(strtab_vaddr) = strtab_vaddr else {
@@ -323,12 +403,13 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
                 needed: Vec::new(),
                 rpath: Vec::new(),
                 runpath: Vec::new(),
+                search_path_tags: false,
             });
         }
         return Err(ElfError::MalformedDynamicTable("missing DT_STRTAB"));
     };
     let strtab_size = strtab_size.ok_or(ElfError::MalformedDynamicTable("missing DT_STRSZ"))?;
-    let strtab_offset = vaddr_to_offset(&segments, strtab_vaddr, strtab_size)?;
+    let strtab_offset = vaddr_to_offset(&segments, strtab_vaddr, strtab_size, load_page_size)?;
     let strtab = slice(bytes, strtab_offset, strtab_size)?;
 
     let mut needed = Vec::with_capacity(needed_offsets.len());
@@ -352,6 +433,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfMetadata, ElfError> {
         needed,
         rpath,
         runpath,
+        search_path_tags: rpath_offset.is_some() || runpath_offset.is_some(),
     })
 }
 
@@ -366,25 +448,128 @@ struct Segment {
     vaddr: u64,
     offset: u64,
     filesz: u64,
+    memsz: u64,
 }
 
-fn vaddr_to_offset(segments: &[Segment], vaddr: u64, size: u64) -> Result<u64, ElfError> {
+fn validate_mapped_file_range(
+    segments: &[Segment],
+    offset: u64,
+    size: u64,
+    page_size: Option<u64>,
+) -> Result<u64, ElfError> {
+    let end = offset
+        .checked_add(size)
+        .ok_or(ElfError::MalformedHeader("metadata file range"))?;
+    let mut found = None;
+    for segment in segments {
+        let file_end = segment
+            .offset
+            .checked_add(segment.filesz)
+            .ok_or(ElfError::MalformedHeader("PT_LOAD file range"))?;
+        if offset >= segment.offset && offset < file_end {
+            // Linux selects the last LOAD containing e_phoff's first byte.
+            // Reject short or distinct aliases rather than selecting another.
+            if end > file_end {
+                return Err(ElfError::MalformedHeader("partially mapped ELF metadata"));
+            }
+            let address = segment
+                .vaddr
+                .checked_add(offset - segment.offset)
+                .ok_or(ElfError::MalformedHeader("metadata address"))?;
+            if found.is_some_and(|prior| prior != address) {
+                return Err(ElfError::MalformedHeader("distinct ELF metadata aliases"));
+            }
+            if vaddr_to_offset(segments, address, size, page_size)? != offset {
+                return Err(ElfError::MalformedHeader(
+                    "mapped metadata differs from file",
+                ));
+            }
+            found = Some(address);
+        }
+    }
+    found.ok_or(ElfError::MalformedHeader("unmapped ELF metadata"))
+}
+
+fn vaddr_to_offset(
+    segments: &[Segment],
+    vaddr: u64,
+    size: u64,
+    page_size: Option<u64>,
+) -> Result<u64, ElfError> {
+    let requested_end = vaddr
+        .checked_add(size)
+        .ok_or(ElfError::MalformedStringTable)?;
+    let mut translated = None;
     for segment in segments {
         let end = segment
             .vaddr
             .checked_add(segment.filesz)
             .ok_or(ElfError::MalformedDynamicTable("segment overflow"))?;
-        let requested_end = vaddr
-            .checked_add(size)
-            .ok_or(ElfError::MalformedStringTable)?;
         if vaddr >= segment.vaddr && requested_end <= end {
-            return segment
+            let offset = segment
                 .offset
                 .checked_add(vaddr - segment.vaddr)
-                .ok_or(ElfError::MalformedStringTable);
+                .ok_or(ElfError::MalformedStringTable)?;
+            if translated.is_some_and(|prior| prior != offset) {
+                return Err(ElfError::MalformedHeader("ambiguous PT_LOAD translation"));
+            }
+            translated = Some(offset);
+        } else if segment.vaddr < requested_end && vaddr < end {
+            // A partly overlapping LOAD could replace part of the metadata.
+            return Err(ElfError::MalformedHeader(
+                "partly overlapping PT_LOAD metadata",
+            ));
         }
     }
-    Err(ElfError::MalformedStringTable)
+    let translated = translated.ok_or(ElfError::MalformedStringTable)?;
+    if let Some(page_size) = page_size {
+        let mask = page_size - 1;
+        let page_end = |address: u64| {
+            address
+                .checked_add(mask)
+                .map(|value| value & !mask)
+                .ok_or(ElfError::MalformedHeader("PT_LOAD page range"))
+        };
+        for segment in segments {
+            let page_start = segment.vaddr & !mask;
+            let file_end = segment
+                .vaddr
+                .checked_add(segment.filesz)
+                .ok_or(ElfError::MalformedHeader("PT_LOAD file range"))?;
+            if segment.offset & mask != segment.vaddr & mask {
+                return Err(ElfError::MalformedHeader("PT_LOAD page alignment"));
+            }
+            if segment.filesz != 0 {
+                let mapped_end = page_end(file_end)?;
+                if page_start < requested_end && vaddr < mapped_end {
+                    let overlap = vaddr.max(page_start);
+                    let actual = (segment.offset - (segment.vaddr & mask))
+                        .checked_add(overlap - page_start)
+                        .ok_or(ElfError::MalformedHeader("PT_LOAD page translation"))?;
+                    let expected = translated
+                        .checked_add(overlap - vaddr)
+                        .ok_or(ElfError::MalformedHeader("metadata page translation"))?;
+                    if actual != expected {
+                        return Err(ElfError::MalformedHeader(
+                            "overlapping PT_LOAD metadata page",
+                        ));
+                    }
+                }
+            }
+            if segment.memsz > segment.filesz {
+                let zero_start = if segment.filesz == 0 {
+                    page_start
+                } else {
+                    file_end
+                };
+                let zero_end = page_end(segment.vaddr + segment.memsz)?;
+                if zero_start < requested_end && vaddr < zero_end {
+                    return Err(ElfError::MalformedHeader("PT_LOAD BSS overwrites metadata"));
+                }
+            }
+        }
+    }
+    Ok(translated)
 }
 
 fn read_dyn_string(table: &[u8], offset: u64) -> Result<String, ElfError> {
@@ -521,7 +706,13 @@ impl FilesystemElfResolver {
                 let relative = logical
                     .strip_prefix(&source.logical_prefix)
                     .map_err(|_| ElfError::DependencyNotFound(logical.display().to_string()))?;
-                let candidate = source.physical_root.join(relative);
+                // Joining an empty suffix adds a trailing slash, which turns
+                // an exact-file source into ENOTDIR during canonicalization.
+                let candidate = if relative.as_os_str().is_empty() {
+                    source.physical_root.clone()
+                } else {
+                    source.physical_root.join(relative)
+                };
                 let canonical = fs::canonicalize(&candidate)
                     .map_err(|error| ElfError::Io(error.to_string()))?;
                 let trusted_root = fs::canonicalize(&source.physical_root)
@@ -849,6 +1040,7 @@ mod tests {
         write_u64(bytes, offset + 8, file_offset);
         write_u64(bytes, offset + 16, vaddr);
         write_u64(bytes, offset + 32, filesz);
+        write_u64(bytes, offset + 40, filesz);
     }
 
     fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
@@ -861,6 +1053,179 @@ mod tests {
 
     fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
         bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    #[test]
+    fn empty_search_path_tags_remain_visible_and_duplicates_fail_closed() {
+        for tag in [15, 29] {
+            let mut bytes = fixture(&[], None);
+            write_u64(&mut bytes, 0x320, tag);
+            write_u64(&mut bytes, 0x328, 0);
+            let elf = parse_elf(&bytes).unwrap();
+            assert!(elf.has_search_path_tags());
+            assert!(elf.rpath().is_empty() && elf.runpath().is_empty());
+            write_u64(&mut bytes, 0x330, tag);
+            assert!(matches!(
+                parse_elf(&bytes),
+                Err(super::ElfError::MalformedDynamicTable(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn duplicate_program_headers_and_inconsistent_dynamic_translation_fail_closed() {
+        let mut duplicate_interp = fixture(&[], Some("/lib/ld-musl-x86_64.so.1"));
+        phdr(&mut duplicate_interp, 176, 3, 0x200, 0x400200, 26);
+        assert!(matches!(
+            parse_elf(&duplicate_interp),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut duplicate_dynamic = fixture(&[], None);
+        phdr(&mut duplicate_dynamic, 120, 2, 0x300, 0x400300, 0x100);
+        assert!(matches!(
+            parse_elf(&duplicate_dynamic),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut wrong_address = fixture(&[], None);
+        write_u64(&mut wrong_address, 176 + 16, 0x400310);
+        assert!(matches!(
+            parse_elf(&wrong_address),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut ambiguous = fixture(&[], None);
+        phdr(&mut ambiguous, 120, 1, 0x500, 0x400300, 0x100);
+        assert!(matches!(
+            parse_elf(&ambiguous),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+    }
+
+    #[test]
+    fn page_rounded_load_aliases_and_bss_cannot_replace_metadata() {
+        let base = || super::Segment {
+            vaddr: 0x400000,
+            offset: 0,
+            filesz: 0x2000,
+            memsz: 0x2000,
+        };
+        for alias in [
+            // No byte-range overlap; MAP_FIXED replaces the whole metadata page.
+            super::Segment {
+                vaddr: 0x400f00,
+                offset: 0x1f00,
+                filesz: 0x100,
+                memsz: 0x100,
+            },
+            // Same file translation, but the trailing BSS clears the metadata.
+            super::Segment {
+                vaddr: 0x400100,
+                offset: 0x100,
+                filesz: 0x100,
+                memsz: 0x300,
+            },
+            // A pure BSS LOAD starts at the page floor, before its p_vaddr.
+            super::Segment {
+                vaddr: 0x400f00,
+                offset: 0xf00,
+                filesz: 0,
+                memsz: 0x100,
+            },
+        ] {
+            assert!(super::vaddr_to_offset(&[base(), alias], 0x400300, 0x100, Some(4096)).is_err());
+        }
+        let same = super::Segment {
+            vaddr: 0x400f00,
+            offset: 0xf00,
+            filesz: 0x100,
+            memsz: 0x100,
+        };
+        assert_eq!(
+            super::vaddr_to_offset(&[base(), same], 0x400300, 0x100, Some(4096)).unwrap(),
+            0x300
+        );
+    }
+
+    #[test]
+    fn mapped_header_pages_and_invalid_load_memory_fail_closed() {
+        let mut bytes = fixture(&[], None);
+        let dynamic = bytes[0x300..0x400].to_vec();
+        let strings = bytes[0x500..0x700].to_vec();
+        bytes.resize(0x3000, 0);
+        bytes[0x1300..0x1400].copy_from_slice(&dynamic);
+        bytes[0x1500..0x1700].copy_from_slice(&strings);
+        write_u64(&mut bytes, 0x1308, 0x401500);
+        phdr(&mut bytes, 64, 1, 0, 0x400000, 0x1700);
+        phdr(&mut bytes, 176, 2, 0x1300, 0x401300, 0x100);
+        assert!(parse_elf(&bytes).is_ok());
+        // This replaces only the ELF/program-header page, not dynamic/strtab.
+        phdr(&mut bytes, 120, 1, 0x2f00, 0x400f00, 0x100);
+        assert!(matches!(
+            parse_elf(&bytes),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut bad_memory = fixture(&[], None);
+        write_u64(&mut bad_memory, 64 + 40, 0x100);
+        assert!(matches!(
+            parse_elf(&bad_memory),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut unaligned = fixture(&[], None);
+        phdr(&mut unaligned, 120, 1, 0x600, 0x400f00, 0x100);
+        assert!(matches!(
+            parse_elf(&unaligned),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+    }
+
+    #[test]
+    fn phdr_aliases_and_forged_musl_base_fail_closed() {
+        let mut bytes = fixture(&[], None);
+        phdr(&mut bytes, 120, 6, 64, 0x400040, 3 * 56);
+        assert!(parse_elf(&bytes).is_ok());
+        write_u64(&mut bytes, 120 + 16, 0x400048);
+        assert!(matches!(
+            parse_elf(&bytes),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut duplicate = fixture(&[], None);
+        phdr(&mut duplicate, 120, 6, 64, 0x400040, 3 * 56);
+        phdr(&mut duplicate, 176, 6, 64, 0x400040, 3 * 56);
+        assert!(matches!(
+            parse_elf(&duplicate),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        for size in [0x20, 3 * 56] {
+            let mut alias = fixture(&[], None);
+            phdr(&mut alias, 120, 1, 64, 0x402040, size);
+            assert!(matches!(
+                parse_elf(&alias),
+                Err(super::ElfError::MalformedHeader(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn dynamic_requires_in_range_sentinel_and_mapped_interpreter() {
+        let mut missing_null = fixture(&[], None);
+        for at in (0x320..0x400).step_by(16) {
+            write_u64(&mut missing_null, at, 21);
+        }
+        assert!(matches!(
+            parse_elf(&missing_null),
+            Err(super::ElfError::MalformedDynamicTable(_))
+        ));
+        let mut interpreter = fixture(&[], Some("/lib/ld-musl-x86_64.so.1"));
+        write_u64(&mut interpreter, 120 + 16, 0x400210);
+        assert!(matches!(
+            parse_elf(&interpreter),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
+        let mut no_dynamic = fixture(&[], Some("/lib/ld-musl-x86_64.so.1"));
+        write_u32(&mut no_dynamic, 176, 0);
+        assert!(matches!(
+            parse_elf(&no_dynamic),
+            Err(super::ElfError::MalformedHeader(_))
+        ));
     }
 
     #[test]

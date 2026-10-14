@@ -1,8 +1,7 @@
-//! Minimal Linux evdev input backend for UserSession.
+//! Минимальная граница ввода Linux evdev для UserSession.
 //!
-//! This module intentionally implements only the contracts needed by the
-//! Luna graphical session. It does not reproduce libinput's full policy,
-//! device database, gesture stack, calibration or desktop integration.
+//! Поддерживает клавиатуру, относительную мышь и абсолютный указатель.
+//! Политика libinput, жесты и калибровка сенсорных устройств сюда не входят.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
@@ -45,6 +44,8 @@ impl InputEvent {
 
     pub const REL_X: u16 = 0;
     pub const REL_Y: u16 = 1;
+    pub const ABS_X: u16 = 0;
+    pub const ABS_Y: u16 = 1;
     pub const BTN_LEFT: u16 = 272;
 
     pub fn decode(bytes: &[u8]) -> Option<Self> {
@@ -63,6 +64,30 @@ impl InputEvent {
             code,
             value,
         })
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AbsoluteAxis {
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+    fuzz: i32,
+    flat: i32,
+    resolution: i32,
+}
+
+impl AbsoluteAxis {
+    pub(crate) fn pixel(self, value: i32, extent: u32) -> i32 {
+        // Диапазон устройства не обязан начинаться с нуля или равняться
+        // 32767. Крайние положения должны попадать в крайние пиксели.
+        let span = i64::from(self.maximum) - i64::from(self.minimum);
+        if span <= 0 || extent == 0 {
+            return 0;
+        }
+        let position = (i64::from(value) - i64::from(self.minimum)).clamp(0, span);
+        ((position * i64::from(extent - 1) + span / 2) / span) as i32
     }
 }
 
@@ -86,6 +111,31 @@ impl InputDeviceHandle {
 
     pub fn fd(&self) -> std::os::fd::RawFd {
         self.file.as_raw_fd()
+    }
+
+    pub(crate) fn absolute_axes(&self) -> io::Result<Option<[AbsoluteAxis; 2]>> {
+        let mut axes = [AbsoluteAxis::default(); 2];
+        for (axis, limits) in axes.iter_mut().enumerate() {
+            // EVIOCGABS из Linux input UAPI: _IOR('E', 0x40 + axis,
+            // struct input_absinfo). Размер структуры фиксирован — 24 байта.
+            let request = ((2u32 << 30)
+                | ((std::mem::size_of::<AbsoluteAxis>() as u32) << 16)
+                | (u32::from(b'E') << 8)
+                | (0x40 + axis as u32)) as libc::c_ulong;
+            // SAFETY: fd принадлежит открытому evdev; limits указывает на
+            // доступную для записи repr(C) структуру размера из ioctl.
+            if unsafe { libc::ioctl(self.fd(), request as _, limits as *mut AbsoluteAxis) } < 0 {
+                let error = io::Error::last_os_error();
+                if matches!(error.raw_os_error(), Some(libc::EINVAL | libc::ENOTTY)) {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+            if limits.maximum <= limits.minimum {
+                return Ok(None);
+            }
+        }
+        Ok(Some(axes))
     }
 
     pub fn set_nonblocking(&self, enabled: bool) -> io::Result<()> {
@@ -193,9 +243,8 @@ fn classify_device(sysfs_path: &Path) -> io::Result<InputDeviceKind> {
     let has_rel = bit_is_set(&relative, 0) || bit_is_set(&relative, 1);
     let has_abs = absolute.iter().any(|&word| word != 0);
 
-    // Some composite USB keyboard interfaces expose extra capability bits
-    // (buttons/ABS) even though their primary role is keyboard input. Prefer
-    // the presence of alpha-key capability when there is no relative motion.
+    // Составные USB-клавиатуры иногда объявляют кнопки/ABS. Если есть
+    // буквенные клавиши без относительного движения, это клавиатура.
     if has_key && !has_rel {
         Ok(InputDeviceKind::Keyboard)
     } else if has_button || has_rel || has_abs {
@@ -225,7 +274,29 @@ fn bit_is_set(words: &[u64], bit: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::InputEvent;
+    use super::{AbsoluteAxis, InputEvent};
+
+    #[test]
+    fn absolute_coordinates_follow_device_limits_and_screen_edges() {
+        let axis = AbsoluteAxis {
+            minimum: -100,
+            maximum: 900,
+            ..Default::default()
+        };
+        assert_eq!(axis.pixel(-100, 1280), 0);
+        assert_eq!(axis.pixel(400, 1280), 640);
+        assert_eq!(axis.pixel(900, 1280), 1279);
+        assert_eq!(axis.pixel(i32::MIN, 1280), 0);
+        assert_eq!(axis.pixel(i32::MAX, 1280), 1279);
+        assert_eq!(axis.pixel(900, 0), 0);
+        assert_eq!(axis.pixel(900, 1), 0);
+        let full = AbsoluteAxis {
+            minimum: i32::MIN,
+            maximum: i32::MAX,
+            ..Default::default()
+        };
+        assert_eq!(full.pixel(i32::MAX, 3840), 3839);
+    }
 
     #[test]
     fn decodes_evdev_event() {

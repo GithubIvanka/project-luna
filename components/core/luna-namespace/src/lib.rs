@@ -7,12 +7,14 @@
 use std::ffi::CString;
 use std::fs;
 use std::io;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Component, Path, PathBuf};
 
 use landlock::{
     ABI, Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, RulesetStatus,
+    RulesetCreatedAttr, RulesetStatus, Scope,
 };
 use luna_common::{ResourceAccess, RuntimeProfile};
 use luna_root_mapping::{MappingKind, MappingRule, MappingTable};
@@ -21,7 +23,7 @@ mod profile;
 mod secure_mount;
 mod volume_mount;
 
-pub use profile::materialize_profiled_logical_root;
+pub use profile::{materialize_profiled_logical_root, materialize_private_terminal};
 pub use volume_mount::{MountInstance, ResolvedVolume, VolumeMountManager, VolumeMountResolver};
 
 #[derive(Debug)]
@@ -81,10 +83,26 @@ impl LinuxMountNamespace {
         profile: &RuntimeProfile,
         mappings: &MappingTable,
     ) -> Result<(), NamespaceError> {
-        let handled = AccessFs::from_all(ABI::V3);
+        self.enforce_filesystem_access_with_terminal(profile, mappings, false)
+    }
+
+    /// The caller must validate the sealed terminal.pty capability first and
+    /// materialize its private device filesystem before entering this root.
+    pub fn enforce_filesystem_access_with_terminal(
+        &self,
+        profile: &RuntimeProfile,
+        mappings: &MappingTable,
+        terminal: bool,
+    ) -> Result<(), NamespaceError> {
+        // Named and abstract UNIX endpoints outside this instance are denied
+        // unless an exact socket mapping has been authorized. ABI9 is required;
+        // dropping the socket restriction on older kernels is not permitted.
+        let handled = AccessFs::from_all(ABI::V3) | AccessFs::ResolveUnix;
         let mut ruleset = Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
             .handle_access(handled)
+            .map_err(|error| NamespaceError::Landlock(error.to_string()))?
+            .scope(Scope::AbstractUnixSocket)
             .map_err(|error| NamespaceError::Landlock(error.to_string()))?
             .create()
             .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
@@ -110,11 +128,36 @@ impl LinuxMountNamespace {
             if rule.access().is_empty() {
                 continue;
             }
-            let access = landlock_access(rule)?;
-            let fd = PathFd::new(rule.logical().as_path())
-                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            let fd = open_mapping_path(rule.logical().as_path())?;
+            let metadata = fs::File::from(fd.try_clone()?).metadata()?;
+            let access = if metadata.file_type().is_socket() {
+                socket_access(rule)?
+            } else {
+                landlock_access(rule)?
+            };
             ruleset = ruleset
                 .add_rule(PathBeneath::new(fd, access))
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+        }
+
+        if terminal {
+            let fd = PathFd::new("/dev")
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            // Only this instance's synthetic devices and new devpts instance;
+            // no host TTY, GPU, disk or input device is exposed.
+            ruleset = ruleset
+                .add_rule(PathBeneath::new(fd, AccessFs::ReadFile | AccessFs::WriteFile | AccessFs::ReadDir))
+                .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            // Yazi's scratch files and DDS socket remain inside this instance's
+            // private tmpfs. Neither host runtime sockets nor device creation
+            // are permitted by this rule.
+            let temporary = MappingRule::subtree(
+                luna_root_mapping::LogicalPath::new("/tmp").map_err(|_| NamespaceError::InvalidPath)?,
+                luna_root_mapping::PhysicalPath::new("/tmp"),
+            ).with_access([ResourceAccess::Read, ResourceAccess::Write]);
+            let fd = PathFd::new("/tmp").map_err(|error| NamespaceError::Landlock(error.to_string()))?;
+            ruleset = ruleset
+                .add_rule(PathBeneath::new(fd, landlock_access(&temporary)? | AccessFs::MakeSock | AccessFs::ResolveUnix))
                 .map_err(|error| NamespaceError::Landlock(error.to_string()))?;
         }
 
@@ -167,6 +210,25 @@ impl LinuxMountNamespace {
     }
 }
 
+// Open the already materialized object as O_PATH, never as a socket/device
+// stream. PathBeneath accepts the owned descriptor directly.
+fn open_mapping_path(path: &Path) -> Result<OwnedFd, NamespaceError> {
+    let path = cstring(path)?;
+    let fd = unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD,
+        path.as_ptr(), libc::O_PATH | libc::O_CLOEXEC | libc::O_NOFOLLOW, 0) } as i32;
+    if fd < 0 { return Err(io::Error::last_os_error().into()); }
+    // open returned one new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+fn socket_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, NamespaceError> {
+    if rule.kind() != MappingKind::File || rule.access().len() != 1
+        || !rule.access().contains(&ResourceAccess::Read) {
+        return Err(NamespaceError::FilesystemAccess("socket requires an exact read-only mapping".into()));
+    }
+    Ok(AccessFs::ResolveUnix.into())
+}
+
 #[derive(Debug, Clone)]
 pub struct LogicalRoot {
     path: PathBuf,
@@ -204,6 +266,7 @@ fn landlock_access(rule: &MappingRule) -> Result<landlock::BitFlags<AccessFs>, N
             add(AccessFs::RemoveFile);
             add(AccessFs::MakeDir);
             add(AccessFs::MakeReg);
+            add(AccessFs::MakeSym);
             add(AccessFs::Refer);
         }
     }
@@ -284,6 +347,25 @@ mod tests {
     use luna_root_mapping::{LogicalPath, MappingRule, PhysicalPath};
 
     #[test]
+    fn socket_rules_use_pinned_opath_and_only_resolve_unix() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixListener;
+        let path = std::env::temp_dir().join(format!("luna-ns-socket-{}", std::process::id()));
+        let listener = UnixListener::bind(&path).unwrap();
+        let fd = super::open_mapping_path(&path).unwrap();
+        assert_ne!(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) } & libc::O_PATH, 0);
+        let rule = MappingRule::file(LogicalPath::new("/run/wayland-0").unwrap(), PhysicalPath::new(&path))
+            .with_access([ResourceAccess::Read]);
+        let access = super::socket_access(&rule).unwrap();
+        assert_eq!(access, landlock::AccessFs::ResolveUnix);
+        assert!(super::socket_access(&rule.clone().with_access([ResourceAccess::Read, ResourceAccess::Write])).is_err());
+        // Diagnostic comparison only: the direct O_PATH operation above is mandatory.
+        println!("standard PathFd socket result: {:?}", landlock::PathFd::new(&path));
+        drop((fd, listener));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn invalid_path_has_stable_message() {
         assert_eq!(
             NamespaceError::InvalidPath.to_string(),
@@ -345,6 +427,19 @@ mod tests {
         assert!(access.contains(landlock::AccessFs::Execute));
         assert!(!access.contains(landlock::AccessFs::ReadFile));
         assert!(!access.contains(landlock::AccessFs::WriteFile));
+    }
+
+    #[test]
+    fn writable_subtree_allows_file_manager_links_but_no_special_nodes() {
+        let rule = MappingRule::subtree(LogicalPath::new("/home").unwrap(), PhysicalPath::new("/data/home"))
+            .with_access([ResourceAccess::Read, ResourceAccess::Write]);
+        let access = landlock_access(&rule).unwrap();
+        assert!(access.contains(landlock::AccessFs::MakeSym));
+        assert!(access.contains(landlock::AccessFs::Refer));
+        assert!(!access.contains(landlock::AccessFs::MakeFifo));
+        assert!(!access.contains(landlock::AccessFs::MakeSock));
+        assert!(!access.contains(landlock::AccessFs::MakeChar));
+        assert!(!access.contains(landlock::AccessFs::MakeBlock));
     }
 
     #[test]

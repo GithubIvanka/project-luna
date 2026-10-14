@@ -1,8 +1,7 @@
-//! Native Luna login renderer.
+//! Нативный экран входа Luna Alpha.
 //!
-//! The renderer consumes only a writable XRGB framebuffer and declarative
-//! login state. It does not depend on GTK, Wayland, fontconfig or a desktop
-//! compositor.
+//! Получает XRGB-буфер и состояние формы, не читает пароль и не принимает
+//! решений об аутентификации. GTK, Wayland и compositor для входа не нужны.
 
 use std::fs;
 use std::io::BufReader;
@@ -10,24 +9,25 @@ use std::path::Path;
 
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 
-const BG: u32 = 0x000B1020;
-const PANEL: u32 = 0x001A284D;
-const FIELD: u32 = 0x00111C33;
-const BORDER: u32 = 0x002F4B7A;
-const ACCENT: u32 = 0x003B82F6;
-const CYAN: u32 = 0x007EE0FF;
-const TEXT: u32 = 0x00F4F8FF;
-const MUTED: u32 = 0x008EA9CF;
-const ERROR: u32 = 0x00FF7B72;
-const AVATAR: u32 = 0x001A284D;
+const BG: u32 = 0x00080F20;
+const PANEL: u32 = 0x0018263D;
+const FIELD: u32 = 0x00111D30;
+const BORDER: u32 = 0x0031435F;
+const ACCENT: u32 = 0x002559A8;
+const CYAN: u32 = 0x0074D5F3;
+const TEXT: u32 = 0x00E9F1FF;
+const MUTED: u32 = 0x00A0B2CF;
+const ERROR: u32 = 0x00FFABAB;
+const AVATAR: u32 = 0x0018263D;
 
 const LOGIN_FONT_PATHS: &[&str] = &[
+    "/resources/fonts/AdwaitaSans-Regular.ttf",
     "/resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf",
     "/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf",
 ];
 const LOGIN_ART_PATHS: &[&str] = &[
-    "/resources/images/luna.png",
-    "/usr/share/luna/luna-login.png",
+    "/resources/images/wallpaper-night-sky.png",
+    "/usr/share/luna/wallpaper-night-sky.png",
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,10 +57,10 @@ pub struct LoginVisualState<'a> {
 }
 
 #[derive(Debug)]
-struct LoginBackground {
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
+pub(crate) struct LoginBackground {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) rgba: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -93,14 +93,32 @@ impl Rect {
 }
 
 impl LoginRenderer {
+    /// Явные ресурсы для воспроизводимой проверки renderer без установленной ОС.
+    pub(crate) fn from_resources(font: &Path, background: &Path) -> Self {
+        Self {
+            text: load_font(font)
+                .map(TextBackend::TrueType)
+                .unwrap_or(TextBackend::BitmapFallback),
+            background: load_png(background),
+        }
+    }
+
     pub fn load_default() -> Self {
+        let art = LOGIN_ART_PATHS
+            .iter()
+            .find(|path| Path::new(path).is_file())
+            .unwrap_or(&LOGIN_ART_PATHS[0]);
         for path in LOGIN_FONT_PATHS {
-            if let Some(font) = load_font(Path::new(path)) {
+            let renderer = Self::from_resources(Path::new(path), Path::new(art));
+            if matches!(renderer.text, TextBackend::TrueType(_)) {
                 eprintln!("luna-user-session: login renderer font loaded from {path}");
-                return Self {
-                    text: TextBackend::TrueType(font),
-                    background: load_background(),
-                };
+                if let Some(image) = &renderer.background {
+                    eprintln!(
+                        "luna-user-session: login renderer background loaded from {art} ({}x{})",
+                        image.width, image.height
+                    );
+                }
+                return renderer;
             }
         }
 
@@ -123,7 +141,6 @@ impl LoginRenderer {
     ) {
         let layout = LoginLayout::for_viewport(width, height);
         self.draw_background(pixels, pitch, width, height);
-        self.draw_login_panel(pixels, pitch, width, height, &layout);
         self.draw_brand(pixels, pitch, width, height, layout.brand_y, layout.compact);
 
         match view.page {
@@ -135,7 +152,7 @@ impl LoginRenderer {
                     height,
                     layout.title_y,
                     if layout.compact { 20.0 } else { 26.0 },
-                    "SELECT USER",
+                    "Выберите пользователя",
                     MUTED,
                 );
                 for index in 0..view.users.len() {
@@ -161,12 +178,34 @@ impl LoginRenderer {
                     width,
                     height,
                     layout.helper_y,
-                    if layout.compact { 11.0 } else { 13.0 },
-                    "CLICK OR ARROWS TO SELECT  ENTER TO CONTINUE",
+                    12.0,
+                    "Стрелки — выбор · Enter — продолжить",
                     MUTED,
                 );
             }
             LoginPage::Password => {
+                self.draw_text(
+                    pixels,
+                    pitch,
+                    width,
+                    height,
+                    layout.field_x,
+                    layout.title_y,
+                    if layout.compact { 26.0 } else { 32.0 },
+                    "Добро пожаловать",
+                    TEXT,
+                );
+                self.draw_text(
+                    pixels,
+                    pitch,
+                    width,
+                    height,
+                    layout.field_x,
+                    layout.title_y + 46,
+                    13.0,
+                    "Войдите в свою сессию Luna",
+                    MUTED,
+                );
                 if let Some(user) = view.users.get(view.selected_user) {
                     draw_avatar(
                         pixels,
@@ -175,7 +214,7 @@ impl LoginRenderer {
                         height,
                         layout.user_icon_x,
                         layout.user_icon_y,
-                        if layout.compact { 22 } else { 28 },
+                        18,
                         user.display_name,
                         true,
                         false,
@@ -188,7 +227,7 @@ impl LoginRenderer {
                         height,
                         layout.user_name_x,
                         layout.user_name_y,
-                        if layout.compact { 17.0 } else { 22.0 },
+                        16.0,
                         user.display_name,
                         TEXT,
                     );
@@ -199,7 +238,7 @@ impl LoginRenderer {
                         height,
                         layout.user_name_x,
                         layout.user_username_y,
-                        if layout.compact { 11.0 } else { 13.0 },
+                        12.0,
                         user.username,
                         MUTED,
                     );
@@ -233,7 +272,7 @@ impl LoginRenderer {
                         layout.field_x + 18,
                         layout.password_field_y + if layout.compact { 13 } else { 18 },
                         if layout.compact { 14.0 } else { 17.0 },
-                        "ENTER PASSWORD",
+                        "Пароль",
                         MUTED,
                     );
                 }
@@ -253,13 +292,13 @@ impl LoginRenderer {
                     width,
                     height,
                     layout.helper_y,
-                    if layout.compact { 11.0 } else { 13.0 },
+                    12.0,
                     if view.error {
-                        "PASSWORD INCORRECT"
+                        "Неверный пароль. Попробуйте снова."
                     } else if view.users.len() > 1 {
-                        "ESC TO CHOOSE ANOTHER USER"
+                        "Esc — другой пользователь"
                     } else {
-                        "ESC TO CANCEL"
+                        "Enter — войти"
                     },
                     if view.error { ERROR } else { MUTED },
                 );
@@ -271,94 +310,18 @@ impl LoginRenderer {
         }
     }
 
-    fn draw_login_panel(
-        &self,
-        pixels: &mut [u8],
-        pitch: usize,
-        width: u32,
-        height: u32,
-        layout: &LoginLayout,
-    ) {
-        fill_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            layout.panel_x,
-            layout.panel_y,
-            layout.panel_w,
-            layout.panel_h,
-            0x00111C33,
-        );
-        stroke_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            layout.panel_x,
-            layout.panel_y,
-            layout.panel_w,
-            layout.panel_h,
-            BORDER,
-        );
-        let inset = 1;
-        stroke_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            layout.panel_x + inset,
-            layout.panel_y + inset,
-            layout.panel_w.saturating_sub(inset * 2),
-            layout.panel_h.saturating_sub(inset * 2),
-            0x001C3358,
-        );
-        fill_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            layout.panel_x,
-            layout.panel_y,
-            2,
-            layout.panel_h,
-            ACCENT,
-        );
-    }
-
-    fn draw_background(&self, pixels: &mut [u8], pitch: usize, width: u32, height: u32) {
+    pub(crate) fn draw_background(&self, pixels: &mut [u8], pitch: usize, width: u32, height: u32) {
         fill_rect(pixels, pitch, width, height, 0, 0, width, height, BG);
-
         if let Some(image) = &self.background {
-            let art_width = width.saturating_mul(if width < 900 { 58 } else { 52 }) / 100;
-            let art_height = height;
-            let x = 0;
-            let y = 0;
             draw_image_cover(
-                pixels, pitch, width, height, image, x, y, art_width, art_height, 178,
+                pixels, pitch, width, height, image, 0, 0, width, height, 255,
             );
         }
-
-        // Blend the artwork into the concept palette so it reads as atmosphere,
-        // not as a separate panel.
-        let fade_start = width.saturating_mul(28) / 100;
-        let fade_end = width.saturating_mul(66) / 100;
-        for x in fade_start..fade_end {
-            let span = fade_end.saturating_sub(fade_start).max(1);
-            let alpha = ((x - fade_start) * 220 / span) as u8;
+        // Затемнение слева сохраняет читаемость формы, не скрывая утверждённое небо.
+        for x in 0..width {
+            let alpha = (150.0 * (1.0 - x as f32 / width.max(1) as f32).powi(2)) as u8;
             blend_vertical_column(pixels, pitch, width, height, x, BG, alpha);
         }
-        fill_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            width.saturating_mul(64) / 100,
-            0,
-            width.saturating_sub(width.saturating_mul(64) / 100),
-            height,
-            BG,
-        );
     }
 
     fn draw_brand(
@@ -368,24 +331,60 @@ impl LoginRenderer {
         width: u32,
         height: u32,
         y: u32,
-        compact: bool,
+        _compact: bool,
     ) {
-        let center_x = width
-            .saturating_mul(55)
-            .saturating_div(100)
-            .saturating_add(width.saturating_mul(40).saturating_div(100) / 2);
-        let logo_radius = if compact { 22 } else { 28 };
-        draw_orbit_logo(pixels, pitch, width, height, center_x, y, logo_radius);
+        let layout = LoginLayout::for_viewport(width, height);
+        draw_orbit_logo(
+            pixels,
+            pitch,
+            width,
+            height,
+            layout.field_x + 32,
+            y + 30,
+            28,
+        );
+        self.draw_text(
+            pixels,
+            pitch,
+            width,
+            height,
+            layout.field_x,
+            y + 76,
+            12.0,
+            "L U N A",
+            CYAN,
+        );
+    }
+
+    pub(crate) fn draw_boot_label(
+        &self,
+        pixels: &mut [u8],
+        pitch: usize,
+        width: u32,
+        height: u32,
+        stage: &str,
+    ) {
         self.centered_text_at(
             pixels,
             pitch,
             width,
             height,
-            center_x,
-            y + logo_radius + if compact { 22 } else { 28 },
-            if compact { 16.0 } else { 20.0 },
-            "L U N A   O S",
+            width / 2,
+            height / 2 + 140,
+            28.0,
+            "L U N A",
             TEXT,
+        );
+        self.centered_text_at(
+            pixels,
+            pitch,
+            width,
+            height,
+            width / 2,
+            height / 2 + 198,
+            13.0,
+            stage,
+            MUTED,
         );
     }
 
@@ -402,26 +401,19 @@ impl LoginRenderer {
     ) {
         let center_x = x + size / 2;
         let center_y = y + size / 2;
-        let color = if active { ACCENT } else { BORDER };
-        fill_circle(
+        rounded_rect(
             pixels,
             pitch,
             width,
             height,
-            center_x,
-            center_y,
-            size / 2,
-            color,
-        );
-        fill_circle(
-            pixels,
-            pitch,
-            width,
-            height,
-            center_x,
-            center_y,
-            size.saturating_sub(6) / 2,
-            0x00214A82,
+            Rect {
+                x,
+                y,
+                w: size,
+                h: size,
+            },
+            6,
+            if active { ACCENT } else { BORDER },
         );
         let arm = size / 4;
         fill_rect(
@@ -534,29 +526,35 @@ impl LoginRenderer {
         cursor_visible: bool,
         size: f32,
     ) {
-        fill_rect(
+        let rect = Rect {
+            x,
+            y,
+            w: field_width,
+            h: field_height,
+        };
+        rounded_rect(
             pixels,
             pitch,
             width,
             height,
-            x,
-            y,
-            field_width,
-            field_height,
+            rect,
+            9,
+            if active { CYAN } else { BORDER },
+        );
+        rounded_rect(
+            pixels,
+            pitch,
+            width,
+            height,
+            Rect {
+                x: x + 2,
+                y: y + 2,
+                w: field_width.saturating_sub(4),
+                h: field_height.saturating_sub(4),
+            },
+            7,
             FIELD,
         );
-        stroke_rect(
-            pixels,
-            pitch,
-            width,
-            height,
-            x,
-            y,
-            field_width,
-            field_height,
-            if active { ACCENT } else { BORDER },
-        );
-
         let text_y = y + field_height.saturating_sub(size.round() as u32) / 2;
         self.draw_text(
             pixels,
@@ -604,7 +602,10 @@ impl LoginRenderer {
             pitch,
             width,
             height,
-            width / 2,
+            {
+                let l = LoginLayout::for_viewport(width, height);
+                l.field_x + l.field_w / 2
+            },
             y,
             size,
             value,
@@ -736,9 +737,13 @@ impl LoginRenderer {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LoginLayout {
+    #[cfg(test)]
     panel_x: u32,
+    #[cfg(test)]
     pub(crate) panel_y: u32,
+    #[cfg(test)]
     panel_w: u32,
+    #[cfg(test)]
     panel_h: u32,
     pub(crate) field_x: u32,
     pub(crate) field_w: u32,
@@ -762,106 +767,48 @@ impl LoginLayout {
     pub(crate) fn for_viewport(width: u32, height: u32) -> Self {
         let compact = width < 900 || height < 600;
         let tiny = height < 400;
-        let panel_w = width
-            .saturating_mul(if compact { 88 } else { 40 })
-            .saturating_div(100)
-            .min(width.saturating_sub(32))
-            .max(if compact { 320 } else { 420 })
-            .min(width.saturating_sub(24));
-        let panel_h = height
-            .saturating_sub(if compact { 48 } else { 96 })
-            .min(620);
-        let panel_left = width
-            .saturating_mul(if compact { 6 } else { 55 })
-            .saturating_div(100)
-            .min(width.saturating_sub(panel_w));
-        let panel_top = (height.saturating_sub(panel_h)) / 2;
-        let field_w = panel_w
-            .saturating_sub(if compact { 40 } else { 72 })
-            .min(360);
-        let form_center_x = panel_left + panel_w / 2;
-        let field_x = form_center_x.saturating_sub(field_w / 2);
-        let field_h = if compact { 42 } else { 48 };
-        let button_size = if compact { 44 } else { 52 };
-        let button_x = form_center_x.saturating_sub(button_size / 2);
-        let content_top = panel_top
+        let panel_w = if compact { 360 } else { 390 }.min(width.saturating_sub(32));
+        let panel_h = 420.min(height.saturating_sub(24));
+        let panel_left = if compact {
+            (width - panel_w) / 2
+        } else {
+            width * 12 / 100
+        };
+        let panel_top = (height - panel_h) / 2;
+        let field_w = 335.min(panel_w);
+        let field_x = panel_left;
+        let field_h = if tiny { 36 } else { 48 };
+        let password_field_y = panel_top
             + if tiny {
-                10
-            } else if compact {
-                22
-            } else {
-                34
-            };
-        let password_field_y = content_top
-            + if tiny {
-                94
-            } else if compact {
-                286
+                panel_h.saturating_sub(72)
             } else {
                 300
             };
-        let button_y = password_field_y
-            + field_h
-            + if tiny {
-                22
-            } else if compact {
-                34
-            } else {
-                38
-            };
-        let user_icon_y = content_top
-            + if tiny {
-                40
-            } else if compact {
-                150
-            } else {
-                164
-            };
-        let user_name_y = user_icon_y
-            + if tiny {
-                28
-            } else if compact {
-                34
-            } else {
-                42
-            };
-        let user_username_y = user_name_y
-            + if tiny {
-                20
-            } else if compact {
-                26
-            } else {
-                30
-            };
-
+        let user_icon_y = panel_top + if tiny { 120 } else { 244 };
         Self {
+            #[cfg(test)]
             panel_x: panel_left,
+            #[cfg(test)]
             panel_y: panel_top,
+            #[cfg(test)]
             panel_w,
+            #[cfg(test)]
             panel_h,
             field_x,
             field_w,
             field_h,
-            title_y: panel_top + if compact { 62 } else { 72 },
+            title_y: panel_top + if tiny { 94 } else { 118 },
             password_field_y,
-            helper_y: button_y
-                + button_size
-                + if tiny {
-                    8
-                } else if compact {
-                    22
-                } else {
-                    28
-                },
-            brand_y: panel_top + if compact { 18 } else { 28 },
-            user_icon_x: field_x + if compact { 24 } else { 30 },
+            helper_y: password_field_y + field_h + 12,
+            brand_y: panel_top,
+            user_icon_x: field_x + 20,
             user_icon_y,
-            user_name_x: field_x + if compact { 58 } else { 70 },
-            user_name_y,
-            user_username_y,
-            button_x,
-            button_y,
-            button_size,
+            user_name_x: field_x + 52,
+            user_name_y: user_icon_y.saturating_sub(18),
+            user_username_y: user_icon_y + 5,
+            button_x: field_x + field_w.saturating_sub(field_h) + 6,
+            button_y: password_field_y + 6,
+            button_size: field_h.saturating_sub(12),
             compact,
         }
     }
@@ -877,7 +824,7 @@ impl LoginLayout {
             .field_w
             .saturating_sub(gap * (cols.saturating_sub(1) as u32))
             / cols as u32;
-        let top = self.panel_y + if self.compact { 118 } else { 180 };
+        let top = self.title_y + 48;
         let card_h = if rows > 1 { 104 } else { 112 };
         let row = index / cols;
         let col = index % cols;
@@ -932,9 +879,9 @@ pub(crate) fn hit_test_user(
 }
 
 pub(crate) fn hit_test_password(width: u32, height: u32, x: u32, y: u32) -> bool {
-    LoginLayout::for_viewport(width, height)
-        .password_rect()
-        .contains(x, y)
+    let layout = LoginLayout::for_viewport(width, height);
+    // Кнопка отправки встроена в поле, но должна получать собственное событие.
+    layout.password_rect().contains(x, y) && !layout.button_rect().contains(x, y)
 }
 
 pub(crate) fn hit_test_login_button(width: u32, height: u32, x: u32, y: u32) -> bool {
@@ -948,48 +895,54 @@ fn load_font(path: &Path) -> Option<fontdue::Font> {
     fontdue::Font::from_bytes(data, fontdue::FontSettings::default()).ok()
 }
 
-fn load_background() -> Option<LoginBackground> {
+pub(crate) fn load_background() -> Option<LoginBackground> {
     for path in LOGIN_ART_PATHS {
-        let file = fs::File::open(path).ok()?;
-        let mut decoder = png::Decoder::new(BufReader::new(file));
-        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-        let mut reader = decoder.read_info().ok()?;
-        let mut bytes = vec![0; reader.output_buffer_size()?];
-        let info = reader.next_frame(&mut bytes).ok()?;
-        let bytes = &bytes[..info.buffer_size()];
-        let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
-        match info.color_type {
-            png::ColorType::Rgb => {
-                for pixel in bytes.chunks_exact(3) {
-                    rgba.extend_from_slice(pixel);
-                    rgba.push(255);
-                }
-            }
-            png::ColorType::Rgba => rgba.extend_from_slice(bytes),
-            png::ColorType::Grayscale => {
-                for &value in bytes {
-                    rgba.extend_from_slice(&[value, value, value, 255]);
-                }
-            }
-            png::ColorType::GrayscaleAlpha => {
-                for pixel in bytes.chunks_exact(2) {
-                    rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
-                }
-            }
-            png::ColorType::Indexed => return None,
+        if let Some(image) = load_png(Path::new(path)) {
+            eprintln!(
+                "luna-user-session: login renderer background loaded from {path} ({}x{})",
+                image.width, image.height
+            );
+            return Some(image);
         }
-        eprintln!(
-            "luna-user-session: login renderer background loaded from {} ({}x{})",
-            path, info.width, info.height
-        );
-        return Some(LoginBackground {
-            width: info.width,
-            height: info.height,
-            rgba,
-        });
     }
     eprintln!("luna-user-session: login renderer background unavailable");
     None
+}
+
+fn load_png(path: &Path) -> Option<LoginBackground> {
+    let file = fs::File::open(path).ok()?;
+    let mut decoder = png::Decoder::new(BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let mut bytes = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut bytes).ok()?;
+    let bytes = &bytes[..info.buffer_size()];
+    let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
+    match info.color_type {
+        png::ColorType::Rgb => {
+            for pixel in bytes.chunks_exact(3) {
+                rgba.extend_from_slice(pixel);
+                rgba.push(255);
+            }
+        }
+        png::ColorType::Rgba => rgba.extend_from_slice(bytes),
+        png::ColorType::Grayscale => {
+            for &value in bytes {
+                rgba.extend_from_slice(&[value, value, value, 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for pixel in bytes.chunks_exact(2) {
+                rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
+            }
+        }
+        png::ColorType::Indexed => return None,
+    }
+    Some(LoginBackground {
+        width: info.width,
+        height: info.height,
+        rgba,
+    })
 }
 
 fn draw_image_cover(
@@ -1070,7 +1023,9 @@ fn draw_orbit_logo(
     center_y: u32,
     radius: u32,
 ) {
-    let rx = radius.saturating_mul(2);
+    // Фирменный знак — три пересекающихся кольца с пустым центром.
+    // Центр не является ядром или точкой: здесь остаётся фон экрана входа.
+    let rx = radius;
     let ry = radius.saturating_mul(3) / 4;
     for &(angle, scale_x, scale_y) in &[
         (0.0f32, 1.0f32, 0.62f32),
@@ -1091,16 +1046,36 @@ fn draw_orbit_logo(
             2,
         );
     }
-    fill_circle(
-        pixels,
-        pitch,
-        width,
-        height,
-        center_x,
-        center_y,
-        radius / 4,
-        0x005EA7FF,
-    );
+}
+
+fn rounded_rect(
+    pixels: &mut [u8],
+    pitch: usize,
+    width: u32,
+    height: u32,
+    rect: Rect,
+    radius: u32,
+    color: u32,
+) {
+    let radius = radius.min(rect.w / 2).min(rect.h / 2) as i32;
+    for y in 0..rect.h as i32 {
+        for x in 0..rect.w as i32 {
+            let dx = (radius - x).max(x - (rect.w as i32 - radius - 1)).max(0);
+            let dy = (radius - y).max(y - (rect.h as i32 - radius - 1)).max(0);
+            if dx * dx + dy * dy <= radius * radius {
+                blend_pixel(
+                    pixels,
+                    pitch,
+                    width,
+                    height,
+                    rect.x as i32 + x,
+                    rect.y as i32 + y,
+                    color,
+                    255,
+                );
+            }
+        }
+    }
 }
 
 fn stroke_ellipse(
@@ -1537,6 +1512,18 @@ mod tests {
         ));
         let button = layout.button_rect();
         assert!(button.contains(button.x + button.w / 2, button.y + button.h / 2));
+        assert!(!hit_test_password(
+            1280,
+            800,
+            button.x + button.w / 2,
+            button.y + button.h / 2
+        ));
+        assert!(super::hit_test_login_button(
+            1280,
+            800,
+            button.x + button.w / 2,
+            button.y + button.h / 2
+        ));
     }
 
     #[test]

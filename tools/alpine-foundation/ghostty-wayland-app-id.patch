@@ -1,0 +1,29 @@
+--- a/src/apprt/gtk/winproto/wayland.zig
++++ b/src/apprt/gtk/winproto/wayland.zig
+@@ -3,6 +3,7 @@
+ const Allocator = std.mem.Allocator;
+ 
+ const gdk = @import("gdk");
++const glib = @import("glib");
+ const gdk_wayland = @import("gdk_wayland");
+ const gobject = @import("gobject");
+ const gtk = @import("gtk");
+@@ -58,7 +59,6 @@
+         config: *const Config,
+     ) !?App {
+         _ = config;
+-        _ = app_id;
+ 
+         const gdk_wayland_display = gobject.ext.cast(
+             gdk_wayland.WaylandDisplay,
+@@ -66,6 +66,10 @@
+             gdk_display,
+         ) orelse return null;
+ 
++        // GDK falls back to this name when no session D-Bus is available.
++        // Keep the Wayland app_id aligned with the selected application class.
++        glib.setPrgname(app_id);
++
+         const display: *wl.Display = @ptrCast(@alignCast(
+             gdk_wayland_display.getWlDisplay() orelse return error.NoWaylandDisplay,
+         ));

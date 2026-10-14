@@ -60,3 +60,25 @@ Kernel запускает memory-resident `.init` через существую�
 ## Статус
 
 FD 3 и базовая жизнь PID 1 реализованы. Полный bootstrap logical root, materialization и production startup orchestration ещё в разработке.
+## Persistent per-user directory ownership
+
+During normal or Recovery logical-root materialization, PID 1 creates the
+selected user's persistent home, data and config directories on DATA. It
+reads UID/GID from the selected auth provider's passwd entry and assigns those
+directories to that identity before launching System Runtime. This is required
+for an authenticated session to write its home files and user caches; the
+selected user identity remains sourced from the auth provider rather than
+being hard-coded in the mount/bootstrap logic.
+
+## Завершение системы — текущий compatibility path
+
+PID 1 обрабатывает стандартные сигналы BusyBox init: `SIGUSR1` для halt,
+`SIGUSR2` для poweroff, `SIGTERM`/`SIGINT` для reboot. Handler только сохраняет
+запрос; завершение выполняется в основном цикле. PID 1 продолжает reap
+усыновлённых процессов, пока работает System Runtime.
+
+После запроса PID 1 даёт процессам две секунды на завершение через SIGTERM,
+останавливает оставшиеся, вызывает sync и финальный Linux reboot syscall.
+Сам syscall разрешён только в PID 1. Это минимальный путь для внешнего elogind
+provider; полная координация shutdown-служб остаётся ответственностью
+`luna-system-runtime` и ещё требует отдельной реализации.

@@ -117,6 +117,8 @@ impl std::error::Error for UpdateError {}
 
 /// Domain managers provide the physical mutation backend. `prepare` must not
 /// perform an irreversible mutation; `apply` is the mutation boundary.
+/// `rollback` must be idempotent, including for an operation whose `apply`
+/// returned an error after making a partial physical change.
 pub trait UpdateBackend {
     fn prepare(&mut self, plan: &UpdatePlan) -> Result<(), UpdateError>;
     fn apply(&mut self, operation: &UpdateOperation) -> Result<(), UpdateError>;
@@ -162,6 +164,14 @@ impl<'a, S: StateStore, B: UpdateBackend> UpdateEngine<'a, S, B> {
     }
     pub fn prepare(&mut self, id: &UpdateId, plan: &UpdatePlan) -> Result<Revision, UpdateError> {
         plan.validate()?;
+        if self
+            .store
+            .get(&phase_key(id))
+            .map_err(state_error)?
+            .is_some()
+        {
+            return Err(UpdateError::new("update identifier already exists"));
+        }
         let mut transaction = StateTransaction::new();
         transaction
             .set(
@@ -191,6 +201,14 @@ impl<'a, S: StateStore, B: UpdateBackend> UpdateEngine<'a, S, B> {
         for (index, operation) in plan.operations().iter().enumerate() {
             self.set_progress(id, &applied, Some(index))?;
             if let Err(error) = self.backend.apply(operation) {
+                // A failed apply can have crossed the physical mutation boundary
+                // (for example rename succeeded, then directory fsync failed).
+                if let Err(rollback_error) = self.backend.rollback(operation) {
+                    let _ = self.set_phase(id, UpdatePhase::Failed);
+                    return Err(UpdateError::new(format!(
+                        "update failed: {error}; rollback failed: {rollback_error}"
+                    )));
+                }
                 for completed in applied.iter().rev() {
                     if let Err(rollback_error) =
                         self.backend.rollback(&plan.operations()[*completed])
@@ -201,8 +219,8 @@ impl<'a, S: StateStore, B: UpdateBackend> UpdateEngine<'a, S, B> {
                         )));
                     }
                 }
-                let _ = self.set_progress(id, &[], None);
-                let _ = self.set_phase(id, UpdatePhase::RolledBack);
+                self.set_progress(id, &[], None)?;
+                self.set_phase(id, UpdatePhase::RolledBack)?;
                 return Err(error);
             }
             applied.push(index);
@@ -218,8 +236,8 @@ impl<'a, S: StateStore, B: UpdateBackend> UpdateEngine<'a, S, B> {
                     )));
                 }
             }
-            let _ = self.set_progress(id, &[], None);
-            let _ = self.set_phase(id, UpdatePhase::RolledBack);
+            self.set_progress(id, &[], None)?;
+            self.set_phase(id, UpdatePhase::RolledBack)?;
             return Err(error);
         }
         self.set_phase(id, UpdatePhase::Committed)
@@ -239,6 +257,22 @@ impl<'a, S: StateStore, B: UpdateBackend> UpdateEngine<'a, S, B> {
             .map_err(|_| UpdateError::new("update journal phase is not valid UTF-8"))?;
         if matches!(phase, "committed" | "rolled-back" | "failed") {
             return Err(UpdateError::new("update is already in a terminal state"));
+        }
+        if !matches!(
+            phase,
+            "prepared" | "checkpointed" | "applying" | "verifying"
+        ) {
+            return Err(UpdateError::new("unknown update journal phase"));
+        }
+        let recorded_plan = self
+            .store
+            .get(&plan_key(id))
+            .map_err(state_error)?
+            .ok_or_else(|| UpdateError::new("update journal plan not found"))?;
+        if recorded_plan.as_slice() != format_plan(plan).as_bytes() {
+            return Err(UpdateError::new(
+                "recovery plan does not match the durable update plan",
+            ));
         }
         let mut indices = self.read_applied_indexes(id)?;
         if let Some(index) = self.read_inflight_index(id)? {

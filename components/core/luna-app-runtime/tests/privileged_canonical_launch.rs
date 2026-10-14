@@ -239,7 +239,7 @@ int main(int argc, char **argv) {
         manifest,
         mappings,
         &session,
-        RuntimeSpec::luna(),
+        RuntimeSpec::musl(),
         ExecutableSpec::new("/app/probe").with_args([host_ns]),
         vec![],
     )

@@ -9,7 +9,110 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
+
+static POWER_SIGNAL: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn request_power_action(signal: libc::c_int) {
+    // Only an atomic store belongs in the signal handler. Cleanup runs in PID 1.
+    POWER_SIGNAL.store(signal, Ordering::Relaxed);
+}
+
+fn install_power_handlers() -> Result<(), String> {
+    for signal in [libc::SIGUSR1, libc::SIGUSR2, libc::SIGTERM, libc::SIGINT] {
+        // SAFETY: sigaction is initialized, and the handler is async-signal-safe.
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = request_power_action as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        unsafe {
+            libc::sigemptyset(&mut action.sa_mask);
+        }
+        if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } != 0 {
+            return Err(format!(
+                "install PID 1 power handler: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn power_command(signal: i32) -> Option<(libc::c_int, &'static str)> {
+    match signal {
+        libc::SIGUSR1 => Some((libc::RB_HALT_SYSTEM, "halt")),
+        libc::SIGUSR2 => Some((libc::RB_POWER_OFF, "poweroff")),
+        libc::SIGTERM | libc::SIGINT => Some((libc::RB_AUTOBOOT, "reboot")),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod power_tests {
+    #[test]
+    fn standard_init_signals_select_the_expected_action() {
+        assert_eq!(
+            super::power_command(libc::SIGUSR1),
+            Some((libc::RB_HALT_SYSTEM, "halt"))
+        );
+        assert_eq!(
+            super::power_command(libc::SIGUSR2),
+            Some((libc::RB_POWER_OFF, "poweroff"))
+        );
+        assert_eq!(
+            super::power_command(libc::SIGTERM),
+            Some((libc::RB_AUTOBOOT, "reboot"))
+        );
+        assert_eq!(
+            super::power_command(libc::SIGINT),
+            Some((libc::RB_AUTOBOOT, "reboot"))
+        );
+        assert_eq!(super::power_command(0), None);
+    }
+}
+
+fn finish_power_action(signal: i32) -> Result<(), String> {
+    if std::process::id() != 1 {
+        return Err("power lifecycle must run in PID 1".into());
+    }
+    let (command, name) = power_command(signal).ok_or("invalid power signal")?;
+    report_power_action(&format!("Luna: PID 1 accepted {name} request"));
+    // Linux excludes the caller and PID 1 from kill(-1). Give userspace a
+    // bounded opportunity to flush state before terminating remaining children.
+    unsafe {
+        libc::kill(-1, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        let mut status = 0;
+        while unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) } > 0 {}
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    unsafe {
+        libc::kill(-1, libc::SIGKILL);
+        libc::sync();
+    }
+    report_power_action(&format!("Luna: filesystems synced; executing {name}"));
+    unsafe {
+        libc::reboot(command);
+    }
+    Err(format!(
+        "{name} syscall failed: {}",
+        std::io::Error::last_os_error()
+    ))
+}
+
+fn report_power_action(message: &str) {
+    use std::io::Write;
+    // A kmsg record stays intact when kernel device-shutdown messages arrive
+    // concurrently; writing userspace stderr can interleave serial characters.
+    if let Ok(mut log) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        if log.write_all(format!("<5>{message}\n").as_bytes()).is_ok() {
+            return;
+        }
+    }
+    write_stderr(&format!("{message}\n"));
+}
 
 const HANDOFF_MAGIC: &[u8; 8] = b"LUNAHD01";
 const HANDOFF_MAJOR: u16 = 1;
@@ -37,6 +140,7 @@ fn main() -> ! {
 }
 
 fn run() -> Result<(), String> {
+    install_power_handlers()?;
     let handoff = read_handoff_fd3()?;
     let context = BootContext::parse(&handoff)?;
 
@@ -58,21 +162,36 @@ fn run() -> Result<(), String> {
     } else {
         "luna"
     };
-    let mut runtime = std::process::Command::new("/sbin/luna-system-runtime")
+    let runtime = std::process::Command::new("/sbin/luna-system-runtime")
         .env("LUNA_SYSTEM_RUNTIME_ROOT", "1")
         .env("LUNA_SESSION_USER", session_user)
         .env("LUNA_BOOT_MODE", context.boot_mode.to_string())
         .spawn()
         .map_err(|error| format!("start luna-system-runtime: {error}"))?;
 
-    let status = runtime
-        .wait()
-        .map_err(|error| format!("wait for luna-system-runtime: {error}"))?;
-    write_stderr(&format!(
-        "Luna: luna-system-runtime exited with status {status}\\n"
-    ));
-
-    Err(format!("system runtime terminated: {status}"))
+    loop {
+        let signal = POWER_SIGNAL.swap(0, Ordering::Relaxed);
+        if power_command(signal).is_some() {
+            return finish_power_action(signal);
+        }
+        // Reap adopted provider children while the runtime is alive as well.
+        let mut status = 0;
+        let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+        if pid == runtime.id() as libc::pid_t {
+            use std::os::unix::process::ExitStatusExt;
+            let status = std::process::ExitStatus::from_raw(status);
+            return Err(format!("system runtime terminated: {status}"));
+        }
+        if pid < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return Err(format!(
+                "reap PID 1 children: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if pid == 0 {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -511,10 +630,7 @@ impl SystemMounts {
                 .map_err(|error| format!("link /usr/bin/{shell_name}: {error}"))?;
         }
         bind_mount(&self.data.join("system/libs"), &root.join("usr/lib"))?;
-        bind_mount(
-            &self.data.join("system/libs"),
-            &root.join("usr/local/lib"),
-        )?;
+        bind_mount(&self.data.join("system/libs"), &root.join("usr/local/lib"))?;
         std::fs::create_dir_all(root.join("usr/lib/udev"))
             .map_err(|error| format!("create /usr/lib/udev: {error}"))?;
         let udev_resources = self.data.join("system/apps/udevd/resources/udev");
@@ -591,9 +707,7 @@ impl SystemMounts {
         }
         std::fs::create_dir_all(root.join("usr/libexec"))
             .map_err(|error| format!("create /usr/libexec: {error}"))?;
-        let loader = self
-            .data
-            .join("system/libs/loader/ld-linux-x86-64.so.2");
+        let loader = self.data.join("system/libs/loader/ld-linux-x86-64.so.2");
         if loader.is_file() {
             std::fs::copy(&loader, root.join("lib64/ld-linux-x86-64.so.2"))
                 .map_err(|error| format!("materialize DATA ELF loader: {error}"))?;
@@ -624,11 +738,8 @@ impl SystemMounts {
             let source = root.join("usr/bin").join(name);
             let target = root.join("sbin").join(name);
             if source.exists() && !target.exists() && !target.is_symlink() {
-                std::os::unix::fs::symlink(
-                    format!("/usr/bin/{name}"),
-                    &target,
-                )
-                .map_err(|error| format!("link /sbin/{name}: {error}"))?;
+                std::os::unix::fs::symlink(format!("/usr/bin/{name}"), &target)
+                    .map_err(|error| format!("link /sbin/{name}: {error}"))?;
             }
         }
 
@@ -712,18 +823,19 @@ impl SystemMounts {
         } else {
             "luna"
         };
-        std::fs::create_dir_all(self.data.join("users").join(username).join("home"))
-            .map_err(|error| format!("create persistent {username} home: {error}"))?;
-        std::fs::create_dir_all(self.data.join("users").join(username).join("data"))
-            .map_err(|error| format!("create persistent {username} data: {error}"))?;
-        std::fs::create_dir_all(self.data.join("users").join(username).join("config"))
-            .map_err(|error| format!("create persistent {username} config: {error}"))?;
+        let users_root = self.data.join("users");
+        ensure_user_directory(&users_root)?;
+        let user_root = users_root.join(username);
+        ensure_user_directory(&user_root)?;
+        for directory in ["home", "data", "config"] {
+            ensure_user_directory(&user_root.join(directory))?;
+        }
         std::fs::create_dir_all(self.data.join("system/config/auth"))
             .map_err(|error| format!("create persistent auth state: {error}"))?;
 
         Self::materialize_data_apps(&self.data, root, shadow_gid)?;
 
-        for name in ["sh", "ash", "busybox"] {
+        for name in ["sh", "ash", "busybox", "udevadm"] {
             let source = root.join("usr/bin").join(name);
             let target = root.join("bin").join(name);
             if source.exists() && !target.exists() && !target.is_symlink() {
@@ -739,6 +851,9 @@ impl SystemMounts {
             "rc-update",
             "start-stop-daemon",
             "supervise-daemon",
+            "halt",
+            "poweroff",
+            "reboot",
         ] {
             let source = root.join("usr/bin").join(name);
             let target = root.join("sbin").join(name);
@@ -784,6 +899,20 @@ impl SystemMounts {
                 chown_group(&target, shadow_gid)?;
             }
         }
+
+        // The persistent home/data/config directories are created during boot
+        // by PID 1, so explicitly transfer ownership to the identity described
+        // by the selected auth provider. Otherwise the authenticated desktop
+        // user cannot create a font cache, config file, or ordinary home file.
+        let auth_passwd = self.data.join("system/config/auth/passwd");
+        let (uid, gid) = bootstrap_user_ids(&auth_passwd, username)?;
+        for directory in ["home", "data", "config"] {
+            chown_owner(
+                &self.data.join("users").join(username).join(directory),
+                uid,
+                gid,
+            )?;
+        }
         Ok(())
     }
 
@@ -797,10 +926,13 @@ impl SystemMounts {
             return Ok(());
         }
 
-        for entry in
-            std::fs::read_dir(&apps).map_err(|error| format!("read DATA apps: {error}"))?
-        {
+        for entry in std::fs::read_dir(&apps).map_err(|error| format!("read DATA apps: {error}"))? {
             let entry = entry.map_err(|error| format!("read DATA app entry: {error}"))?;
+            // Installed applications belong to AppManager/AppRuntime, never the
+            // legacy provider copy into the global executable namespace.
+            if matches!(entry.file_name().to_str(), Some(".bundles" | ".bundles-v2")) {
+                continue;
+            }
             let app = entry.path();
             if !app.is_dir() {
                 continue;
@@ -826,8 +958,8 @@ impl SystemMounts {
                     for resource in std::fs::read_dir(&source)
                         .map_err(|error| format!("read DATA application resources: {error}"))?
                     {
-                        let resource =
-                            resource.map_err(|error| format!("read DATA resource entry: {error}"))?;
+                        let resource = resource
+                            .map_err(|error| format!("read DATA resource entry: {error}"))?;
                         let resource_source = resource.path();
                         let resource_name = resource.file_name();
 
@@ -862,9 +994,8 @@ impl SystemMounts {
                         }
 
                         if resource_meta.is_dir() {
-                            std::fs::create_dir_all(&resource_target).map_err(|error| {
-                                format!("create DATA resource target: {error}")
-                            })?;
+                            std::fs::create_dir_all(&resource_target)
+                                .map_err(|error| format!("create DATA resource target: {error}"))?;
                             bind_mount(&resource_source, &resource_target)?;
                         } else {
                             if let Some(parent) = resource_target.parent() {
@@ -872,9 +1003,8 @@ impl SystemMounts {
                                     format!("create DATA resource parent: {error}")
                                 })?;
                             }
-                            std::fs::copy(&resource_source, &resource_target).map_err(|error| {
-                                format!("materialize DATA resource: {error}")
-                            })?;
+                            std::fs::copy(&resource_source, &resource_target)
+                                .map_err(|error| format!("materialize DATA resource: {error}"))?;
                         }
                     }
                     continue;
@@ -897,7 +1027,6 @@ impl SystemMounts {
                     std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
                         .map_err(|error| format!("set DATA application permissions: {error}"))?;
                 }
-
             }
         }
 
@@ -1087,6 +1216,87 @@ fn bootstrap_group_id(path: &std::path::Path, wanted: &str) -> Result<u32, Strin
         }
     }
     Err(format!("bootstrap group {wanted} is missing"))
+}
+
+fn bootstrap_user_ids(path: &std::path::Path, wanted: &str) -> Result<(u32, u32), String> {
+    let passwd = std::fs::read_to_string(path)
+        .map_err(|error| format!("read bootstrap passwd {}: {error}", path.display()))?;
+    for line in passwd.lines() {
+        let mut fields = line.split(':');
+        let name = fields.next().unwrap_or_default();
+        let _password = fields.next();
+        let uid = fields.next().unwrap_or_default();
+        let gid = fields.next().unwrap_or_default();
+        if name == wanted {
+            let uid = uid
+                .parse::<u32>()
+                .map_err(|error| format!("invalid UID for bootstrap user {wanted}: {error}"))?;
+            let gid = gid
+                .parse::<u32>()
+                .map_err(|error| format!("invalid GID for bootstrap user {wanted}: {error}"))?;
+            return Ok((uid, gid));
+        }
+    }
+    Err(format!("bootstrap user {wanted} is missing"))
+}
+
+fn ensure_user_directory(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(format!(
+            "persistent user path is not a real directory: {}",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(path).map_err(|error| {
+                format!(
+                    "create persistent user directory {}: {error}",
+                    path.display()
+                )
+            })?;
+            let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+                format!(
+                    "inspect persistent user directory {}: {error}",
+                    path.display()
+                )
+            })?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "persistent user path is not a real directory: {}",
+                    path.display()
+                ))
+            }
+        }
+        Err(error) => Err(format!(
+            "inspect persistent user directory {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn chown_owner(path: &std::path::Path, uid: u32, gid: u32) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("inspect user-owned directory {}: {error}", path.display()))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(format!(
+            "refusing to change ownership of non-directory or symlink: {}",
+            path.display()
+        ));
+    }
+    let path_c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|_| format!("path contains NUL: {}", path.display()))?;
+    // lchown cannot follow a symlink if a path is replaced between validation
+    // and the ownership syscall.
+    if unsafe { libc::lchown(path_c.as_ptr(), uid, gid) } == -1 {
+        return Err(format!(
+            "set user ownership on {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
 }
 
 fn chown_group(path: &std::path::Path, gid: u32) -> Result<(), String> {
@@ -1584,5 +1794,66 @@ fn reap_forever() -> ! {
                 std::thread::sleep(Duration::from_secs(1));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod user_directory_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn test_root(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("luna-init-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("create isolated test root");
+        path
+    }
+
+    #[test]
+    fn installed_registries_are_not_materialized_as_legacy_providers() {
+        let fixture = test_root("private-registries");
+        let data = fixture.join("data");
+        let root = fixture.join("root");
+        for name in [".bundles", ".bundles-v2"] {
+            std::fs::create_dir_all(
+                data.join("system/apps")
+                    .join(name)
+                    .join("private-slot/nested-payload"),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir(&root).unwrap();
+        SystemMounts::materialize_data_apps(&data, &root, 0).unwrap();
+        assert!(std::fs::read_dir(&root).unwrap().next().is_none());
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn creates_missing_persistent_user_directory() {
+        let root = test_root("user-dir-create");
+        let home = root.join("users/luna/home");
+        ensure_user_directory(&root.join("users")).expect("create users root");
+        ensure_user_directory(&root.join("users/luna")).expect("create user root");
+        ensure_user_directory(&home).expect("create home");
+
+        let metadata = std::fs::symlink_metadata(&home).expect("inspect home");
+        assert!(metadata.is_dir());
+        assert!(!metadata.file_type().is_symlink());
+        std::fs::remove_dir_all(root).expect("remove isolated test root");
+    }
+
+    #[test]
+    fn rejects_symlink_at_user_directory_boundary() {
+        let root = test_root("user-dir-symlink");
+        let outside = root.join("outside");
+        let users_link = root.join("users");
+        std::fs::create_dir(&outside).expect("create outside directory");
+        symlink(&outside, &users_link).expect("create users symlink");
+
+        let result = ensure_user_directory(&users_link);
+        assert!(result.is_err());
+        assert!(outside.is_dir());
+        assert!(users_link.is_symlink());
+        std::fs::remove_dir_all(root).expect("remove isolated test root");
     }
 }

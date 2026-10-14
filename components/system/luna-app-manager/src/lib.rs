@@ -5,6 +5,12 @@
 
 use luna_common::{BundleId, Version};
 
+mod filesystem;
+pub use filesystem::{
+    BundleInspection, BundleRepresentation, FilesystemApplicationManager, InstalledBundle,
+    content_identity_hex, inspect_bundle, parse_version,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ApplicationRef {
     id: BundleId,

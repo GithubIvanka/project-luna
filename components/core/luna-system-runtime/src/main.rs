@@ -11,6 +11,8 @@ use luna_system_runtime::{ProcessId, ProcessState, SystemRuntime, SystemRuntimeS
 use luna_user_session::SessionState;
 use luna_user_session::UserCredentials;
 
+mod application_broker;
+mod application_catalog;
 mod boot_success;
 
 const SYSTEM_SOURCE_FD_ENV: &str = "LUNA_SYSTEM_SOURCE_FD";
@@ -22,6 +24,20 @@ const DEVICE_MANAGER_STATUS: &str = "/run/luna/device-manager.status";
 const DEVICE_MANAGER_INVENTORY: &str = "/run/luna/device-manager.volumes";
 const VOLUME_MANAGER_READY: &str = "/run/luna/volume-manager.ready";
 const VOLUME_MANAGER_STATUS: &str = "/run/luna/volume-manager.status";
+
+fn boot_diagnostic(message: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    // Запись kmsg сохраняет целостность при одновременном выводе ядра в serial.
+    // Даже один write в stderr может быть разорван kernel console посреди UART.
+    let line = format!("{message}\n");
+    if let Ok(mut log) = fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        if log.write_all(format!("<5>{line}").as_bytes()).is_ok() {
+            return;
+        }
+    }
+    // В среде без kmsg остаётся один заранее сформированный write в stderr.
+    let _ = std::io::stderr().lock().write_all(line.as_bytes());
+}
 
 fn secure_source_handoff_fds() -> Result<(), String> {
     for variable in [SYSTEM_SOURCE_FD_ENV, IMAGE_SOURCE_FD_ENV] {
@@ -174,9 +190,9 @@ fn wait_for_volume_services(
                 .map_err(|error| format!("read Volume Manager status: {error}"))?;
             let (detected, available) =
                 validate_volume_service_status(&device_status, &volume_status)?;
-            eprintln!(
+            boot_diagnostic(format_args!(
                 "luna-system-runtime: device and volume managers ready (detected={detected}, available={available}, auto_attach=true)"
-            );
+            ));
             return Ok(());
         }
 
@@ -248,7 +264,9 @@ fn start_optional_external_services() {
     }
 
     for runlevel in ["sysinit", "boot", "default"] {
-        eprintln!("luna-system-runtime: starting optional compatibility runlevel {runlevel}");
+        boot_diagnostic(format_args!(
+            "luna-system-runtime: starting optional compatibility runlevel {runlevel}"
+        ));
         match std::process::Command::new("/usr/bin/openrc")
             .arg(runlevel)
             .status()
@@ -265,6 +283,61 @@ fn start_optional_external_services() {
                     "luna-system-runtime: optional compatibility runlevel {runlevel} unavailable: {error}"
                 );
                 return;
+            }
+        }
+    }
+}
+
+/// Start the optional seat broker when no external service manager exists.
+/// Device Manager owns the udev compatibility daemon and coldplug lifecycle;
+/// starting a second udevd here would conflict with that single owner.
+fn start_optional_graphics_compatibility_services(
+    runtime: &mut SystemRuntimeService,
+) -> Vec<(&'static str, ProcessId)> {
+    if std::path::Path::new("/usr/bin/openrc").is_file() {
+        return Vec::new();
+    }
+
+    let mut services = Vec::new();
+    if std::path::Path::new("/usr/bin/seatd").is_file() {
+        match runtime.spawn_process_inherited_stdio("/usr/bin/seatd", ["-g", "seat", "-l", "info"])
+        {
+            Ok(process) => {
+                eprintln!(
+                    "luna-system-runtime: started optional seat compatibility provider /usr/bin/seatd (pid {})",
+                    process.get()
+                );
+                services.push(("/usr/bin/seatd", process));
+            }
+            Err(error) => eprintln!(
+                "luna-system-runtime: optional seat compatibility provider unavailable; continuing: {error}"
+            ),
+        }
+    }
+
+    services
+}
+
+fn supervise_optional_graphics_compatibility_services(
+    runtime: &mut SystemRuntimeService,
+    services: &mut Vec<(&'static str, ProcessId)>,
+) {
+    let mut index = 0;
+    while index < services.len() {
+        let (name, process) = services[index];
+        match runtime.poll_process(process) {
+            Ok(ProcessState::Running) => index += 1,
+            Ok(ProcessState::Exited(status)) => {
+                eprintln!(
+                    "luna-system-runtime: optional graphics compatibility provider {name} exited ({status}); continuing"
+                );
+                services.remove(index);
+            }
+            Err(error) => {
+                eprintln!(
+                    "luna-system-runtime: optional graphics compatibility provider {name} supervision lost: {error}; continuing"
+                );
+                services.remove(index);
             }
         }
     }
@@ -292,6 +365,7 @@ fn launch_graphical_user_session(
     runtime: &mut SystemRuntimeService,
     session_id: luna_user_session::SessionId,
     program: &str,
+    cgroup: Option<&luna_system_runtime::process_cgroup::ProcessCgroup>,
 ) -> Result<ProcessId, luna_system_runtime::RuntimeError> {
     let session = runtime.session(session_id)?;
     if session.state() != SessionState::Active {
@@ -341,7 +415,7 @@ fn launch_graphical_user_session(
         (OsString::from("SDL_VIDEODRIVER"), OsString::from("wayland")),
         (
             OsString::from("XDG_DATA_DIRS"),
-            OsString::from("/usr/local/share:/usr/share"),
+            OsString::from(format!("{}:/usr/local/share:/usr/share", luna_app_runtime::protocol::DESKTOP_SHARE)),
         ),
         (
             OsString::from("FONTCONFIG_FILE"),
@@ -374,9 +448,27 @@ fn launch_graphical_user_session(
         ),
     ];
     let credentials = UserCredentials::new(uid, gid, username);
-    runtime.spawn_process_with_env_and_pre_exec_inherited_stdio(executable, args, env, move || {
-        credentials.apply()
-    })
+    let membership = cgroup
+        .map(|group| group.child_membership_fd())
+        .transpose()
+        .map_err(|error| luna_system_runtime::RuntimeError::Session(error.to_string()))?;
+    runtime.launch_graphical_session_with_env_and_pre_exec(
+        session_id,
+        executable,
+        args,
+        env,
+        move || {
+            if let Some(fd) = &membership {
+                luna_system_runtime::process_cgroup::ProcessCgroup::enter(fd)?;
+            }
+            // Give the desktop and its providers one cleanup boundary on logout.
+            // SAFETY: this runs only in the forked child before dropping its UID.
+            if unsafe { libc::setpgid(0, 0) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            credentials.apply()
+        },
+    )
 }
 
 fn prepare_niri_config(
@@ -508,11 +600,25 @@ fn main() {
     let respawn = std::env::var_os("LUNA_NO_RESPAWN").is_none();
     let mut runtime = SystemRuntimeService::new();
 
+    // Презентация принадлежит графической границе UserSession. Системный runtime
+    // сообщает реальные этапы и прекращает отрисовку до аутентификации.
+    let boot_presentation = if std::env::var(BOOT_MODE_ENV).is_ok_and(|v| v == "0") {
+        luna_user_session::BootPresentation::start().ok()
+    } else { None };
+    if let Some(screen) = &boot_presentation { screen.set_stage("Подготовка состояния системы"); }
+
+    let state_start = std::time::Instant::now();
+    eprintln!("luna-system-runtime: opening persistent system state");
     match PersistentSystemManager::open_or_initialize_redb(
         "/data",
         default_development_system_state(),
     ) {
         Ok(manager) => {
+            boot_diagnostic(format_args!(
+                "luna-system-runtime: persistent system state ready in {} ms (revision {})",
+                state_start.elapsed().as_millis(),
+                manager.revision().value(),
+            ));
             let state = manager.state().clone();
             runtime.attach_system_manager(manager);
             eprintln!(
@@ -529,6 +635,7 @@ fn main() {
     }
 
     runtime.start();
+    if let Some(screen) = &boot_presentation { screen.set_stage("Подключение устройств и томов"); }
     let recovery_mode = std::env::var(BOOT_MODE_ENV).is_ok_and(|value| value == "2");
     let system_services = if recovery_mode {
         // Recovery uses VirtualData and its dedicated toolset; normal physical
@@ -548,13 +655,19 @@ fn main() {
         eprintln!("luna-system-runtime: boot success confirmation failed: {error}");
         std::process::exit(1);
     }
-    eprintln!("luna-system-runtime: boot success confirmed");
+    boot_diagnostic(format_args!("luna-system-runtime: boot success confirmed"));
 
+    let mut optional_graphics_compatibility_services = Vec::new();
+    if let Some(screen) = &boot_presentation { screen.set_stage("Подготовка графической сессии"); }
     if !recovery_mode {
         start_optional_external_services();
+        optional_graphics_compatibility_services =
+            start_optional_graphics_compatibility_services(&mut runtime);
     }
 
     let login_user = std::env::var(SESSION_USER_ENV).unwrap_or_else(|_| "luna".to_owned());
+
+    drop(boot_presentation);
 
     loop {
         let session = if recovery_mode {
@@ -592,10 +705,41 @@ fn main() {
             session
         };
 
-        let _graphical_process = match launch_graphical_user_session(
+        let session_cgroup = match luna_system_runtime::process_cgroup::ProcessCgroup::new() {
+            Ok(group) => Some(group),
+            Err(error) => {
+                eprintln!("luna-system-runtime: session descendant boundary unavailable: {error}");
+                None
+            }
+        };
+        let mut application_broker =
+            if let Some(group) = session_cgroup.as_ref().filter(|_| !recovery_mode) {
+                let user = runtime
+                    .session(session)
+                    .expect("owned session")
+                    .user()
+                    .to_string();
+                let (uid, gid, _, _) = user_environment(&user).expect("authenticated account");
+                match application_broker::ApplicationBroker::new(
+                    runtime.session(session).expect("owned session"),
+                    UserCredentials::new(uid, gid, user),
+                    group,
+                ) {
+                    Ok(broker) => Some(broker),
+                    Err(error) => {
+                        eprintln!("luna-system-runtime: application broker unavailable: {error}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+        let graphical_process = match launch_graphical_user_session(
             &mut runtime,
             session,
-            &session_command,
+            session_command,
+            session_cgroup.as_ref(),
         ) {
             Ok(process) => {
                 eprintln!(
@@ -617,6 +761,10 @@ fn main() {
                 eprintln!("luna-system-runtime: required system service failed: {error}");
                 std::process::exit(1);
             }
+            supervise_optional_graphics_compatibility_services(
+                &mut runtime,
+                &mut optional_graphics_compatibility_services,
+            );
             if let Err(error) = runtime.supervise() {
                 eprintln!("luna-system-runtime: supervision error: {error}");
                 std::process::exit(1);
@@ -629,8 +777,52 @@ fn main() {
             {
                 break;
             }
+            if let Some(broker) = application_broker.as_mut()
+                && let Err(error) = broker.poll(&mut runtime)
+            {
+                eprintln!("luna-system-runtime: application broker failed: {error}");
+                if let Err(error) = broker.end_session(&mut runtime) {
+                    eprintln!("luna-system-runtime: application cleanup failed: {error}");
+                    std::process::exit(1);
+                }
+                application_broker = None;
+            }
             std::thread::sleep(Duration::from_millis(20));
         }
+
+        if let Some(mut broker) = application_broker.take()
+            && let Err(error) = broker.end_session(&mut runtime)
+        {
+            eprintln!("luna-system-runtime: application logout cleanup failed: {error}");
+            std::process::exit(1);
+        }
+        if let Some(group) = session_cgroup {
+            if let Err(error) = group.kill_and_wait() {
+                eprintln!("luna-system-runtime: session descendant cleanup failed: {error}");
+                std::process::exit(1);
+            }
+        } else {
+            // Compatibility desktop without cgroup support has no Bundle broker.
+            unsafe {
+                libc::kill(-(graphical_process.get() as libc::pid_t), libc::SIGTERM);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            unsafe {
+                libc::kill(-(graphical_process.get() as libc::pid_t), libc::SIGKILL);
+            }
+        }
+        let ended_user = runtime
+            .session(session)
+            .map(|value| value.user().to_string());
+        if let Ok((uid, _, _, _)) = ended_user.and_then(|user| user_environment(&user)) {
+            let path = format!("/run/user/{uid}");
+            if let Err(error) = fs::remove_dir_all(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("luna-system-runtime: could not clean {path} after logout: {error}");
+            }
+        }
+        eprintln!("luna-system-runtime: graphical UserSession ended; returning to login UI");
 
         if !respawn {
             break;

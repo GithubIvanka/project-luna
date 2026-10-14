@@ -239,6 +239,23 @@ impl SessionUi {
         {
             return Err(SessionUiError::NoKeyboard);
         }
+        let absolute_axes = inputs
+            .iter()
+            .map(|device| {
+                if device.device().kind == InputDeviceKind::Pointer {
+                    let axes = device.absolute_axes()?;
+                    if axes.is_some() {
+                        eprintln!(
+                            "luna-user-session: login absolute pointer ready: {}",
+                            device.device().name
+                        );
+                    }
+                    Ok(axes)
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect::<io::Result<Vec<_>>>()?;
         eprintln!("luna-user-session: login UI keyboard/pointer input ready");
         for input_device in &inputs {
             input_device.set_nonblocking(true)?;
@@ -383,6 +400,7 @@ impl SessionUi {
                                 &mut keyboard,
                                 &layout,
                                 &event,
+                                absolute_axes[index],
                                 &mut pointer_x,
                                 &mut pointer_y,
                                 target.mode.width,
@@ -451,12 +469,23 @@ fn handle_pointer_event(
     keyboard: &mut KeyboardState,
     layout: &UsKeyLayout,
     event: &crate::InputEvent,
+    absolute_axes: Option<[crate::input::AbsoluteAxis; 2]>,
     pointer_x: &mut i32,
     pointer_y: &mut i32,
     width: u32,
     height: u32,
 ) -> Option<UserCredentials> {
     match (event.event_type, event.code) {
+        (crate::InputEvent::ABS, crate::InputEvent::ABS_X) => {
+            if let Some(axes) = absolute_axes {
+                *pointer_x = axes[0].pixel(event.value, width);
+            }
+        }
+        (crate::InputEvent::ABS, crate::InputEvent::ABS_Y) => {
+            if let Some(axes) = absolute_axes {
+                *pointer_y = axes[1].pixel(event.value, height);
+            }
+        }
         (crate::InputEvent::REL, crate::InputEvent::REL_X) => {
             *pointer_x =
                 (*pointer_x + pointer_delta(event.value)).clamp(0, width.saturating_sub(1) as i32);

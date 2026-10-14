@@ -1,39 +1,68 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 022
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DIST="$REPO_ROOT/dist"
-WORK="$DIST/.build/canonical-luna-disk"
+SOURCE_DIST="$REPO_ROOT/dist"
+OUTPUT_ROOT="${LUNA_CANONICAL_OUTPUT_ROOT:-$SOURCE_DIST}"
+WORK="$OUTPUT_ROOT/.build/canonical-luna-disk"
 SYS_ROOT="$WORK/luna-sys"
 DATA_ROOT="$WORK/luna-data"
 PARTS="$WORK/parts"
 SYSTEM_IMAGE_ROOT="$WORK/system-image-root"
 RECOVERY_DATA_ROOT="$WORK/recovery-data-root"
-ALPINE_ROOTFS="$DIST/sources/reference/alpine-3.24/release/alpine-runtime-rootfs-3.24.2-x86_64.tar.gz"
-NIRI_CACHE="$DIST/.build/alpine-niri-apk-cache"
-SERVICE_ROOT="$DIST/.build/alpine-system-service-root"
-UDISKS_ROOT="$DIST/.build/udisks-provider-root/root"
-MESA_ROOT="$DIST/.build/alpine-foundation-graphics/mesa/out"
-NOCTALIA_BIN="$DIST/.build/noctalia-build/out/usr/local/bin/noctalia"
-NOCTALIA_CACHE="$DIST/.build/noctalia-runtime-apks"
-NOCTALIA_RUNTIME_ROOT="$DIST/.build/noctalia-runtime-root"
+ALPINE_ROOTFS="$SOURCE_DIST/sources/reference/alpine-3.24/release/alpine-runtime-rootfs-3.24.2-x86_64.tar.gz"
+NIRI_CACHE="$SOURCE_DIST/.build/alpine-niri-apk-cache"
+SERVICE_ROOT="$SOURCE_DIST/.build/alpine-system-service-root"
+UDISKS_ROOT="$SOURCE_DIST/.build/udisks-provider-root/root"
+GRAPHICS_BUILD_ROOT="${LUNA_ALPINE_GRAPHICS_BUILD_ROOT:-$SOURCE_DIST/.build/alpine-foundation-graphics}"
+NERD_FONTS_ROOT="${LUNA_NERD_FONTS_ROOT:-$SOURCE_DIST/nerd-fonts-root}"
+MESA_ROOT="$GRAPHICS_BUILD_ROOT/mesa/out"
+NOCTALIA_ROOT="$GRAPHICS_BUILD_ROOT/noctalia/out"
+NOCTALIA_BIN="$NOCTALIA_ROOT/usr/local/bin/noctalia"
+NOCTALIA_SHARE="$NOCTALIA_ROOT/usr/local/share/noctalia"
+NOCTALIA_CACHE="$GRAPHICS_BUILD_ROOT/noctalia-runtime-apks"
+NOCTALIA_RUNTIME_ROOT="$WORK/noctalia-runtime-root"
 DESKTOP_SERVICE_ROOT="$WORK/desktop-service-root"
 BUSYBOX_SOURCE="$SYS_ROOT/bin/busybox"
-ADWAITA_APK="$DIST/.build/alpine-greeter-apks/packages/adwaita-icon-theme-50.0-r1.apk"
-LIBUDEV_ZERO_APK="$DIST/.build/alpine-niri-apk-cache/libudev-zero-1.0.4-r0.apk"
-ELOGIND_APK="$DIST/.build/alpine-greeter-apks/packages/elogind-255.24-r0.apk"
-EUDEV_APK="$DIST/.build/alpine-niri-apk-cache/eudev-libs-3.2.14-r6.apk"
-UDEV_DAEMON_APK="$DIST/.build/udev-provider-root/repo/eudev-3.2.14-r6.apk"
-UDEV_REPO="$DIST/.build/udev-provider-root/repo"
-UDEV_ROOT="$DIST/.build/udev-provider-root/root"
-KERNEL="$DIST/kernel/current/bzImage"
+ADWAITA_APK="$SOURCE_DIST/.build/alpine-greeter-apks/packages/adwaita-icon-theme-50.0-r1.apk"
+LIBUDEV_ZERO_APK="$SOURCE_DIST/.build/alpine-niri-apk-cache/libudev-zero-1.0.4-r0.apk"
+ELOGIND_APK="$SOURCE_DIST/.build/alpine-greeter-apks/packages/elogind-255.24-r0.apk"
+EUDEV_APK="$SOURCE_DIST/.build/alpine-niri-apk-cache/eudev-libs-3.2.14-r6.apk"
+UDEV_DAEMON_APK="$SOURCE_DIST/.build/udev-provider-root/repo/eudev-3.2.14-r6.apk"
+UDEV_REPO="$SOURCE_DIST/.build/udev-provider-root/repo"
+UDEV_ROOT="$OUTPUT_ROOT/.build/canonical-luna-udev-root"
+KERNEL="$SOURCE_DIST/kernel/current/bzImage"
+PROVIDER_APKS="$SOURCE_DIST/.build/alpine-greeter-apks/packages"
+if [ -n "${LUNA_CANONICAL_INPUT_ROOT:-}" ]; then
+    python3 "$REPO_ROOT/tools/canonical-luna-inputs.py" verify "$LUNA_CANONICAL_INPUT_ROOT"
+    ALPINE_ROOTFS="$LUNA_CANONICAL_INPUT_ROOT/alpine-runtime-rootfs.tar.gz"
+    NIRI_CACHE="$LUNA_CANONICAL_INPUT_ROOT/niri-apks"
+    SERVICE_ROOT="$LUNA_CANONICAL_INPUT_ROOT/provider-root"
+    UDISKS_ROOT="$SERVICE_ROOT"
+    UDEV_REPO="$LUNA_CANONICAL_INPUT_ROOT/provider-apks"
+    PROVIDER_APKS="$UDEV_REPO"
+    ADWAITA_APK="$PROVIDER_APKS/adwaita-icon-theme-50.0-r1.apk"
+    LIBUDEV_ZERO_APK="$PROVIDER_APKS/libudev-zero-1.0.4-r0.apk"
+    ELOGIND_APK="$PROVIDER_APKS/elogind-255.24-r0.apk"
+    EUDEV_APK="$PROVIDER_APKS/eudev-libs-3.2.14-r6.apk"
+    UDEV_DAEMON_APK="$PROVIDER_APKS/eudev-3.2.14-r6.apk"
+    GRAPHICS_BUILD_ROOT="$LUNA_CANONICAL_INPUT_ROOT/graphics"
+    MESA_ROOT="$GRAPHICS_BUILD_ROOT/mesa/out"
+    NOCTALIA_ROOT="$GRAPHICS_BUILD_ROOT/noctalia/out"
+    NOCTALIA_BIN="$NOCTALIA_ROOT/usr/local/bin/noctalia"
+    NOCTALIA_SHARE="$NOCTALIA_ROOT/usr/local/share/noctalia"
+    NOCTALIA_CACHE="$GRAPHICS_BUILD_ROOT/noctalia-runtime-apks"
+    NERD_FONTS_ROOT="$LUNA_CANONICAL_INPUT_ROOT/fonts"
+    KERNEL="$LUNA_CANONICAL_INPUT_ROOT/kernel/bzImage"
+fi
 
 LUNA_VERSION="${LUNA_VERSION:-0.1.0}"
 VERSION="$LUNA_VERSION"
-OUT="$DIST/luna-$VERSION.img"
+OUT="$OUTPUT_ROOT/luna-$VERSION.img"
 EFI="$REPO_ROOT/components/boot/target/x86_64-unknown-uefi/release/luna-boot.efi"
 
-for tool in fakeroot cargo rustup sgdisk mkfs.ext4 mkfs.fat mkswap mcopy mmd dd mksquashfs file truncate blkid; do
+for tool in fakeroot cc cargo rustup sgdisk mkfs.ext4 mkfs.fat mkswap mcopy mmd dd mksquashfs file truncate blkid btrfs; do
     command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 MKFS_BTRFS="$(command -v mkfs.btrfs || true)"
@@ -44,24 +73,36 @@ MKFS_BTRFS="$(command -v mkfs.btrfs || true)"
 [ -d "$UDISKS_ROOT/usr/lib" ] || { echo "missing prepared UDisks2 provider closure: $UDISKS_ROOT" >&2; exit 1; }
 [ -d "$MESA_ROOT/usr/local/lib" ] || { echo "missing tracked Mesa virgl artifact: $MESA_ROOT" >&2; exit 1; }
 [ -x "$NOCTALIA_BIN" ] || { echo "missing built Noctalia shell: $NOCTALIA_BIN" >&2; exit 1; }
-[ -x "$BUSYBOX_SOURCE" ] || { echo "missing musl busybox source: $BUSYBOX_SOURCE" >&2; exit 1; }
+[ -d "$NOCTALIA_SHARE/assets" ] || { echo "missing built Noctalia assets: $NOCTALIA_SHARE/assets" >&2; exit 1; }
+[ -s "$NERD_FONTS_ROOT/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" ] || { echo "missing Luna login font: $NERD_FONTS_ROOT/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" >&2; exit 1; }
 [ -d "$NOCTALIA_CACHE" ] || { echo "missing Noctalia runtime APK cache: $NOCTALIA_CACHE" >&2; exit 1; }
+while IFS= read -r runtime_package; do
+    case "$runtime_package" in ''|\#*) continue ;; esac
+    compgen -G "$NOCTALIA_CACHE/$runtime_package-[0-9]*.apk" >/dev/null || {
+        echo "incomplete Noctalia runtime cache: missing $runtime_package; run tools/build-alpine-foundation-graphics.sh" >&2
+        exit 1
+    }
+done < "$REPO_ROOT/tools/alpine-foundation/noctalia-runtime-packages.txt"
 [ -f "$ADWAITA_APK" ] || { echo "missing Adwaita icon theme APK: $ADWAITA_APK" >&2; exit 1; }
 [ -f "$LIBUDEV_ZERO_APK" ] || { echo "missing libudev-zero APK: $LIBUDEV_ZERO_APK" >&2; exit 1; }
 [ -f "$ELOGIND_APK" ] || { echo "missing elogind seat rules APK: $ELOGIND_APK" >&2; exit 1; }
 [ -f "$EUDEV_APK" ] || { echo "missing eudev-libs APK: $EUDEV_APK" >&2; exit 1; }
 [ -f "$UDEV_DAEMON_APK" ] || { echo "missing eudev daemon APK: $UDEV_DAEMON_APK" >&2; exit 1; }
 [ -d "$UDEV_REPO" ] || { echo "missing udev provider repository: $UDEV_REPO" >&2; exit 1; }
+mkdir -p "$OUTPUT_ROOT"
+printf '%s\n' 'Project Luna generated canonical output v1' > "$OUTPUT_ROOT/.luna-canonical-output-v1"
 rm -rf "$UDEV_ROOT"
 mkdir -p "$UDEV_ROOT"
 tar -xzf "$EUDEV_APK" -C "$UDEV_ROOT" usr/lib/libudev.so.1 usr/lib/libudev.so.1.6.3
 for apk in "$UDEV_REPO"/*.apk; do
     tar -xzf "$apk" -C "$UDEV_ROOT" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.INSTALL' --exclude='.trigger' 2>/dev/null || true
 done
+# The daemon uses real eudev; libudev-zero is private to the Niri provider.
+tar -xzf "$EUDEV_APK" -C "$UDEV_ROOT" usr/lib/libudev.so.1 usr/lib/libudev.so.1.6.3 2>/dev/null
 
 rm -rf "$WORK"
-rm -rf "$DIST/luna-sys" "$DIST/luna-data"
-rm -f "$DIST/luna-$VERSION.squashfs"
+rm -rf "$OUTPUT_ROOT/luna-sys" "$OUTPUT_ROOT/luna-data"
+rm -f "$OUTPUT_ROOT/luna-$VERSION.squashfs"
 mkdir -p "$SYS_ROOT" "$DATA_ROOT" "$PARTS"
 
 echo "==> Build luna-boot.efi"
@@ -70,11 +111,13 @@ cargo build --release --target x86_64-unknown-uefi --manifest-path "$REPO_ROOT/c
 
 echo "==> Base system -> LUNA-SYS"
 tar -xzf "$ALPINE_ROOTFS" -C "$SYS_ROOT"
+[ -x "$BUSYBOX_SOURCE" ] || { echo "Alpine rootfs is missing BusyBox: $BUSYBOX_SOURCE" >&2; exit 1; }
 
 echo "==> Luna core artifacts"
 cargo build --release -p luna-device-manager --target x86_64-unknown-linux-musl
 cargo build --release -p luna-volume-manager --target x86_64-unknown-linux-musl
 cargo build --release -p luna-system-runtime --target x86_64-unknown-linux-musl
+cargo build --release -p luna-cli --target x86_64-unknown-linux-musl
 cargo build --release --manifest-path "$REPO_ROOT/components/core/luna-init/Cargo.toml" --target x86_64-unknown-linux-musl
 DEVICE_MANAGER="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-device-manager"
 VOLUME_MANAGER="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-volume-manager"
@@ -93,11 +136,11 @@ SESSION="$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna-user-session"
 install -Dm0755 "$SESSION" "$SYS_ROOT/usr/bin/luna-user-session"
 
 echo "==> Niri packages -> LUNA-SYS dependencies; provider -> LUNA-DATA"
-mkdir -p "$DATA_ROOT/system"/{apps,drivers,firmware,libs,config,resources}
-mkdir -p "$DATA_ROOT/users" "$DATA_ROOT/cach"
+mkdir -p "$DATA_ROOT/system"/{apps,drivers,firmware,libs,config,resources,state,volumes}
+mkdir -p "$DATA_ROOT/users" "$DATA_ROOT/cache"
 mkdir -p "$DATA_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 tar -xzf "$ADWAITA_APK" -C "$DATA_ROOT/system/resources/icons" --strip-components=3 usr/share/icons/Adwaita
-find "$NIRI_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 |
+find "$NIRI_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 | sort -z |
 while IFS= read -r -d '' apk; do
     tar -xzf "$apk" -C "$SYS_ROOT" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.INSTALL' --exclude='.trigger' 2>/dev/null || true
 done
@@ -113,7 +156,7 @@ tar -xOf "$LIBUDEV_ZERO_APK" usr/lib/libudev.so.1 > "$DATA_ROOT/system/libs/niri
 NIRI_RUNTIME_ROOT="$WORK/niri-runtime-root"
 rm -rf "$NIRI_RUNTIME_ROOT"
 mkdir -p "$NIRI_RUNTIME_ROOT"
-find "$NIRI_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 |
+find "$NIRI_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 | sort -z |
 while IFS= read -r -d '' apk; do
     tar -xzf "$apk" -C "$NIRI_RUNTIME_ROOT" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.INSTALL' --exclude='.trigger' 2>/dev/null || true
 done
@@ -125,7 +168,7 @@ if [ -d "$NIRI_RUNTIME_ROOT/usr/lib" ]; then
 fi
 rm -rf "$NOCTALIA_RUNTIME_ROOT"
 mkdir -p "$NOCTALIA_RUNTIME_ROOT"
-find "$NOCTALIA_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 |
+find "$NOCTALIA_CACHE" -maxdepth 1 -type f -name '*.apk' -print0 | sort -z |
 while IFS= read -r -d '' apk; do
     tar -xzf "$apk" -C "$NOCTALIA_RUNTIME_ROOT" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.INSTALL' --exclude='.trigger' 2>/dev/null || true
 done
@@ -137,6 +180,8 @@ if [ -d "$NOCTALIA_RUNTIME_ROOT/lib" ]; then
 fi
 mkdir -p "$DATA_ROOT/system/apps/noctalia"
 install -Dm0755 "$NOCTALIA_BIN" "$DATA_ROOT/system/apps/noctalia/noctalia"
+mkdir -p "$DATA_ROOT/system/apps/noctalia/resources"
+cp -a "$NOCTALIA_SHARE" "$DATA_ROOT/system/apps/noctalia/resources/noctalia"
 mkdir -p "$DATA_ROOT/system/apps/busybox"
 install -Dm0755 "$BUSYBOX_SOURCE" "$DATA_ROOT/system/apps/busybox/busybox"
 # Keep the normal Alpine BusyBox applet namespace available to OpenRC and
@@ -158,39 +203,18 @@ for busybox_dir in "$SYS_ROOT/bin" "$SYS_ROOT/sbin" "$SYS_ROOT/usr/bin"; do
 done
 
 echo "==> Restore OpenRC-managed desktop lifecycle -> LUNA-DATA"
+# Niri APK extraction can replace the Alpine root's mount symlink with a
+# util-linux executable. Keep the bootstrap applet available in canonical DATA.
+ln -sfn busybox "$DATA_ROOT/system/apps/busybox/mount"
 rm -rf "$DESKTOP_SERVICE_ROOT"
 mkdir -p "$DESKTOP_SERVICE_ROOT"
-desktop_service_apks=(
-    dbus-1.16.2-r2.apk
-    dbus-daemon-launch-helper-1.16.2-r2.apk
-    dbus-libs-1.16.2-r2.apk
-    dbus-openrc-1.16.2-r2.apk
-    elogind-255.24-r0.apk
-    elogind-common-255.24-r0.apk
-    elogind-openrc-255.24-r0.apk
-    upower-1.91.0-r2.apk
-    bluez-5.86-r2.apk
-    bluez-libs-5.86-r2.apk
-    bluez-openrc-5.86-r2.apk
-    networkmanager-1.52.2-r0.apk
-    networkmanager-cli-1.52.2-r0.apk
-    networkmanager-openrc-1.52.2-r0.apk
-    polkit-127-r2.apk
-    polkit-common-127-r2.apk
-    polkit-elogind-127-r2.apk
-    polkit-elogind-libs-127-r2.apk
-    polkit-openrc-127-r2.apk
-    rtkit-0.14-r0.apk
-    rtkit-openrc-0.14-r0.apk
-    pipewire-1.6.8-r4.apk
-    pipewire-libs-1.6.8-r4.apk
-    pipewire-spa-bluez-1.6.8-r4.apk
-    wireplumber-0.5.15-r0.apk
-    wireplumber-libs-0.5.15-r0.apk
-    wireplumber-logind-0.5.15-r0.apk
-)
+desktop_service_apks=()
+while IFS= read -r package; do
+    case "$package" in ''|\#*) continue ;; esac
+    desktop_service_apks+=("${package%%=*}-${package#*=}.apk")
+done < "$REPO_ROOT/tools/alpine-foundation/desktop-service-packages.txt"
 for apk_name in "${desktop_service_apks[@]}"; do
-    apk="$DIST/.build/alpine-greeter-apks/packages/$apk_name"
+    apk="$PROVIDER_APKS/$apk_name"
     if [ ! -s "$apk" ]; then
         apk="$NOCTALIA_CACHE/$apk_name"
     fi
@@ -349,6 +373,8 @@ chmod 0755 "$DATA_ROOT/system/config/init.d/luna-session"
 
 ln -sfn ../../init.d/cgroups "$DATA_ROOT/system/config/runlevels/sysinit/cgroups"
 ln -sfn ../../init.d/seatd "$DATA_ROOT/system/config/runlevels/boot/seatd"
+# Device and volume managers are started and supervised directly by
+# luna-system-runtime; they must not be enabled as OpenRC services.
 for svc in dbus elogind upower bluetooth networkmanager polkit rtkit; do
     ln -sfn ../../init.d/"$svc" "$DATA_ROOT/system/config/runlevels/default/$svc"
 done
@@ -373,6 +399,8 @@ EOF_OPENRC_USER_DBUS_CONF
 mkdir -p "$DATA_ROOT/system/apps/elogind" "$DATA_ROOT/system/apps/upower"     "$DATA_ROOT/system/apps/polkit" "$DATA_ROOT/system/apps/pipewire"     "$DATA_ROOT/system/apps/wireplumber" "$DATA_ROOT/system/apps/rtkit"
 
 install -Dm0755 "$DESKTOP_SERVICE_ROOT/usr/libexec/elogind/elogind"     "$DATA_ROOT/system/apps/elogind/elogind"
+install -Dm0755 "$DESKTOP_SERVICE_ROOT/usr/libexec/elogind/elogind-uaccess-command" \
+    "$DATA_ROOT/system/apps/elogind/elogind-uaccess-command"
 install -Dm0755 "$DESKTOP_SERVICE_ROOT/usr/bin/loginctl"     "$DATA_ROOT/system/apps/elogind/loginctl"
 install -Dm0755 "$DESKTOP_SERVICE_ROOT/usr/libexec/upowerd"     "$DATA_ROOT/system/apps/upower/upowerd"
 install -Dm0755 "$DESKTOP_SERVICE_ROOT/usr/lib/polkit-1/polkitd"     "$DATA_ROOT/system/apps/polkit/polkitd"
@@ -410,18 +438,30 @@ fi
 if [ -d "$DESKTOP_SERVICE_ROOT/lib" ]; then
     cp -a "$DESKTOP_SERVICE_ROOT/lib/." "$DATA_ROOT/system/libs/"
 fi
-for provider_config in dbus-1 elogind NetworkManager bluetooth polkit-1 upower; do
+for provider_config in dbus-1 elogind NetworkManager bluetooth polkit-1 UPower; do
     if [ -d "$DESKTOP_SERVICE_ROOT/etc/$provider_config" ]; then
-        mkdir -p "$DATA_ROOT/system/config/$(dirname "$provider_config")"
-        cp -a "$DESKTOP_SERVICE_ROOT/etc/$provider_config" "$DATA_ROOT/system/config/$provider_config"
+        mkdir -p "$DATA_ROOT/system/config/$provider_config"
+        cp -a "$DESKTOP_SERVICE_ROOT/etc/$provider_config/." "$DATA_ROOT/system/config/$provider_config/"
     fi
 done
 
 mkdir -p "$DATA_ROOT/system/apps/pipewire/resources"     "$DATA_ROOT/system/apps/wireplumber/resources"
 cat > "$DATA_ROOT/system/apps/noctalia/luna-noctalia-test" <<'EOF_NOCTALIA_WRAPPER'
 #!/bin/sh
+exec >>"${XDG_RUNTIME_DIR:-/tmp}/luna-noctalia.log" 2>&1
 export NOCTALIA_LOG_LEVEL=debug
-exec /usr/bin/noctalia >>"${XDG_RUNTIME_DIR:-/tmp}/luna-noctalia.log" 2>&1
+export NOCTALIA_ASSETS_DIR=/usr/share/noctalia/assets
+/usr/bin/noctalia >>"${XDG_RUNTIME_DIR:-/tmp}/luna-noctalia.log" 2>&1 &
+NOCTALIA_PID=$!
+printf '%s\n' "$NOCTALIA_PID" > "$XDG_RUNTIME_DIR/luna-noctalia.pid"
+echo "luna-graphical-session: Noctalia main pid $NOCTALIA_PID" >&2
+trap 'kill "$NOCTALIA_PID" 2>/dev/null || true' HUP INT TERM
+wait "$NOCTALIA_PID"
+NOCTALIA_STATUS=$?
+rm -f "$XDG_RUNTIME_DIR/luna-noctalia.pid"
+echo "luna-graphical-session: Noctalia exited with status $NOCTALIA_STATUS" >&2
+[ "$NOCTALIA_STATUS" -eq 0 ] || /usr/bin/busybox sync
+exit "$NOCTALIA_STATUS"
 EOF_NOCTALIA_WRAPPER
 chmod 0755 "$DATA_ROOT/system/apps/noctalia/luna-noctalia-test"
 if [ -d "$DESKTOP_SERVICE_ROOT/usr/share/pipewire" ]; then
@@ -443,13 +483,13 @@ if [ -L "$UDEV_ROOT/usr/lib/libudev.so.1" ]; then
     rm -f "$DATA_ROOT/system/libs/libudev.so.1"
     cp -a "$UDEV_ROOT/usr/lib/libudev.so.1" "$DATA_ROOT/system/libs/libudev.so.1"
 fi
-if [ -d "$MESA_ROOT/usr/local/lib" ]; then
-    cp -a "$MESA_ROOT/usr/local/lib/." "$DATA_ROOT/system/libs/"
-fi
-if [ -d "$MESA_ROOT/usr/lib/dri" ]; then
-    mkdir -p "$DATA_ROOT/system/libs/dri"
-    cp -a "$MESA_ROOT/usr/lib/dri/." "$DATA_ROOT/system/libs/dri/"
-fi
+# Preserve the working Alpine foundation's private Mesa loader namespace.
+# Service APK closures also carry Mesa and are copied later into system/libs;
+# flattening this VirGL build there silently replaces it with package Mesa.
+MESA_DATA_LIB="$DATA_ROOT/system/libs/mesa-virgl"
+mkdir -p "$MESA_DATA_LIB/dri"
+cp -a "$MESA_ROOT/usr/local/lib/." "$MESA_DATA_LIB/"
+cp -a "$MESA_ROOT/usr/lib/dri/." "$MESA_DATA_LIB/dri/"
 if [ -x "$NIRI_RUNTIME_ROOT/usr/bin/seatd" ]; then
     mkdir -p "$DATA_ROOT/system/apps/seatd"
     install -Dm0755 "$NIRI_RUNTIME_ROOT/usr/bin/seatd" "$DATA_ROOT/system/apps/seatd/seatd"
@@ -457,6 +497,18 @@ fi
 if [ -d "$NIRI_RUNTIME_ROOT/etc/fonts" ]; then
     mkdir -p "$DATA_ROOT/system/config/fonts"
     cp -a "$NIRI_RUNTIME_ROOT/etc/fonts/." "$DATA_ROOT/system/config/fonts/"
+fi
+# Одной конфигурации fontconfig недостаточно: шрифты текста должны быть доступны
+# в логическом /usr отдельно от встроенного шрифта значков Noctalia.
+install -Dm0644 "$SERVICE_ROOT/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf" "$DATA_ROOT/system/resources/fonts/Adwaita/AdwaitaSans-Regular.ttf"
+for font_root in "$NIRI_RUNTIME_ROOT" "$NOCTALIA_RUNTIME_ROOT"; do
+    if [ -d "$font_root/usr/share/fonts" ]; then
+        cp -a "$font_root/usr/share/fonts/." "$DATA_ROOT/system/resources/fonts/"
+    fi
+done
+if [ -d "$NOCTALIA_RUNTIME_ROOT/usr/share/qalculate" ]; then
+    cp -a "$NOCTALIA_RUNTIME_ROOT/usr/share/qalculate" \
+        "$DATA_ROOT/system/apps/noctalia/resources/qalculate"
 fi
 for niri_resource in libinput xkeyboard-config-2 X11; do
     source_resource="$NIRI_RUNTIME_ROOT/usr/share/$niri_resource"
@@ -478,6 +530,9 @@ install -Dm0755 "$UDEV_ROOT/bin/udevadm" "$DATA_ROOT/system/apps/udevd/udevadm"
 cp -a "$UDEV_ROOT/usr/lib/udev/." "$DATA_ROOT/system/apps/udevd/resources/udev/"
 tar -xOf "$ELOGIND_APK" usr/lib/udev/rules.d/71-seat.rules > "$DATA_ROOT/system/apps/udevd/resources/udev/rules.d/71-seat.rules"
 tar -xOf "$ELOGIND_APK" usr/lib/udev/rules.d/73-seat-late.rules > "$DATA_ROOT/system/apps/udevd/resources/udev/rules.d/73-seat-late.rules"
+# DATA application executables are exposed at /usr/bin by luna-init.
+sed -i 's#/usr/libexec/elogind/elogind-uaccess-command#/usr/bin/elogind-uaccess-command#g' \
+    "$DATA_ROOT/system/apps/udevd/resources/udev/rules.d/73-seat-late.rules"
 cat > "$DATA_ROOT/system/apps/udevd/resources/udev/rules.d/72-luna-seat.rules" <<'EOF_LUNA_SEAT_RULES'
 SUBSYSTEM=="input", KERNEL=="input[0-9]*", TAG+="seat", ENV{ID_SEAT}="seat0"
 SUBSYSTEM=="input", KERNEL=="event[0-9]*", TAG+="seat", ENV{ID_SEAT}="seat0"
@@ -498,24 +553,24 @@ if [ -d "$UDISKS_ROOT/usr/lib" ]; then
     cp -a "$UDISKS_ROOT/usr/lib/." "$DATA_ROOT/system/libs/"
 fi
 if [ -d "$SERVICE_ROOT/usr/share/dbus-1" ]; then
-    cp -a "$SERVICE_ROOT/usr/share/dbus-1" "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1"
+    cp -a "$SERVICE_ROOT/usr/share/dbus-1/." "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1/"
 fi
 if [ -d "$SERVICE_ROOT/usr/share/polkit-1" ]; then
-    cp -a "$SERVICE_ROOT/usr/share/polkit-1" "$DATA_ROOT/system/apps/dbus-daemon/resources/polkit-1"
+    cp -a "$SERVICE_ROOT/usr/share/polkit-1/." "$DATA_ROOT/system/apps/dbus-daemon/resources/polkit-1/"
 fi
 if [ -d "$UDISKS_ROOT/usr/lib/udisks2" ]; then
     cp -a "$UDISKS_ROOT/usr/lib/udisks2" "$DATA_ROOT/system/apps/udisksd/resources/udisks2"
 fi
 if [ -d "$UDISKS_ROOT/usr/share/dbus-1" ]; then
-    rm -rf "$DATA_ROOT/system/apps/udisksd/resources/dbus-1"
-    cp -a "$UDISKS_ROOT/usr/share/dbus-1" "$DATA_ROOT/system/apps/udisksd/resources/dbus-1"
-    if [ -f "$DATA_ROOT/system/apps/udisksd/resources/dbus-1/system-services/org.freedesktop.UDisks2.service" ]; then
-        sed -i 's#/usr/libexec/udisks2/udisksd#/usr/bin/udisksd#g' "$DATA_ROOT/system/apps/udisksd/resources/dbus-1/system-services/org.freedesktop.UDisks2.service"
+    # One provider owns each shared resource namespace. A separate UDisks
+    # dbus-1 bind mount hides every other service policy and activation file.
+    cp -a "$UDISKS_ROOT/usr/share/dbus-1/." "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1/"
+    if [ -f "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1/system-services/org.freedesktop.UDisks2.service" ]; then
+        sed -i 's#/usr/libexec/udisks2/udisksd#/usr/bin/udisksd#g' "$DATA_ROOT/system/apps/dbus-daemon/resources/dbus-1/system-services/org.freedesktop.UDisks2.service"
     fi
 fi
 if [ -d "$UDISKS_ROOT/usr/share/polkit-1" ]; then
-    rm -rf "$DATA_ROOT/system/apps/udisksd/resources/polkit-1"
-    cp -a "$UDISKS_ROOT/usr/share/polkit-1" "$DATA_ROOT/system/apps/udisksd/resources/polkit-1"
+    cp -a "$UDISKS_ROOT/usr/share/polkit-1/." "$DATA_ROOT/system/apps/dbus-daemon/resources/polkit-1/"
 fi
 for provider_config in dbus-1 NetworkManager bluetooth udisks2 libblockdev/3 udev; do
     provider_root="$SERVICE_ROOT"
@@ -524,12 +579,47 @@ for provider_config in dbus-1 NetworkManager bluetooth udisks2 libblockdev/3 ude
         udev) provider_root="$UDEV_ROOT" ;;
     esac
     if [ -d "$provider_root/etc/$provider_config" ]; then
-        mkdir -p "$DATA_ROOT/system/config/$(dirname "$provider_config")"
-        cp -a "$provider_root/etc/$provider_config" "$DATA_ROOT/system/config/$provider_config"
+        mkdir -p "$DATA_ROOT/system/config/$provider_config"
+        cp -a "$provider_root/etc/$provider_config/." "$DATA_ROOT/system/config/$provider_config/"
     fi
 done
 
+# Match the working direct-root desktop's local administrator power policy.
+mkdir -p "$DATA_ROOT/system/config/polkit-1/rules.d"
+cat > "$DATA_ROOT/system/config/polkit-1/rules.d/49-luna-power.rules" <<'EOF_POWER_POLICY'
+polkit.addRule(function(action, subject) {
+    if (subject.isInGroup("wheel") &&
+        (action.id == "org.freedesktop.login1.reboot" ||
+         action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.reboot-ignore-inhibit" ||
+         action.id == "org.freedesktop.login1.power-off-ignore-inhibit")) {
+        return polkit.Result.YES;
+    }
+});
+EOF_POWER_POLICY
+
+echo "==> Verify DATA musl provider dependencies"
+[ -s "$DATA_ROOT/system/libs/libwayland-server.so.0" ] || {
+    echo "missing Niri dlopen dependency: libwayland-server.so.0" >&2
+    exit 1
+}
+mkdir -p "$WORK/runtime-closure"
+for provider in niri/niri noctalia/noctalia elogind/elogind-uaccess-command; do
+    # Translate elogind's absolute guest RUNPATH for this offline loader check.
+    LD_LIBRARY_PATH="$DATA_ROOT/system/libs/niri-compat:$MESA_DATA_LIB:$DATA_ROOT/system/libs:$DATA_ROOT/system/libs/elogind" \
+        "$DATA_ROOT/system/libs/ld-musl-x86_64.so.1" --list "$DATA_ROOT/system/apps/$provider" \
+        > "$WORK/runtime-closure/${provider%%/*}.log" 2>&1 || {
+        echo "unresolved musl provider dependencies: $provider (see $WORK/runtime-closure/${provider%%/*}.log)" >&2
+        exit 1
+    }
+done
+
 echo "==> User content -> LUNA-DATA"
+if [ -n "${LUNA_CANONICAL_INPUT_ROOT:-}" ] && [ -d "$LUNA_CANONICAL_INPUT_ROOT/desktop-bundles" ]; then
+    python3 "$REPO_ROOT/tools/install-luna-desktop-bundles.py" \
+        --source "$LUNA_CANONICAL_INPUT_ROOT/desktop-bundles" --data "$DATA_ROOT" \
+        --cli "$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna"
+fi
 bash "$REPO_ROOT/components/boot/tests/ovmf/configure-alpine-test-user.sh" "$SYS_ROOT"
 if grep -q "^seat:" "$SYS_ROOT/etc/group"; then
     sed -i -E "s/^(seat:x:[^:]*:).*/\1luna/" "$SYS_ROOT/etc/group"
@@ -543,25 +633,13 @@ else
 fi
 mkdir -p "$DATA_ROOT/users/luna/home" "$DATA_ROOT/users/luna/data" "$DATA_ROOT/users/luna/config/niri" "$DATA_ROOT/users/luna/config/noctalia"
 cp -a "$SYS_ROOT/home/luna/." "$DATA_ROOT/users/luna/home/"
+# Начальный HOME содержит реальные каталоги, на которые ведёт панель Files.
+# Это подготовка нового образа DATA, а не миграция существующих данных пользователя.
+mkdir -p "$DATA_ROOT/users/luna/home/"{Documents,Downloads,Pictures,Music}
 rm -rf "$SYS_ROOT/home/luna"
-cat > "$DATA_ROOT/users/luna/config/niri/config.kdl" <<'EOF_NIRI'
-input {
-    keyboard {
-        xkb {
-            layout "us"
-        }
-    }
-}
-cursor {
-    xcursor-theme "Adwaita"
-    xcursor-size 24
-}
-layout {}
-hotkey-overlay {
-    skip-at-startup
-}
-spawn-at-startup "/usr/bin/luna-noctalia-test"
-EOF_NIRI
+install -Dm0644 "$REPO_ROOT/resources/alpha/niri.kdl" "$DATA_ROOT/users/luna/config/niri/config.kdl"
+install -Dm0644 "$REPO_ROOT/resources/alpha/noctalia.toml" "$DATA_ROOT/users/luna/config/noctalia/02-luna-alpha.toml"
+install -Dm0644 "$REPO_ROOT/resources/alpha/luna-alpha.json" "$DATA_ROOT/users/luna/config/noctalia/palettes/luna-alpha.json"
 cat > "$DATA_ROOT/users/luna/config/noctalia/00-luna-qemu.toml" <<'EOF_NOCTALIA_QEMU'
 [system.monitor]
 enabled = false
@@ -703,8 +781,10 @@ for svc in dbus elogind luna-data luna-session; do
 done
 
 mkdir -p "$SYS_ROOT/resources/fonts" "$SYS_ROOT/resources/images"
-install -Dm0644 "$REPO_ROOT/dist/nerd-fonts-root/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" "$SYS_ROOT/resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
-install -Dm0644 "$REPO_ROOT/docs/design/visual-concepts/luna.png" "$SYS_ROOT/resources/images/luna.png"
+install -Dm0644 "$NERD_FONTS_ROOT/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" "$SYS_ROOT/resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
+install -Dm0644 "$SERVICE_ROOT/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf" "$SYS_ROOT/resources/fonts/AdwaitaSans-Regular.ttf"
+install -Dm0644 "$REPO_ROOT/docs/design/luna-alpha-20261013/assets/wallpaper-night-sky.png" "$SYS_ROOT/resources/images/wallpaper-night-sky.png"
+install -Dm0644 "$REPO_ROOT/docs/design/luna-alpha-20261013/assets/stone-reference.png" "$SYS_ROOT/resources/images/stone-reference.png"
 
 echo "==> Canonical boot artifacts -> LUNA-SYS"
 mkdir -p "$SYS_ROOT/kernels/7.2.4" "$SYS_ROOT/images" "$SYS_ROOT/config" "$SYS_ROOT/cores" "$SYS_ROOT/recovery" "$SYS_ROOT/alpine"
@@ -754,6 +834,7 @@ mkdir -p "$SYSTEM_IMAGE_ROOT/config/luna" "$SYSTEM_IMAGE_ROOT/resources"/{fonts,
 install -Dm0755 "$DEVICE_MANAGER" "$SYSTEM_IMAGE_ROOT/apps/luna-device-manager/luna-device-manager"
 install -Dm0755 "$VOLUME_MANAGER" "$SYSTEM_IMAGE_ROOT/apps/luna-volume-manager/luna-volume-manager"
 install -Dm0755 "$RUNTIME" "$SYSTEM_IMAGE_ROOT/apps/luna-system-runtime/luna-system-runtime"
+install -Dm0755 "$REPO_ROOT/target/x86_64-unknown-linux-musl/release/luna" "$SYSTEM_IMAGE_ROOT/apps/luna-cli/luna"
 install -Dm0755 "$SESSION" "$SYSTEM_IMAGE_ROOT/apps/luna-user-session/luna-user-session"
 mkdir -p "$SYSTEM_IMAGE_ROOT/apps/luna-graphical-session"
 cat > "$SYSTEM_IMAGE_ROOT/apps/luna-graphical-session/luna-graphical-session" <<'EOF_GRAPHICS'
@@ -766,15 +847,15 @@ export GTK_ICON_THEME="Adwaita"
 export XCURSOR_THEME="Adwaita"
 export XCURSOR_SIZE="24"
 export XCURSOR_PATH="/usr/share/icons:/usr/share/cursors:/usr/share/pixmaps"
-export XDG_DATA_DIRS="/usr/local/share:/usr/share"
+export XDG_DATA_DIRS="/run/luna/desktop-applications/share:/usr/local/share:/usr/share"
 export NOCTALIA_CONFIG_HOME="$HOME/.config"
 export NOCTALIA_STATE_HOME="$HOME/.local/state"
 export LIBSEAT_BACKEND="seatd"
 export FONTCONFIG_FILE="/etc/fonts/fonts.conf"
 export FONTCONFIG_PATH="/etc/fonts"
-export LD_LIBRARY_PATH="/usr/lib/niri-compat:/usr/lib:/usr/local/lib"
-export LIBGL_DRIVERS_PATH="/usr/lib/dri"
-export GBM_BACKENDS_PATH="/usr/lib/gbm"
+export LD_LIBRARY_PATH="/usr/lib/niri-compat:/usr/lib/mesa-virgl:/usr/lib:/usr/local/lib"
+export LIBGL_DRIVERS_PATH="/usr/lib/mesa-virgl/dri"
+export GBM_BACKENDS_PATH="/usr/lib/mesa-virgl/gbm"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 echo "luna-graphical-session: starting user D-Bus" >&2
@@ -808,8 +889,10 @@ exec /usr/bin/dbus-run-session -- sh -c '
     echo "luna-graphical-session: PipeWire/WirePlumber started" >&2
 
     cleanup_children() {
-        kill "$PIPEWIRE_PID" "$WIREPLUMBER_PID" 2>/dev/null || true
-        wait "$PIPEWIRE_PID" "$WIREPLUMBER_PID" 2>/dev/null || true
+        kill "$PIPEWIRE_PID" "$WIREPLUMBER_PID" "$WAYLAND_MONITOR_PID" \
+            "$NOCTALIA_MONITOR_PID" "$TAIL_PID" 2>/dev/null || true
+        wait "$PIPEWIRE_PID" "$WIREPLUMBER_PID" "$WAYLAND_MONITOR_PID" \
+            "$NOCTALIA_MONITOR_PID" "$TAIL_PID" 2>/dev/null || true
     }
     trap cleanup_children EXIT
 
@@ -830,37 +913,73 @@ exec /usr/bin/dbus-run-session -- sh -c '
             echo "luna-graphical-session: Wayland display not observed" >&2
         fi
     ) &
+    WAYLAND_MONITOR_PID=$!
     (
         touch "$XDG_RUNTIME_DIR/luna-noctalia.log"
         tail -f "$XDG_RUNTIME_DIR/luna-noctalia.log" >&2 &
         NOCTALIA_TAIL_PID=$!
+        cleanup_noctalia_log() {
+            kill "$NOCTALIA_TAIL_PID" 2>/dev/null || true
+            wait "$NOCTALIA_TAIL_PID" 2>/dev/null || true
+        }
+        trap cleanup_noctalia_log EXIT
+        trap "exit 0" HUP INT TERM
+        NOCTALIA_PID=""
         for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
-            if /usr/bin/busybox pidof noctalia >/dev/null 2>&1; then
+            if [ -s "$XDG_RUNTIME_DIR/luna-noctalia.pid" ]; then
+                read -r NOCTALIA_PID < "$XDG_RUNTIME_DIR/luna-noctalia.pid"
                 echo "luna-graphical-session: Noctalia process ready" >&2
-                kill "$NOCTALIA_TAIL_PID" 2>/dev/null || true
-                wait "$NOCTALIA_TAIL_PID" 2>/dev/null || true
-                exit 0
+                break
             fi
             sleep 0.25
         done
-        kill "$NOCTALIA_TAIL_PID" 2>/dev/null || true
-        wait "$NOCTALIA_TAIL_PID" 2>/dev/null || true
-        echo "luna-graphical-session: Noctalia process not observed" >&2
+        if [ -z "$NOCTALIA_PID" ]; then
+            echo "luna-graphical-session: Noctalia process not observed" >&2
+            exit 1
+        fi
+        observed=0
+        # kill -0 also succeeds for zombies; that is not a live shell.
+        while kill -0 "$NOCTALIA_PID" 2>/dev/null && \
+              ! grep -Eq "^State:[[:space:]]+[ZX]" "/proc/$NOCTALIA_PID/status"; do
+            sleep 0.25
+            observed=$((observed + 1))
+            if [ "$observed" -eq 80 ]; then
+                echo "luna-graphical-session: Noctalia process alive after 20s" >&2
+            fi
+        done
+        echo "luna-graphical-session: Noctalia process exited" >&2
+        tail -n 5 "$XDG_RUNTIME_DIR/luna-noctalia.log" >&2
+        if [ -r "/proc/$NOCTALIA_PID/status" ]; then
+            grep -E "^(Name|State):" "/proc/$NOCTALIA_PID/status" >&2
+        fi
+        exit 1
     ) &
+    NOCTALIA_MONITOR_PID=$!
+    touch "$XDG_RUNTIME_DIR/luna-niri.log"
     /usr/bin/niri --session >>"$XDG_RUNTIME_DIR/luna-niri.log" 2>&1 &
     NIRI_PID=$!
     tail -f "$XDG_RUNTIME_DIR/luna-niri.log" >&2 &
     TAIL_PID=$!
+    set +e
     wait "$NIRI_PID"
     NIRI_STATUS=$?
+    set -e
     kill "$TAIL_PID" 2>/dev/null || true
     wait "$TAIL_PID" 2>/dev/null || true
+    if [ "$NIRI_STATUS" -ne 0 ]; then
+        echo "luna-graphical-session: Niri exited with status $NIRI_STATUS" >&2
+        # Drain diagnostics before System Runtime removes the ended session
+        # runtime directory. tail -f may still be sleeping when Niri fails.
+        tail -n 80 "$XDG_RUNTIME_DIR/luna-niri.log" >&2
+    fi
     exit "$NIRI_STATUS"
 '
 EOF_GRAPHICS
 chmod 0755 "$SYSTEM_IMAGE_ROOT/apps/luna-graphical-session/luna-graphical-session"
-install -Dm0644 "$REPO_ROOT/dist/nerd-fonts-root/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" "$SYSTEM_IMAGE_ROOT/resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
-install -Dm0644 "$REPO_ROOT/docs/design/visual-concepts/luna.png" "$SYSTEM_IMAGE_ROOT/resources/images/luna.png"
+install -Dm0644 "$NERD_FONTS_ROOT/usr/share/fonts/truetype/luna/JetBrainsMonoNerdFontMono-Regular.ttf" "$SYSTEM_IMAGE_ROOT/resources/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
+install -Dm0644 "$SERVICE_ROOT/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf" "$SYSTEM_IMAGE_ROOT/resources/fonts/AdwaitaSans-Regular.ttf"
+install -Dm0644 "$REPO_ROOT/docs/design/luna-alpha-20261013/assets/wallpaper-night-sky.png" "$SYSTEM_IMAGE_ROOT/resources/images/wallpaper-night-sky.png"
+install -Dm0644 "$REPO_ROOT/docs/design/luna-alpha-20261013/assets/stone-reference.png" "$SYSTEM_IMAGE_ROOT/resources/images/stone-reference.png"
 
 cat > "$SYSTEM_IMAGE_ROOT/config/desktop.toml" <<EOF_DESKTOP
 [desktop]
@@ -872,35 +991,32 @@ terminal = "ghostty"
 entry = "/usr/bin/luna-user-session --handoff"
 EOF_DESKTOP
 
-cat > "$SYSTEM_IMAGE_ROOT/config/luna/niri-config.kdl" <<'EOF_NIRI_CONFIG'
-input {
-    keyboard {
-        xkb {
-            layout "us"
-        }
-    }
-}
-layout {
-    gaps 8
-    center-focused-column "never"
-}
-binds {
-    Mod+Q { close-window; }
-    Mod+Shift+E repeat=false { quit skip-confirmation=true; }
-}
-prefer-no-csd
-EOF_NIRI_CONFIG
+install -Dm0644 "$REPO_ROOT/resources/alpha/niri.kdl" "$SYSTEM_IMAGE_ROOT/config/luna/niri-config.kdl"
 
 cat > "$SYSTEM_IMAGE_ROOT/config/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
+polkitd:x:994:994:PolicyKit:/nonexistent:/bin/false
 messagebus:x:995:995:System Message Bus:/nonexistent:/usr/sbin/nologin
+rtkit:x:996:996:RealtimeKit:/nonexistent:/bin/false
 luna:x:1000:1000:Luna User:/home/luna:/bin/sh
 EOF_PASSWD
 
 cat > "$SYSTEM_IMAGE_ROOT/config/group" <<'EOF_GROUP'
 root:x:0:
+tty:x:5:
+disk:x:6:
+lp:x:7:
+wheel:x:10:luna
+uucp:x:14:
+audio:x:18:luna
+cdrom:x:19:
+dialout:x:20:
+video:x:27:luna
+kvm:x:34:
 shadow:x:42:
+polkitd:x:994:
 messagebus:x:995:
+rtkit:x:996:
 seat:x:997:luna
 input:x:998:luna
 luna:x:1000:
@@ -950,9 +1066,9 @@ compatible = ["$INIT_VERSION"]
 EOF_IMAGE_MANIFEST
 
 rm -rf "$RECOVERY_DATA_ROOT"
-mkdir -p "$RECOVERY_DATA_ROOT/system"/{apps,drivers,firmware,libs,config,resources}
+mkdir -p "$RECOVERY_DATA_ROOT/system"/{apps,drivers,firmware,libs,config,resources,state,volumes}
 mkdir -p "$RECOVERY_DATA_ROOT/users"
-mkdir -p "$RECOVERY_DATA_ROOT/cach"
+mkdir -p "$RECOVERY_DATA_ROOT/cache"
 mkdir -p "$RECOVERY_DATA_ROOT/system/resources"/{fonts,icons,themes,cursors,sounds,locales,translations}
 mkdir -p "$RECOVERY_DATA_ROOT/system/config/auth"
 mkdir -p "$RECOVERY_DATA_ROOT/system/apps"/{recovery-tools,data-discovery,system-diagnostics,system-repair}
@@ -1028,7 +1144,14 @@ EOF_RECOVERY_MANIFEST
 
 EFI_SIZE=128
 SYS_SIZE=1024
-DATA_SIZE=1024
+# Registered application payloads are part of DATA. mkfs.btrfs --rootdir may
+# extend an undersized regular file; a fixed 1GiB partition would then truncate
+# that filesystem when copying it into the GPT disk. Reserve measured content,
+# 50% growth/metadata headroom and 256MiB, rounded to 256MiB (minimum 1GiB).
+DATA_BYTES="$(du -sb --count-links "$DATA_ROOT" | cut -f1)"
+DATA_MIB=$(((DATA_BYTES + 1048575) / 1048576))
+DATA_SIZE=$((((DATA_MIB + (DATA_MIB + 1) / 2 + 256 + 255) / 256) * 256))
+[ "$DATA_SIZE" -ge 1024 ] || DATA_SIZE=1024
 SWAP_SIZE=256
 START=2048
 EFI_SECTORS=$((EFI_SIZE * 2048))
@@ -1050,10 +1173,13 @@ preferred_disk_guid = "%s"
 preferred_partition_guid = "%s"
 ' "$DISK_GUID" "$DATA_GUID" > "$SYS_ROOT/config/luna-data.toml"
 
-rm -rf "$DIST/luna-sys" "$DIST/luna-data"
-cp -a "$SYS_ROOT" "$DIST/luna-sys"
-cp -a "$DATA_ROOT" "$DIST/luna-data"
-cp "$WORK/luna-$VERSION.squashfs" "$DIST/luna-$VERSION.squashfs"
+rm -rf "$OUTPUT_ROOT/luna-sys" "$OUTPUT_ROOT/luna-data"
+# Exporting duplicate directory trees is only needed for explicit debugging.
+if [ "${LUNA_CANONICAL_EXPORT_TREES:-0}" = 1 ]; then
+    cp -a "$SYS_ROOT" "$OUTPUT_ROOT/luna-sys"
+    cp -a "$DATA_ROOT" "$OUTPUT_ROOT/luna-data"
+fi
+cp "$WORK/luna-$VERSION.squashfs" "$OUTPUT_ROOT/luna-$VERSION.squashfs"
 
 truncate -s "$IMAGE_MIB"M "$OUT"
 sgdisk --zap-all "$OUT" >/dev/null
@@ -1068,20 +1194,30 @@ mmd -i "$PARTS/efi.fs" ::/EFI/BOOT
 mcopy -i "$PARTS/efi.fs" "$EFI" ::/EFI/LUNA/LUNA-BOOT.EFI
 mcopy -i "$PARTS/efi.fs" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
 
-export SYS_ROOT DATA_ROOT PARTS SYS_SIZE DATA_SIZE SWAP_SIZE MKFS_BTRFS
+# nftw uses libc-internal stat and otherwise bypasses fakeroot ownership.
+NFTW_SHIM="$WORK/fakeroot-nftw.so"
+cc -shared -fPIC -O2 -Wall -Wextra -Werror "$REPO_ROOT/tools/fixtures/fakeroot-nftw.c" -ldl -o "$NFTW_SHIM"
+export SYS_ROOT DATA_ROOT PARTS SYS_SIZE DATA_SIZE SWAP_SIZE MKFS_BTRFS NFTW_SHIM
 fakeroot bash -c '
 set -e
 chown -R 0:0 "$SYS_ROOT"
 chown -R 0:0 "$DATA_ROOT/system"
+chown 0:0 "$DATA_ROOT" "$DATA_ROOT/users"
 chown -R 1000:100 "$DATA_ROOT/users/luna"
+chmod 0755 "$DATA_ROOT" "$DATA_ROOT/system" "$DATA_ROOT/system/apps" "$DATA_ROOT/system/state" "$DATA_ROOT/system/config" "$DATA_ROOT/users"
 truncate -s "${SYS_SIZE}M" "$PARTS/luna-sys.fs"
 mkfs.ext4 -q -F -L LUNA-SYS -d "$SYS_ROOT" "$PARTS/luna-sys.fs" >/dev/null
 truncate -s "${DATA_SIZE}M" "$PARTS/luna-data.fs"
-"$MKFS_BTRFS" -q -f -L LUNA-DATA --rootdir "$DATA_ROOT" "$PARTS/luna-data.fs" >/dev/null
+LD_PRELOAD="$NFTW_SHIM${LD_PRELOAD:+:$LD_PRELOAD}" "$MKFS_BTRFS" -q -f -L LUNA-DATA --rootdir "$DATA_ROOT" "$PARTS/luna-data.fs" >/dev/null
+[ "$(stat -c %s "$PARTS/luna-data.fs")" -eq "$((DATA_SIZE * 1048576))" ] || {
+    echo "mkfs.btrfs changed DATA size; refusing to copy beyond its GPT partition" >&2
+    exit 1
+}
 fallocate -l "${SWAP_SIZE}M" "$PARTS/swap.fs"
 chmod 0600 "$PARTS/swap.fs"
 mkswap -L SWAP "$PARTS/swap.fs" >/dev/null
 ' bash
+python3 "$REPO_ROOT/tools/test-canonical-luna-data-ownership.py" "$PARTS/luna-data.fs"
 
 dd if="$PARTS/efi.fs" of="$OUT" bs=512 seek="$START" conv=notrunc status=none
 dd if="$PARTS/luna-sys.fs" of="$OUT" bs=512 seek="$SYS_START" conv=notrunc status=none
@@ -1097,9 +1233,9 @@ echo "==> Verify canonical disk layout"
 [ "$(blkid -p -O $((DATA_START * 512)) -s TYPE -o value "$OUT")" = btrfs ]
 [ "$(blkid -p -O $((SWAP_START * 512)) -s TYPE -o value "$OUT")" = swap ]
 
-ln -sfn "luna-$VERSION.img" "$DIST/luna-pc.img"
-sha256sum "$OUT" > "$DIST/luna-$VERSION.img.sha256"
-cat > "$DIST/luna-$VERSION.img.BUILD-INFO" <<EOF_INFO
+ln -sfn "luna-$VERSION.img" "$OUTPUT_ROOT/luna-pc.img"
+sha256sum "$OUT" > "$OUTPUT_ROOT/luna-$VERSION.img.sha256"
+cat > "$OUTPUT_ROOT/luna-$VERSION.img.BUILD-INFO" <<EOF_INFO
 luna_disk_image=canonical
 version=$VERSION
 architecture=x86_64
@@ -1115,4 +1251,8 @@ kernel=LUNA-SYS/kernels/7.2.4/bzImage
 EOF_INFO
 
 echo "Built canonical Luna disk image: $OUT"
+if [ -n "${LUNA_CANONICAL_INPUT_ROOT:-}" ]; then
+    cp "$LUNA_CANONICAL_INPUT_ROOT/inputs.lock.json" "$OUT.inputs.lock.json"
+    printf 'input_lock_sha256=%s\n' "$(sha256sum "$OUT.inputs.lock.json" | cut -d' ' -f1)" >> "$OUT.BUILD-INFO"
+fi
 

@@ -131,6 +131,70 @@ impl BootParams {
         Ok(())
     }
 
+    /// Preserve the currently scanned-out firmware framebuffer for Linux.
+    /// Returns its page-aligned reservation for the final E820 map.
+    pub fn preserve_efi_framebuffer(&mut self) -> BootResult<Option<(u64, usize)>> {
+        use uefi::boot::{self, open_protocol_exclusive};
+        use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
+        let Ok(gop_handle) = boot::get_handle_for_protocol::<GraphicsOutput>() else {
+            return Ok(None);
+        };
+        let mut gop = open_protocol_exclusive::<GraphicsOutput>(gop_handle)
+            .map_err(|_| crate::error::BootError::Unsupported("graphics output unavailable"))?;
+        let mode = gop.current_mode_info();
+        let (width, height) = mode.resolution();
+        let stride_pixels = mode.stride();
+        let pixel_format = mode.pixel_format();
+        let bytes_per_pixel = match pixel_format {
+            PixelFormat::Rgb => 4usize,
+            PixelFormat::Bgr => 4usize,
+            _ => return Ok(None),
+        };
+        let stride = stride_pixels.checked_mul(bytes_per_pixel).ok_or(
+            crate::error::BootError::Unsupported("EFI framebuffer stride overflow"),
+        )?;
+        let (
+            red_pos,
+            red_size,
+            green_pos,
+            green_size,
+            blue_pos,
+            blue_size,
+            reserved_pos,
+            reserved_size,
+        ) = match pixel_format {
+            PixelFormat::Rgb => (0, 8, 8, 8, 16, 8, 24, 8),
+            PixelFormat::Bgr => (16, 8, 8, 8, 0, 8, 24, 8),
+            _ => return Ok(None),
+        };
+        let mut fb = gop.frame_buffer();
+        let base = fb.as_mut_ptr() as u64;
+        let size = fb.size();
+        self.set_efi_framebuffer(
+            base,
+            size,
+            width,
+            height,
+            stride,
+            red_pos,
+            red_size,
+            green_pos,
+            green_size,
+            blue_pos,
+            blue_size,
+            reserved_pos,
+            reserved_size,
+        )?;
+        let page_size = boot::PAGE_SIZE as u64;
+        let start = base & !(page_size - 1);
+        let end = base
+            .checked_add(size as u64)
+            .ok_or(BootError::InvalidKernel)?
+            .div_ceil(page_size)
+            * page_size;
+        Ok(Some((start, ((end - start) / page_size) as usize)))
+    }
+
     pub fn set_cmdline(&mut self, address: u64) -> BootResult<()> {
         if address > LOW_MEMORY_CMDLINE_MAX {
             return Err(BootError::Unsupported(

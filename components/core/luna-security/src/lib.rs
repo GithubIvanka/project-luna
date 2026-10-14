@@ -26,6 +26,12 @@ pub enum Resource {
         application: BundleId,
     },
     Application(BundleId),
+    /// Trust in exact Bundle content for an operation; never an execution grant.
+    BundleTrust {
+        application: BundleId,
+        content_identity: [u8; 32],
+        scope: BundleTrustScope,
+    },
     FilesystemPath(String),
     Capability(String),
     Runtime(RuntimeKind),
@@ -38,6 +44,12 @@ pub enum Resource {
     VolumeSubtree(VolumePath),
     Device(String),
     System,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum BundleTrustScope {
+    Install,
+    Launch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]

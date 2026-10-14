@@ -10,24 +10,21 @@ use std::str::FromStr;
 pub enum RuntimeKind {
     /// Native Luna userspace. The system libc is musl.
     #[default]
-    Luna,
+    Musl,
     /// GNU libc compatibility runtime for applications that require glibc.
     Glibc,
-    /// Runtime supplied privately by the Bundle itself.
-    Bundle,
 }
 
 impl RuntimeKind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Luna => "luna",
+            Self::Musl => "musl",
             Self::Glibc => "glibc",
-            Self::Bundle => "bundle",
         }
     }
 
     pub const fn is_native(self) -> bool {
-        matches!(self, Self::Luna)
+        matches!(self, Self::Musl)
     }
 }
 
@@ -53,9 +50,8 @@ impl FromStr for RuntimeKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "luna" => Ok(Self::Luna),
+            "musl" => Ok(Self::Musl),
             "glibc" => Ok(Self::Glibc),
-            "bundle" => Ok(Self::Bundle),
             _ => Err(ParseRuntimeKindError),
         }
     }
@@ -71,16 +67,12 @@ impl RuntimeSpec {
         Self { kind }
     }
 
-    pub const fn luna() -> Self {
-        Self::new(RuntimeKind::Luna)
+    pub const fn musl() -> Self {
+        Self::new(RuntimeKind::Musl)
     }
 
     pub const fn glibc() -> Self {
         Self::new(RuntimeKind::Glibc)
-    }
-
-    pub const fn bundle() -> Self {
-        Self::new(RuntimeKind::Bundle)
     }
 
     pub const fn kind(self) -> RuntimeKind {
@@ -90,7 +82,7 @@ impl RuntimeSpec {
 
 impl Default for RuntimeSpec {
     fn default() -> Self {
-        Self::luna()
+        Self::musl()
     }
 }
 
@@ -107,14 +99,13 @@ mod tests {
 
     #[test]
     fn runtime_kind_has_stable_wire_names() {
-        assert_eq!(RuntimeKind::Luna.as_str(), "luna");
+        assert_eq!(RuntimeKind::Musl.as_str(), "musl");
         assert_eq!(RuntimeKind::Glibc.as_str(), "glibc");
-        assert_eq!(RuntimeKind::Bundle.as_str(), "bundle");
     }
 
     #[test]
     fn runtime_kind_round_trips_from_str() {
-        for kind in [RuntimeKind::Luna, RuntimeKind::Glibc, RuntimeKind::Bundle] {
+        for kind in [RuntimeKind::Musl, RuntimeKind::Glibc] {
             assert_eq!(RuntimeKind::from_str(kind.as_str()).unwrap(), kind);
         }
         assert!(RuntimeKind::from_str("systemd").is_err());
@@ -122,8 +113,8 @@ mod tests {
 
     #[test]
     fn runtime_spec_defaults_to_native_luna() {
-        assert_eq!(RuntimeSpec::default().kind(), RuntimeKind::Luna);
-        assert!(RuntimeKind::Luna.is_native());
+        assert_eq!(RuntimeSpec::default().kind(), RuntimeKind::Musl);
+        assert!(RuntimeKind::Musl.is_native());
         assert!(!RuntimeKind::Glibc.is_native());
     }
 }

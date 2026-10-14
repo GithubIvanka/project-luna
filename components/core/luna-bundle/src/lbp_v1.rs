@@ -144,6 +144,11 @@ impl LbpArchive {
             if !matches!(compression, COMPRESSION_NONE | COMPRESSION_ZSTD) {
                 return Err(LbpError::UnsupportedCompression(compression));
             }
+            if matches!(kind, SectionKind::Manifest | SectionKind::Signature)
+                && compression != COMPRESSION_NONE
+            {
+                return Err(LbpError::UnsupportedCompression(compression));
+            }
             validate_range(offset, compressed_length, bytes.len())?;
             if offset < table_end as u64 {
                 return Err(LbpError::InvalidSectionTable);
@@ -228,8 +233,16 @@ impl LbpArchive {
     }
 
     pub fn extract_payload(&self, destination: impl AsRef<Path>) -> Result<(), LbpError> {
+        use std::os::unix::fs::PermissionsExt;
         let destination = destination.as_ref();
         fs::create_dir_all(destination)?;
+        if !fs::symlink_metadata(destination)?.is_dir()
+            || fs::read_dir(destination)?.next().is_some()
+        {
+            return Err(LbpError::PayloadFormat(
+                "extraction requires an empty real directory".into(),
+            ));
+        }
         let mut archive = Archive::new(Cursor::new(self.payload_bytes()?));
         let mut seen = BTreeSet::new();
 
@@ -246,9 +259,134 @@ impl LbpArchive {
                     return Err(LbpError::UnsupportedEntry(path.display().to_string()));
                 }
             }
-            entry.unpack_in(destination).map_err(payload_error)?;
+            // TAR's implicit directories inherit the caller's umask. Create
+            // these ourselves with deterministic, safe modes instead.
+            let mut parent = destination.to_path_buf();
+            for component in path.parent().into_iter().flat_map(Path::components) {
+                parent.push(component);
+                match fs::create_dir(&parent) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error.into()),
+                }
+                if !fs::symlink_metadata(&parent)?.is_dir() {
+                    return Err(LbpError::UnsupportedEntry(parent.display().to_string()));
+                }
+                fs::set_permissions(&parent, fs::Permissions::from_mode(0o755))?;
+            }
+            if !entry.unpack_in(destination).map_err(payload_error)? {
+                return Err(LbpError::PayloadPath(path));
+            }
+            if entry.header().entry_type() == EntryType::Directory {
+                fs::set_permissions(destination.join(path), fs::Permissions::from_mode(0o755))?;
+            }
         }
         Ok(())
+    }
+
+    /// Compare the complete extracted tree with the verified transport payload.
+    /// Implicit parent directories are allowed; extra files, links, special
+    /// entries, changed bytes and changed modes are rejected.
+    pub fn verify_extracted_payload(
+        &self,
+        destination: impl AsRef<Path>,
+        read_only: bool,
+    ) -> Result<(), LbpError> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let destination = destination.as_ref();
+        let root_metadata = fs::symlink_metadata(destination)?;
+        if !root_metadata.is_dir() {
+            return Err(LbpError::UnsupportedEntry(
+                destination.display().to_string(),
+            ));
+        }
+        let mut allowed = BTreeSet::new();
+        let mut archive = Archive::new(Cursor::new(self.payload_bytes()?));
+        for entry in archive.entries().map_err(payload_error)? {
+            let mut entry = entry.map_err(payload_error)?;
+            let relative = entry.path().map_err(payload_error)?.into_owned();
+            for parent in relative.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+                allowed.insert(parent.to_path_buf());
+                let metadata = fs::symlink_metadata(destination.join(parent))?;
+                if parent != relative && !metadata.is_dir() {
+                    return Err(LbpError::UnsupportedEntry(parent.display().to_string()));
+                }
+            }
+            let path = destination.join(&relative);
+            let metadata = fs::symlink_metadata(&path)?;
+            let expected_mode = entry.header().mode().map_err(payload_error)?;
+            let expected_mode = if read_only {
+                expected_mode & !0o222
+            } else {
+                expected_mode
+            };
+            if metadata.permissions().mode() & 0o7777 != expected_mode {
+                return Err(LbpError::PayloadFormat(format!(
+                    "changed payload mode: {}",
+                    relative.display()
+                )));
+            }
+            if entry.header().entry_type() == EntryType::Directory {
+                if !metadata.is_dir() {
+                    return Err(LbpError::UnsupportedEntry(relative.display().to_string()));
+                }
+            } else {
+                if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() != entry.size() {
+                    return Err(LbpError::PayloadFormat(format!(
+                        "changed payload file: {}",
+                        relative.display()
+                    )));
+                }
+                let mut expected = Hasher::new();
+                let mut actual = Hasher::new();
+                io::copy(&mut entry, &mut expected)?;
+                io::copy(&mut File::open(path)?, &mut actual)?;
+                if expected.finalize() != actual.finalize() {
+                    return Err(LbpError::HashMismatch);
+                }
+            }
+        }
+        fn walk(
+            root: &Path,
+            relative: &Path,
+            allowed: &BTreeSet<PathBuf>,
+            read_only: bool,
+            owner: u32,
+        ) -> Result<(), LbpError> {
+            let metadata = fs::symlink_metadata(root.join(relative))?;
+            let mode = metadata.permissions().mode() & 0o7777;
+            let safe_mode = if read_only {
+                mode == 0o555
+            } else {
+                matches!(mode, 0o700 | 0o750 | 0o755)
+            };
+            if !safe_mode || metadata.uid() != owner {
+                return Err(LbpError::PayloadFormat(
+                    "changed payload directory mode or owner".into(),
+                ));
+            }
+            for entry in fs::read_dir(root.join(relative))? {
+                let entry = entry?;
+                let path = relative.join(entry.file_name());
+                let kind = entry.file_type()?;
+                if !allowed.contains(&path) || (!kind.is_file() && !kind.is_dir()) {
+                    return Err(LbpError::UnsupportedEntry(path.display().to_string()));
+                }
+                if kind.is_dir() {
+                    walk(root, &path, allowed, read_only, owner)?;
+                } else if entry.metadata()?.uid() != owner {
+                    return Err(LbpError::PayloadFormat("changed payload file owner".into()));
+                }
+            }
+            Ok(())
+        }
+        walk(
+            destination,
+            Path::new(""),
+            &allowed,
+            read_only,
+            root_metadata.uid(),
+        )
     }
 }
 
@@ -258,11 +396,11 @@ pub struct LbpManifest {
     pub bundle: BundleManifestInfo,
     pub platform: PlatformInfo,
     pub entry: Option<EntryPoint>,
-    #[serde(default)]
+    #[serde(default, alias = "dependency")]
     pub dependencies: Vec<Dependency>,
     #[serde(default)]
     pub capabilities: Capabilities,
-    #[serde(default)]
+    #[serde(default, alias = "mapping")]
     pub mappings: Vec<MappingDeclaration>,
     #[serde(default)]
     pub metadata: Metadata,
@@ -287,6 +425,44 @@ pub struct PlatformInfo {
 pub struct EntryPoint {
     pub exec: String,
     pub logical: Option<String>,
+    /// Неизменяемые аргументы по умолчанию перед аргументами вызова.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Отдельный режим открытия одного выбранного файла только для чтения.
+    /// Объявление запрашивает user.selected-file; разрешение выдаёт политика ОС.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_open: Option<FileOpenEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileOpenEntry {
+    pub mime_types: Vec<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl FileOpenEntry {
+    pub fn validate(&self) -> Result<(), LbpError> {
+        let mut unique = std::collections::BTreeSet::new();
+        if self.mime_types.is_empty()
+            || self.mime_types.len() > 16
+            || self.mime_types.iter().any(|value| !valid_mime_type(value) || !unique.insert(value))
+            || self.args.len() > 64
+            || self.args.iter().any(|arg| arg.len() > 4096 || arg.contains('\0'))
+        {
+            return Err(LbpError::ManifestFormat("invalid entry.file_open".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Ограниченная грамматика точного MIME без параметров, шаблонов и управляющих символов.
+pub fn valid_mime_type(value: &str) -> bool {
+    if value.len() > 127 { return false; }
+    let parts = value.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && parts.iter().all(|part| part.bytes().next().is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && part.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".+-".contains(&byte)))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -330,6 +506,21 @@ impl LbpManifest {
     }
 
     pub fn validate(&self) -> Result<(), LbpError> {
+        if let Some(file_open) = self.entry.as_ref().and_then(|entry| entry.file_open.as_ref()) {
+            file_open.validate()?;
+            if self.entry.as_ref().expect("file_open belongs to entry").args.len() + file_open.args.len() + 1 > 64 {
+                return Err(LbpError::ManifestFormat("combined file-open arguments exceed limit".into()));
+            }
+        }
+        if self.entry.as_ref().is_some_and(|entry| {
+            entry.args.len() > 64
+                || entry
+                    .args
+                    .iter()
+                    .any(|arg| arg.len() > 4096 || arg.contains('\0'))
+        }) {
+            return Err(LbpError::ManifestFormat("invalid entry.args".into()));
+        }
         if self.format != FORMAT_VERSION {
             return Err(LbpError::UnsupportedVersion(self.format));
         }
@@ -372,6 +563,15 @@ impl LbpManifest {
 
         let mut logicals = BTreeSet::new();
         for mapping in &self.mappings {
+            if mapping
+                .access
+                .iter()
+                .any(|access| !matches!(access.as_str(), "read" | "write" | "execute"))
+            {
+                return Err(LbpError::ManifestFormat(
+                    "unsupported mapping access".into(),
+                ));
+            }
             validate_logical_path(&mapping.logical)?;
             if !mapping.source.starts_with("@dep:") {
                 validate_bundle_relative_path(Path::new(&mapping.source))?;
@@ -561,7 +761,7 @@ pub fn build_from_directory(
     Ok(output)
 }
 
-fn build_deterministic_tar(
+pub(crate) fn build_deterministic_tar(
     manifest: &LbpManifest,
     source_root: &Path,
 ) -> Result<Vec<u8>, LbpError> {
@@ -581,6 +781,7 @@ fn build_deterministic_tar(
     for relative in sources {
         validate_bundle_relative_path(&relative)?;
         let full = source_root.join(&relative);
+        validate_source_ancestors(source_root, &relative)?;
         let metadata = fs::symlink_metadata(&full)?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(LbpError::UnsupportedEntry(relative.display().to_string()));
@@ -588,32 +789,58 @@ fn build_deterministic_tar(
 
         let mut data = Vec::new();
         File::open(&full)?.read_to_end(&mut data)?;
+        if data.len() as u64 != metadata.len() {
+            return Err(LbpError::PayloadFormat(
+                "source size changed while packaging".into(),
+            ));
+        }
 
-        let mut header = Header::new_gnu();
-        header.set_path(&relative).map_err(payload_error)?;
-        header.set_size(data.len() as u64);
-        header.set_uid(0);
-        header.set_gid(0);
-        header.set_mtime(0);
-        #[cfg(unix)]
-        header.set_mode(
-            if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 != 0 {
-                0o755
-            } else {
-                0o644
-            },
-        );
-        #[cfg(not(unix))]
-        header.set_mode(0o644);
-        header.set_username("").map_err(payload_error)?;
-        header.set_groupname("").map_err(payload_error)?;
-        header.set_cksum();
-        builder
-            .append(&header, Cursor::new(data))
-            .map_err(payload_error)?;
+        append_canonical_file(&mut builder, &relative, &metadata, Cursor::new(data))?;
     }
     builder.finish().map_err(payload_error)?;
     builder.into_inner().map_err(payload_error)
+}
+
+/// Shared encoding keeps transport and installed directory identities equal.
+pub(crate) fn append_canonical_file<W: io::Write>(
+    builder: &mut Builder<W>,
+    relative: &Path,
+    metadata: &fs::Metadata,
+    data: impl Read,
+) -> Result<(), LbpError> {
+    validate_bundle_relative_path(relative)?;
+    let mut header = Header::new_gnu();
+    header.set_path(relative).map_err(payload_error)?;
+    header.set_size(metadata.len());
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    #[cfg(unix)]
+    header.set_mode(
+        if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 != 0 {
+            0o755
+        } else {
+            0o644
+        },
+    );
+    #[cfg(not(unix))]
+    header.set_mode(0o644);
+    header.set_username("").map_err(payload_error)?;
+    header.set_groupname("").map_err(payload_error)?;
+    header.set_cksum();
+    // tar::Builder trusts the header and does not enforce the byte count.
+    // Limit actual reads and reject short streams, including truncate/regrow
+    // races which a second stat alone would not detect.
+    let mut bounded = data.take(metadata.len());
+    builder
+        .append(&header, &mut bounded)
+        .map_err(payload_error)?;
+    if bounded.limit() != 0 {
+        return Err(LbpError::PayloadFormat(
+            "payload size changed while reading".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn collect_source_files(
@@ -623,6 +850,7 @@ fn collect_source_files(
 ) -> Result<(), LbpError> {
     validate_bundle_relative_path(relative)?;
     let full = root.join(relative);
+    validate_source_ancestors(root, relative)?;
     let metadata = fs::symlink_metadata(&full)?;
     if metadata.file_type().is_symlink() {
         return Err(LbpError::UnsupportedEntry(relative.display().to_string()));
@@ -682,12 +910,20 @@ fn validate_payload(bytes: &[u8]) -> Result<(), LbpError> {
             EntryType::Regular | EntryType::Directory => {}
             _ => return Err(LbpError::UnsupportedEntry(path.display().to_string())),
         }
+        let mode = entry.header().mode().map_err(payload_error)?;
+        if !matches!(mode, 0o644 | 0o755)
+            || (entry.header().entry_type() == EntryType::Directory && mode != 0o755)
+        {
+            return Err(LbpError::PayloadFormat(
+                "unsafe or non-canonical payload mode".into(),
+            ));
+        }
     }
     Ok(())
 }
 
 fn validate_payload_path(path: &Path) -> Result<(), LbpError> {
-    if path.is_absolute() {
+    if path.is_absolute() || path.as_os_str().is_empty() || has_navigation(path) {
         return Err(LbpError::PayloadPath(path.to_path_buf()));
     }
     for component in path.components() {
@@ -706,7 +942,7 @@ fn validate_payload_path(path: &Path) -> Result<(), LbpError> {
 
 fn validate_logical_path(value: &str) -> Result<(), LbpError> {
     let path = Path::new(value);
-    if !path.is_absolute() || value.ends_with('/') {
+    if !path.is_absolute() || value.ends_with('/') || has_navigation(path) {
         return Err(LbpError::ManifestFormat(
             "logical path must be absolute and must not end with /".into(),
         ));
@@ -727,7 +963,7 @@ fn validate_logical_path(value: &str) -> Result<(), LbpError> {
 }
 
 fn validate_bundle_relative_path(path: &Path) -> Result<(), LbpError> {
-    if path.as_os_str().is_empty() || path.is_absolute() {
+    if path.as_os_str().is_empty() || path.is_absolute() || has_navigation(path) {
         return Err(LbpError::ManifestFormat(format!(
             "invalid bundle-relative path: {}",
             path.display()
@@ -745,6 +981,26 @@ fn validate_bundle_relative_path(path: &Path) -> Result<(), LbpError> {
                 "unsafe bundle-relative path: {}",
                 path.display()
             )));
+        }
+    }
+    Ok(())
+}
+
+fn has_navigation(path: &Path) -> bool {
+    path.to_string_lossy()
+        .split('/')
+        .any(|part| matches!(part, "." | ".."))
+}
+
+fn validate_source_ancestors(root: &Path, relative: &Path) -> Result<(), LbpError> {
+    if !fs::symlink_metadata(root)?.is_dir() {
+        return Err(LbpError::UnsupportedEntry(root.display().to_string()));
+    }
+    let mut path = root.to_path_buf();
+    for component in relative.components() {
+        path.push(component);
+        if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            return Err(LbpError::UnsupportedEntry(path.display().to_string()));
         }
     }
     Ok(())
@@ -854,7 +1110,16 @@ fn decode_section(bytes: &[u8], section: &SectionInfo) -> Result<Vec<u8>, LbpErr
 
     let decoded = match section.compression {
         COMPRESSION_NONE => stored.to_vec(),
-        COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(stored)).map_err(payload_error)?,
+        COMPRESSION_ZSTD => {
+            let decoder =
+                zstd::stream::read::Decoder::new(Cursor::new(stored)).map_err(payload_error)?;
+            let mut decoded = Vec::new();
+            decoder
+                .take(section.uncompressed_length + 1)
+                .read_to_end(&mut decoded)
+                .map_err(payload_error)?;
+            decoded
+        }
         other => return Err(LbpError::UnsupportedCompression(other)),
     };
     if decoded.len() as u64 != section.uncompressed_length {
@@ -929,6 +1194,8 @@ mod tests {
             entry: Some(EntryPoint {
                 exec: "bin/app".into(),
                 logical: Some("/usr/bin/app".into()),
+                args: Vec::new(),
+                file_open: None,
             }),
             dependencies: Vec::new(),
             capabilities: Capabilities::default(),
@@ -942,6 +1209,28 @@ mod tests {
         fs::create_dir_all(root.join("bin")).expect("create bin");
         fs::write(root.join("bin/app"), b"#!/bin/sh\necho luna\n").expect("write fixture");
         root
+    }
+
+    #[test]
+    fn canonical_tar_rejects_short_stream_and_bounds_extra_bytes() {
+        let root = fixture();
+        let metadata = fs::metadata(root.join("bin/app")).unwrap();
+        let mut builder = Builder::new(Vec::new());
+        assert!(
+            append_canonical_file(
+                &mut builder,
+                Path::new("bin/app"),
+                &metadata,
+                Cursor::new(b"short")
+            )
+            .is_err()
+        );
+        let bytes = vec![b'x'; metadata.len() as usize + 100];
+        let mut input = Cursor::new(bytes);
+        let mut builder = Builder::new(Vec::new());
+        append_canonical_file(&mut builder, Path::new("bin/app"), &metadata, &mut input).unwrap();
+        assert_eq!(input.position(), metadata.len());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

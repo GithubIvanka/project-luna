@@ -17,6 +17,36 @@ impl UserCredentials {
         }
     }
 
+    /// Resolve supplementary groups in the parent, before fork and chroot.
+    pub fn supplementary_groups(&self) -> io::Result<Vec<u32>> {
+        let name = CString::new(self.username.as_str())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "username contains NUL"))?;
+        let mut count = 16;
+        let mut groups = vec![0; count as usize];
+        // SAFETY: buffers have count elements; libc reports the required size.
+        if unsafe { libc::getgrouplist(name.as_ptr(), self.gid, groups.as_mut_ptr(), &mut count) } < 0 {
+            if !(1..=65536).contains(&count) {
+                return Err(io::Error::other("invalid supplementary group count"));
+            }
+            groups.resize(count as usize, 0);
+            if unsafe { libc::getgrouplist(name.as_ptr(), self.gid, groups.as_mut_ptr(), &mut count) } < 0 {
+                return Err(io::Error::other("cannot resolve supplementary groups"));
+            }
+        }
+        groups.truncate(count as usize);
+        Ok(groups)
+    }
+    /// Only credential syscalls in the child; no NSS lookup inside the app root.
+    pub fn apply_with_groups(&self, groups: &[u32]) -> io::Result<()> {
+        // SAFETY: group slice is valid and the privileged child owns its credentials.
+        if unsafe { libc::setgroups(groups.len(), groups.as_ptr()) } != 0
+            || unsafe { libc::setresgid(self.gid, self.gid, self.gid) } != 0
+            || unsafe { libc::setresuid(self.uid, self.uid, self.uid) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     /// Drop the current privileged process into this user's real/effective/saved
     /// identity and initialize the user's supplementary groups.
     ///

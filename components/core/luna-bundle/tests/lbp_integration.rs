@@ -34,6 +34,8 @@ fn manifest_with_mapping(source: &str, logical: &str) -> LbpManifest {
         entry: Some(EntryPoint {
             exec: "bin/app".into(),
             logical: Some("/usr/bin/app".into()),
+            args: Vec::new(),
+            file_open: None,
         }),
         dependencies: Vec::new(),
         capabilities: Capabilities::default(),

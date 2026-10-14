@@ -10,7 +10,35 @@ use luna_bundle::validate_manifest;
 use luna_common::{BundleId, RuntimeKind, RuntimeSpec, Version};
 use luna_namespace::NamespaceError;
 use luna_root_mapping::{LogicalPath, MappingError, MappingTable};
-use luna_system_runtime::{ProcessError, ProcessId, ProcessState, SystemRuntimeService};
+/// Application-facing process handle; the system runtime owns the actual child.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct ProcessId(u32);
+impl ProcessId {
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+#[derive(Debug)]
+pub enum ProcessState {
+    Running,
+    Exited(ExitStatus),
+}
+/// The existing system-wide supervisor implements this execution boundary.
+/// AppRuntime owns instance state, never a second child-process table.
+pub trait ApplicationProcessHost {
+    fn spawn_application(
+        &mut self,
+        program: &str,
+        args: &[std::ffi::OsString],
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
+        setup: Box<dyn FnMut() -> std::io::Result<()> + Send + Sync>,
+    ) -> std::io::Result<ProcessId>;
+    fn poll_process(&mut self, process: ProcessId) -> std::io::Result<ProcessState>;
+    fn terminate_supervised_process(&mut self, process: ProcessId) -> std::io::Result<ExitStatus>;
+}
 use luna_user_session::{SessionId, SessionState, UserSession};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -281,8 +309,12 @@ impl ApplicationInstance {
         stage: FailureStage,
         message: impl Into<String>,
     ) -> Result<(), RuntimeError> {
-        self.transition(InstanceState::Failed)?;
-        self.failure = Some(InstanceFailure::new(stage, message));
+        if self.state != InstanceState::Failed {
+            self.transition(InstanceState::Failed)?;
+        }
+        if self.failure.is_none() {
+            self.failure = Some(InstanceFailure::new(stage, message));
+        }
         Ok(())
     }
     pub(crate) fn record_process_exit(&mut self, status: ExitStatus) -> Result<(), RuntimeError> {
@@ -299,7 +331,11 @@ impl ApplicationInstance {
         } else {
             InstanceState::Crashed
         };
-        self.transition(next)?;
+        // A stopping/supervision failure may retain a live child. Its eventual
+        // exit must clear that handle while preserving the original failure.
+        if self.state != InstanceState::Failed {
+            self.transition(next)?;
+        }
         self.process.as_mut().expect("process checked above").exit = Some(outcome);
         Ok(())
     }
@@ -311,7 +347,9 @@ impl ApplicationInstance {
             }
             Some(_) => {}
         }
-        self.transition(InstanceState::Stopped)?;
+        if self.state != InstanceState::Failed {
+            self.transition(InstanceState::Stopped)?;
+        }
         self.process.as_mut().expect("process checked above").exit =
             Some(ProcessExit::from_status(&status));
         Ok(())
@@ -334,8 +372,7 @@ pub enum RuntimeError {
         actual: SessionId,
     },
     InstanceNotFound,
-    Process(ProcessError),
-    Supervisor(luna_system_runtime::RuntimeError),
+    Process(std::io::Error),
     ProcessAlreadyAttached,
     ProcessAlreadyExited,
     NoProcess,
@@ -368,7 +405,6 @@ impl std::fmt::Display for RuntimeError {
             ),
             Self::InstanceNotFound => f.write_str("application instance not found"),
             Self::Process(e) => write!(f, "process supervision failed: {e}"),
-            Self::Supervisor(e) => write!(f, "system runtime operation failed: {e}"),
             Self::ProcessAlreadyAttached => {
                 f.write_str("application instance already has a process")
             }
@@ -386,14 +422,9 @@ impl std::fmt::Display for RuntimeError {
     }
 }
 impl std::error::Error for RuntimeError {}
-impl From<ProcessError> for RuntimeError {
-    fn from(value: ProcessError) -> Self {
+impl From<std::io::Error> for RuntimeError {
+    fn from(value: std::io::Error) -> Self {
         Self::Process(value)
-    }
-}
-impl From<luna_system_runtime::RuntimeError> for RuntimeError {
-    fn from(value: luna_system_runtime::RuntimeError) -> Self {
-        Self::Supervisor(value)
     }
 }
 
@@ -539,6 +570,20 @@ impl LinuxApplicationRuntime {
             roots: BTreeMap::new(),
         }
     }
+    /// Release completed instance metadata after its result has been delivered.
+    pub fn forget_instance(&mut self, id: ApplicationInstanceId) -> Result<(), RuntimeError> {
+        if self.model.instance(id)?.active_process().is_some() {
+            return Err(RuntimeError::ProcessAlreadyAttached);
+        }
+        self.model.instances.remove(&id);
+        Ok(())
+    }
+    /// Broker has delivered failed launch diagnostics; retain no unbounded history.
+    pub fn discard_failed_launches(&mut self) {
+        self.model.instances.retain(|_, instance| {
+            instance.state() != InstanceState::Failed || instance.active_process().is_some()
+        });
+    }
     pub fn instance(
         &self,
         id: ApplicationInstanceId,
@@ -548,7 +593,7 @@ impl LinuxApplicationRuntime {
     pub fn poll(
         &mut self,
         id: ApplicationInstanceId,
-        runtime: &mut SystemRuntimeService,
+        runtime: &mut dyn ApplicationProcessHost,
     ) -> Result<InstanceState, RuntimeError> {
         let process = self
             .model
@@ -570,7 +615,7 @@ impl LinuxApplicationRuntime {
     pub fn terminate(
         &mut self,
         id: ApplicationInstanceId,
-        runtime: &mut SystemRuntimeService,
+        runtime: &mut dyn ApplicationProcessHost,
     ) -> Result<(), RuntimeError> {
         let process = self
             .model
@@ -601,7 +646,7 @@ impl LinuxApplicationRuntime {
     }
     pub fn reconcile(
         &mut self,
-        runtime: &mut SystemRuntimeService,
+        runtime: &mut dyn ApplicationProcessHost,
     ) -> Result<Vec<(ApplicationInstanceId, InstanceState)>, RuntimeError> {
         let ids: Vec<_> = self.processes.keys().copied().collect();
         let mut changes = Vec::new();
@@ -649,12 +694,12 @@ impl LinuxApplicationRuntime {
 
 #[cfg(test)]
 mod lifecycle_tests {
+    use super::ProcessId;
     use super::{
         ApplicationInstance, ApplicationInstanceId, CleanupOutcome, FailureStage, InstanceState,
         LinuxApplicationRuntime, ProcessExit, RuntimeError,
     };
     use luna_common::{BundleId, Version};
-    use luna_system_runtime::ProcessId;
     use luna_user_session::SessionId;
     use std::process::Command;
 
@@ -665,6 +710,62 @@ mod lifecycle_tests {
             Version::new(1, 0, 0),
             SessionId::new(7),
         )
+    }
+
+    #[test]
+    fn failed_stop_can_finalize_exit_and_release_the_process_handle() {
+        for requested in [false, true] {
+            let mut value = instance();
+            value.transition(InstanceState::Starting).unwrap();
+            value.attach_process(ProcessId::new(42)).unwrap();
+            value.transition(InstanceState::Running).unwrap();
+            value.transition(InstanceState::Stopping).unwrap();
+            value
+                .record_failure(FailureStage::Stopping, "temporary cleanup error")
+                .unwrap();
+            value
+                .record_failure(FailureStage::Stopping, "retry error")
+                .unwrap();
+            let status = Command::new("sh").args(["-c", "exit 17"]).status().unwrap();
+            if requested {
+                value.record_requested_stop(status).unwrap();
+            } else {
+                value.record_process_exit(status).unwrap();
+            }
+            assert_eq!(value.state(), InstanceState::Failed);
+            assert!(value.active_process().is_none());
+            assert_eq!(value.exit(), Some(ProcessExit::Exited { code: 17 }));
+            assert_eq!(
+                value.failure().unwrap().message(),
+                "temporary cleanup error"
+            );
+            let mut runtime = LinuxApplicationRuntime::new();
+            let id = value.id();
+            runtime.model.insert(value);
+            runtime.forget_instance(id).unwrap();
+        }
+    }
+
+    #[test]
+    fn delivered_failed_launches_do_not_accumulate_but_active_failures_remain() {
+        let mut runtime = LinuxApplicationRuntime::new();
+        let mut failed = instance();
+        failed.transition(InstanceState::Starting).unwrap();
+        failed
+            .record_failure(FailureStage::Starting, "exec failed")
+            .unwrap();
+        runtime.model.insert(failed);
+        runtime.discard_failed_launches();
+        assert!(runtime.model.instances.is_empty());
+        let mut failed = instance();
+        failed.transition(InstanceState::Starting).unwrap();
+        failed.attach_process(ProcessId::new(42)).unwrap();
+        failed
+            .record_failure(FailureStage::Starting, "attached failure")
+            .unwrap();
+        runtime.model.insert(failed);
+        runtime.discard_failed_launches();
+        assert_eq!(runtime.model.instances.len(), 1);
     }
 
     #[test]

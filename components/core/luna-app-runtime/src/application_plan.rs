@@ -370,7 +370,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         )
@@ -398,7 +398,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &session,
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         );
@@ -411,7 +411,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/not-mapped"),
             vec![],
         );
@@ -433,7 +433,7 @@ mod tests {
             manifest,
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         );
@@ -449,7 +449,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/./app"),
             vec![],
         );
@@ -459,7 +459,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/../bin/app"),
             vec![],
         );
@@ -476,7 +476,7 @@ mod tests {
             valid_manifest(),
             mapping,
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         );
@@ -518,7 +518,7 @@ mod tests {
             manifest,
             mapping,
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         )
@@ -574,7 +574,7 @@ mod tests {
             manifest,
             mapping,
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![],
         )
@@ -658,7 +658,7 @@ mod tests {
     fn successful_authorization_returns_owned_authorized_plan() {
         let authorized = authorize_application_plan(plan(), &Allow).unwrap();
         assert_eq!(authorized.value().application().as_str(), "example.app");
-        assert_eq!(authorized.value().runtime(), RuntimeSpec::luna());
+        assert_eq!(authorized.value().runtime(), RuntimeSpec::musl());
         assert_eq!(
             authorized.value().executable().path().to_str().unwrap(),
             "/bin/app"
@@ -676,7 +676,7 @@ mod tests {
             valid_manifest(),
             valid_mapping(),
             &active_session(),
-            RuntimeSpec::luna(),
+            RuntimeSpec::musl(),
             ExecutableSpec::new("/bin/app"),
             vec![request],
         );
